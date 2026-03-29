@@ -149,7 +149,7 @@ import ZoneClose6 from '../Themes/Theme6/on-screen/zoneClose.tsx'
 import Intro6 from '../Themes/Theme6/on-screen/intro.tsx'
 import MapPreview6 from '../Themes/Theme6/off-screen/mapPreview.tsx'
 import Slots6 from '../Themes/Theme6/off-screen/slots.tsx'  
-import Achive6 from '../Themes/Theme6/on-screen/achive.tsx'
+import Achieve6 from '../Themes/Theme6/on-screen/Achieve.tsx'
 import Mvp6 from '../Themes/Theme6/off-screen/mvp.tsx'
 import HighlightPoints6 from '../Themes/Theme6/off-screen/HighlightPoints.tsx'
 import HighlightSchedule6 from '../Themes/Theme6/off-screen/HighlightSchedule.tsx'
@@ -391,7 +391,7 @@ const PublicThemeRenderer: React.FC = () => {
       Intro: Intro6,
       MapPreview: MapPreview6,
       Slots: Slots6,
-      Achive: Achive6, 
+      Achive: Achieve6,
       Mvp: Mvp6,
       HighlightPoints: HighlightPoints6,
       HighlightSchedule: HighlightSchedule6,

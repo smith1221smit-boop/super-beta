@@ -430,6 +430,7 @@ const activeTheme = themes[theme as 'Theme1'  | 'Theme3' | 'Theme4' | 'Theme5' |
     MapPreview: MapPreviewComp,
     Slots: SlotsComp,
     Mvp: MvpComp,
+    
       achive: AchiveComp,
     HighlightPoints: HighlightPointsComp,
     HighlightSchedule: HighlightScheduleComp,

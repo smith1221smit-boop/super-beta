@@ -149,7 +149,7 @@ import ZoneClose6 from '../Themes/Theme6/on-screen/zoneClose.tsx'
 import Intro6 from '../Themes/Theme6/on-screen/intro.tsx'
 import MapPreview6 from '../Themes/Theme6/off-screen/mapPreview.tsx'
 import Slots6 from '../Themes/Theme6/off-screen/slots.tsx'
-import Achive6 from '../Themes/Theme6/on-screen/Achive'
+import Achive6 from '../Themes/Theme6/on-screen/Achive.tsx'
 import Mvp6 from '../Themes/Theme6/off-screen/mvp.tsx'
 import HighlightPoints6 from '../Themes/Theme6/off-screen/HighlightPoints.tsx'
 import HighlightSchedule6 from '../Themes/Theme6/off-screen/HighlightSchedule.tsx'
@@ -391,7 +391,7 @@ const PublicThemeRenderer: React.FC = () => {
       Intro: Intro6,
       MapPreview: MapPreview6,
       Slots: Slots6,
-      achive: Achive6, 
+      Achive: Achive6, 
       Mvp: Mvp6,
       HighlightPoints: HighlightPoints6,
       HighlightSchedule: HighlightSchedule6,
@@ -431,7 +431,7 @@ const activeTheme = themes[theme as 'Theme1'  | 'Theme3' | 'Theme4' | 'Theme5' |
     Slots: SlotsComp,
     Mvp: MvpComp,
     
-      achive: AchiveComp,
+      Achive: AchiveComp,
     HighlightPoints: HighlightPointsComp,
     HighlightSchedule: HighlightScheduleComp,
     RosterShowCase: RosterShowCaseComp,
@@ -655,7 +655,6 @@ const activeTheme = themes[theme as 'Theme1'  | 'Theme3' | 'Theme4' | 'Theme5' |
       case 'Dom':
         return <DomComp tournament={tournament} round={round} match={match} matchData={matchData} />;
       case 'Achive':
-      case 'achive':
         return <AchiveComp tournament={tournament} round={round} match={match} matchData={matchData} />;
       case 'Alerts':
         return <AlertsComp tournament={tournament} round={round} match={match} matchData={matchData} />;

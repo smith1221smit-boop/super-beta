@@ -157,9 +157,9 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallD
       exit={{ opacity: 0 }}
       transition={{ duration: 2 }}
     >
-      <div className="w-[1920px] h-[1080px] flex font-bebas-neue font-[500] bg-green-400">
+      <div className="w-[1920px] h-[1080px] flex font-bebas-neue font-[500] ">
         <div
-          className="font-[tungsten] text-[140px] leading-[1] absolute top-[30px] left-[270px] font-[700] bg-gradient-to-l from-[#ffa300] to-[#f9df67] text-transparent bg-clip-text drop-shadow-[0px_7px_10px_rgba(0,0,0,0.3)] scale-y-[1.4]"
+          className="font-[Awaking] text-[140px] leading-[1] absolute top-[30px] left-[270px] font-[700] bg-gradient-to-l from-[#ffa300] to-[#f9df67] text-transparent bg-clip-text drop-shadow-[0px_7px_10px_rgba(0,0,0,0.3)] scale-y-[1.4]"
         >
           OVERALL FRAGGERS
         </div>
@@ -170,7 +170,7 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallD
             backgroundImage: `linear-gradient(to left, transparent, ${tournament.primaryColor})`,
             clipPath: "polygon(30px 0%, 100% 0%, 100% 100%, 30px 100%, 0% 50%)",
           }}
-          className="w-[1000px] h-[60px] absolute left-[260px] top-[180px] text-white font-bebas-neue font-[700] text-[3rem] tracking-wide"
+          className="w-[1000px] h-[55px] absolute left-[260px] top-[210px] text-white font-bebas-neue font-[700] text-[2.5rem] tracking-wide"
         >
           <div className="relative top-[-5px] left-[50px] font-[agencyb]">
             {tournament.tournamentName} | {round?.roundName}
@@ -180,7 +180,7 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallD
         <div className="flex flex-wrap justify-center space-x-4">
           {topPlayers.map((player, index) => (
             <motion.div
-              className="flex mb-[20px] relative left-[35px] top-[300px] font-[AGENCYB]"
+              className="flex mb-[20px] relative left-[35px] top-[350px] font-[AGENCYB]"
               key={player.uId || index}
               initial={{ opacity: 0, y: 550 }}
               animate={{ opacity: 1, y: 0 }}
@@ -226,8 +226,8 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallD
                 )}
 
                 {/* Player Name */}
-                <div className="w-[100%] bg-black h-[80px] absolute top-[280px] z-50">
-                  <div className="text-[50px] text-center" style={{ color: tournament?.primaryColor }}>
+                <div className="w-[100%] bg-black text-white h-[80px] absolute top-[280px] z-50">
+                  <div className="text-[50px] text-center" >
                     {player.playerName.toUpperCase()}
                   </div>
                 </div>

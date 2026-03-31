@@ -167,11 +167,11 @@ type StatKey =
     [...allPlayers].sort((a, b) => b[key] - a[key])[0];
 
   return [
-    { label: "En Fazla Skor", player: getTop("killNum"), valueKey: "killNum" as StatKey },
-    { label: "En Fazla Hasar", player: getTop("damage"), valueKey: "damage" as StatKey },
-    { label: "En Fazla Bomba Skoru", player: getTop("grenadeKills"), valueKey: "grenadeKills" as StatKey },
-    { label: "En Uzak Mesafe Skoru", player: getTop("killDistance"), valueKey: "killDistance" as StatKey },
-    { label: "Toplam Hayatta Kalma", player: getTop("travelDistance"), valueKey: "travelDistance" as StatKey }
+    { label: "KILLS", player: getTop("killNum"), valueKey: "killNum" as StatKey },
+    { label: "DAMAGE", player: getTop("damage"), valueKey: "damage" as StatKey },
+    { label: "GRENADE KILLS", player: getTop("grenadeKills"), valueKey: "grenadeKills" as StatKey },
+    { label: "KILL DISTANCE", player: getTop("killDistance"), valueKey: "killDistance" as StatKey },
+    { label: "TRAVEL DISTANCE", player: getTop("travelDistance"), valueKey: "travelDistance" as StatKey }
   ];
 }, [localMatchData]);
 
@@ -192,7 +192,7 @@ type StatKey =
         }}
         className="w-[500px] h-[110px] text-[77px] font-[tungsten] absolute left-[690px] text-center text-white pt-[0px] top-[10px]"
       >
-     MAÇ İSTATİSTİKLERİ
+  PLAYERS SUMMARY
       </div>
      
 

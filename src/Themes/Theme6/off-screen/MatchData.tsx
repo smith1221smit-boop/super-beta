@@ -227,20 +227,20 @@ className='text-white w-[350px]  absolute left-[537px] bottom-[0px] font-[AGENCY
       <div 
       
       className="absolute left-[146px] top-[488px] w-[891px] h-[30px] border-2 text-black font-[AGENCYB] text-[18px] flex items-center gap-[130px]" style={{background: 'linear-gradient(to bottom right, #ffffff, #e0e0e0)', borderColor: tournament.secondaryColor}}>
-   <div className='pl-[10px]'>
-    SIRALAMA
+   <div className='pl-[25px]'>
+    RANK
    </div>
    <div className='pl-[10px]'>
-    TAKIM
+    TEAM
    </div>
- <div className='pl-[210px]'>
-    PUANI
+ <div className='pl-[225px]'>
+    PLACE
    </div>
     <div className='ml-[-40px]'>
-    SKOR
+    KILLS
    </div>
-    <div className='ml-[-55px]'>
-    TOPLAM
+    <div className='ml-[-45px]'>
+    TOTAL
    </div>
         
       </div>
@@ -314,11 +314,11 @@ className="absolute left-[1059px] top-[280px] w-[715px]">
   <div 
   style={{background: 'linear-gradient(to bottom right, #ffffff, #e0e0e0)', borderColor: tournament.secondaryColor}}
   className='w-[715px] h-[30px]   text-black font-[AGENCYB] text-[20px] flex items-centee pb-[0px] mb-[55px] border-2'>
-     <div className='ml-[0px]'>SIRALAMA</div>
-    <div className='ml-[100px]'>TAKIM</div>
-<div className='ml-[280px]'>PUANI</div>
-<div className='ml-[50px]'>SKOR</div>
-<div className='ml-[35px]'>TOPLAM</div>
+     <div className='ml-[10px]'>RANK</div>
+    <div className='ml-[100px]'>TEAM</div>
+<div className='ml-[310px]'>PLACE</div>
+<div className='ml-[50px]'>KILLS</div>
+<div className='ml-[35px]'>TOTAL</div>
 
   </div>
   {restTeams.map((team, index) => {

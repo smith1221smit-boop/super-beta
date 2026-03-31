@@ -7,7 +7,7 @@ import React, {
   memo,
 } from 'react';
 import SocketManager from '../../../dashboard/socketManager.tsx';
-
+import { FaChevronRight } from 'react-icons/fa';
 // ─────────────────────────────────────────────
 // Interfaces
 // ─────────────────────────────────────────────
@@ -39,6 +39,7 @@ interface Player {
   _id: string;
   playerName: string;
   killNum: number;
+  isFiring?: boolean; // for firing indicator
   bHasDied: boolean;
   picUrl?: string;
   health: number;
@@ -449,13 +450,42 @@ const AnimatedTeamRow = ({
           )}
       
         {/* Rank */}
-        <div
-          className="w-[80px] flex items-center justify-center text-white"
-          style={{ height: `${baseRowHeight}px`, ...gradientStyle }}
-        >
-          {index + 1}
-        </div>
-
+  {/* Rank */}
+<div
+  className="w-[80px] flex items-center justify-center text-white"
+  style={{ height: `${baseRowHeight}px`, ...gradientStyle }}
+>
+  {team.players.some((p: Player) => p.isFiring) ? (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 500 500"
+      className="w-[44px] h-[44px] animate-pulse"
+      style={{
+        transform: "rotate(90deg)", // points right
+        filter: "drop-shadow(0 0 18px red) drop-shadow(0 0 30px red)",
+        transition: "all 0.2s ease-in-out",
+      }}
+    >
+      {/* Solid white bullet */}
+      <g fill="white" stroke="red" strokeWidth="2">
+        <polygon points="285.374,191.068 285.374,151.082 218.227,151.082 218.227,191.068 204.646,218.23 298.955,218.23" />
+        <rect x="201.441" y="235.015" width="100.721" height="184.656"/>
+        <path d="M270.558,41.682L259.84,5.985C258.774,2.434,255.509,0,251.799,0c-3.702,0-6.975,2.434-8.041,5.984l-10.71,35.697
+          c-9.031,30.107-13.765,61.23-14.512,92.613h66.535C284.323,102.912,279.589,71.789,270.558,41.682z"/>
+      </g>
+      <path
+        d="M294.703,458.164c0.26-0.688,0.537-1.368,0.713-2.09l4.902-19.615h-97.037l4.893,19.615
+        c0.185,0.722,0.453,1.402,0.722,2.09c-4.516,3.794-7.453,9.417-7.453,15.763v8.998c0,11.407,9.275,20.681,20.681,20.681h59.358
+        c11.398,0,20.681-9.275,20.681-20.681v-8.998C302.165,467.581,299.228,461.957,294.703,458.164z"
+        fill="white"
+        stroke="red"
+        strokeWidth="2"
+      />
+    </svg>
+  ) : (
+    index + 1
+  )}
+</div>
         {/* Tag */}
         <div className="h-full w-[230px] flex items-center justify-start gap-2 pl-[10px] text-black bg-white">
           <img
@@ -740,10 +770,10 @@ const LiveStats: React.FC<LiveStatsProps> = ({
             background: `linear-gradient(to right, rgba(0,0,0,0) 40%, ${tournament.primaryColor} 80%)`,
           }}
         >
-          <span className="relative left-[50px]">TAKIM</span>
-          <span className="relative left-[90px]">HAYATTA</span>
-          <span className="relative left-[48px]">PUAN</span>
-          <span className="relative left-[4px]">SKOR</span>
+          <span className="relative left-[50px]">TEAM</span>
+          <span className="relative left-[90px]">ALIVE</span>
+          <span className="relative left-[50px]">PTS</span>
+          <span className="relative left-[4px]">KILLS</span>
         </div>
 
         {topTeam?.players.map((player: Player, index: number) => (
@@ -785,7 +815,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({
             className="w-full h-[30px] font-[AGENCYB] bg-[#282828] flex justify-center items-center text-white font-bold"
           >
             ALIVE{' '}
-            <span className="bg-white w-[20px] h-[20px] ml-[5px] border border-black" />
+            <span className="bg-green-500 w-[20px] h-[20px] ml-[5px] border border-black" />
           <div className="flex items-center ml-[20px]">
               KNOCK{' '}
               <span className="bg-red-500 w-[20px] h-[20px] ml-[5px] border border-white" />

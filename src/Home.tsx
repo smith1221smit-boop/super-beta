@@ -194,262 +194,109 @@ const Home: React.FC = () => {
 
 
       {/* Pricing Section */}
-      <section id="pricing" className="py-20 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-slate-900/50 via-indigo-900/20 to-slate-900/50 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-purple-500/5 to-transparent animate-[shimmer_4s_ease-in-out_infinite]"></div>
-        <div className="max-w-7xl mx-auto relative z-10">
-          <div className="text-center mb-16 animate-[fadeIn_1s_ease-out]">
-            <h2 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-4 bg-gradient-to-r from-white to-purple-300 bg-clip-text text-transparent font-['Tungsten'] uppercase tracking-widest">{t('pricing.title')}</h2>
-            <p className="text-lg sm:text-xl text-gray-400 max-w-2xl mx-auto font-['Bebas'] tracking-wide">
-              {t('pricing.subtitle')}
-            </p>
+      {/* Pricing Section */}
+<section id="pricing" className="py-20 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-slate-900/50 via-indigo-900/20 to-slate-900/50 relative overflow-hidden">
+  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-purple-500/5 to-transparent animate-[shimmer_4s_ease-in-out_infinite]"></div>
+
+  <div className="max-w-7xl mx-auto relative z-10">
+
+    <div className="text-center mb-16">
+      <h2 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-4 bg-gradient-to-r from-white to-purple-300 bg-clip-text text-transparent font-['Tungsten'] uppercase tracking-widest">
+        {t('pricing.title')}
+      </h2>
+
+      <p className="text-lg sm:text-xl text-gray-400 max-w-2xl mx-auto font-['Bebas'] tracking-wide">
+        {t('pricing.subtitle')}
+      </p>
+    </div>
+
+    {/* 3 Pricing Boxes */}
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+
+      {["daily", "monthly", "yearly"].map((plan) => (
+
+        <div
+          key={plan}
+          className={`bg-gradient-to-br from-slate-800/60 to-slate-900/60 p-6 rounded-xl 
+          border ${plan === "monthly" ? "border-purple-500/60" : "border-slate-700/50"}
+          hover:border-purple-500/80 transition-all duration-300 
+          hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/20 
+          flex flex-col justify-between relative`}
+        >
+
+          {/* Popular Badge */}
+          {plan === "monthly" && (
+            <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
+              <span className="bg-gradient-to-r from-purple-600 to-purple-800 text-white px-3 py-1 rounded-full text-xs font-semibold">
+                {t('pricing.monthly.popular')}
+              </span>
+            </div>
+          )}
+
+          <div>
+
+            <div className="text-center mb-6">
+              <h3 className="text-xl font-bold text-white mb-2">
+                {t(`pricing.${plan}.title`)}
+              </h3>
+
+              <div className="text-3xl font-bold text-purple-400 mb-2">
+                {t(`pricing.${plan}.price`)}
+                <span className="text-base text-gray-400">
+                  {t(`pricing.${plan}.period`)}
+                </span>
+              </div>
+
+              <p className="text-gray-400">
+                {t(`pricing.${plan}.desc`)}
+              </p>
+            </div>
+
+            <ul className="space-y-4 mb-8">
+
+             {(t(`pricing.${plan}.features`, {
+  returnObjects: true,
+}) as string[]).map((feature, index) => (
+                  <li key={index} className="flex items-center text-gray-300">
+
+                    <svg
+                      className="w-5 h-5 text-green-400 mr-3"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+
+                    {feature}
+                  </li>
+                )
+              )}
+
+            </ul>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
-            <div className="bg-gradient-to-br from-slate-800/60 to-slate-900/60 p-6 rounded-xl border border-slate-700/50 hover:border-purple-500/70 transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/20 animate-[slideInFromBottom_0.5s_ease-out] flex flex-col justify-between">
-              <div className="text-center mb-6">
-                <h3 className="text-xl font-bold text-white mb-2">{t('pricing.daily.title')}</h3>
-                <div className="text-3xl font-bold text-purple-400 mb-2 animate-[pulse_2s_ease-in-out_infinite]">{t('pricing.daily.price')}<span className="text-base text-gray-400">{t('pricing.daily.period')}</span></div>
-                <p className="text-gray-400">{t('pricing.daily.desc')}</p>
-              </div>
-              <ul className="space-y-4 mb-8">
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                 {t('pricing.daily.features[0]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.2s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                 {t('pricing.daily.features[1]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.4s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-               {t('pricing.daily.features[2]')}
-                </li>
-              </ul>
-              <Link
-                to="/login"
-                className="w-full block text-center py-3 bg-gradient-to-r from-slate-700 to-slate-600 hover:from-slate-600 hover:to-slate-500 text-white font-semibold rounded-lg transition-all duration-300 hover:scale-105 hover:shadow-lg"
-              >
-                {t('pricing.daily.button')}
-              </Link>
-            </div>
+          <Link
+            to="/login"
+            className={`w-full block text-center py-3 font-semibold rounded-lg transition-all duration-300 hover:scale-105 hover:shadow-lg
+            ${plan === "monthly"
+              ? "bg-purple-600 hover:bg-purple-700"
+              : "bg-slate-700 hover:bg-slate-600"}`}
+          >
+            {t(`pricing.${plan}.button`)}
+          </Link>
 
-            <div className="bg-gradient-to-br from-slate-800/60 to-slate-900/60 p-6 rounded-xl border border-slate-700/50 hover:border-purple-500/70 transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/20 animate-[slideInFromBottom_0.6s_ease-out] flex flex-col justify-between">
-              <div className="text-center mb-6">
-                <h3 className="text-xl font-bold text-white mb-2">{t('pricing.weekly.title')}</h3>
-                <div className="text-3xl font-bold text-purple-400 mb-2 animate-[pulse_2s_ease-in-out_infinite]">{t('pricing.weekly.price')}<span className="text-base text-gray-400">{t('pricing.weekly.period')}</span></div>
-                <p className="text-gray-400">{t('pricing.weekly.desc')}</p>
-              </div>
-              <ul className="space-y-4 mb-8">
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                 {t('pricing.weekly.features[0]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.2s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-             {t('pricing.weekly.features[1]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.4s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.weekly.features[2]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.6s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.weekly.features[3]')}
-                </li>
-              </ul>
-              <Link
-                to="/login"
-                className="w-full block text-center py-3 bg-gradient-to-r from-slate-700 to-slate-600 hover:from-slate-600 hover:to-slate-500 text-white font-semibold rounded-lg transition-all duration-300 hover:scale-105 hover:shadow-lg"
-              >
-                {t('pricing.weekly.button')}
-              </Link>
-            </div>
-            <div className="bg-gradient-to-br from-slate-800/60 to-slate-900/60 p-6 rounded-xl border-2 border-purple-500/50 relative hover:border-purple-500/80 transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/30 animate-[slideInFromBottom_0.7s_ease-out] flex flex-col justify-between">
-              <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                <span className="bg-gradient-to-r from-purple-600 to-purple-800 text-white px-3 py-0.5 rounded-full text-xs font-semibold animate-[pulse_2s_ease-in-out_infinite]">{t('pricing.monthly.popular')}</span>
-              </div>
-              <div className="text-center mb-6">
-                <h3 className="text-xl font-bold text-white mb-2">{t('pricing.monthly.title')}</h3>
-                <div className="text-3xl font-bold text-purple-400 mb-2 animate-[pulse_2s_ease-in-out_infinite]">{t('pricing.monthly.price')}<span className="text-base text-gray-400">{t('pricing.monthly.period')}</span></div>
-                <p className="text-gray-400">{t('pricing.monthly.desc')}</p>
-              </div>
-              <ul className="space-y-4 mb-8">
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.monthly.features[0]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.2s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.monthly.features[1]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.4s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.monthly.features[2]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.6s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.monthly.features[3]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.8s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.monthly.features[4]')}
-                </li>
-              </ul>
-              <Link
-                to="/login"
-                className="w-full block text-center py-3 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white font-semibold rounded-lg transition-all duration-300 hover:scale-105 hover:shadow-lg"
-              >
-                {t('pricing.monthly.button')}
-              </Link>
-            </div>
-
-            <div className="bg-gradient-to-br from-slate-800/60 to-slate-900/60 p-6 rounded-xl border border-slate-700/50 hover:border-purple-500/70 transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/20 animate-[slideInFromBottom_0.8s_ease-out] flex flex-col justify-between">
-              <div className="text-center mb-6">
-                <h3 className="text-xl font-bold text-white mb-2">{t('pricing.yearly.title')}</h3>
-                <div className="text-3xl font-bold text-purple-400 mb-2 animate-[pulse_2s_ease-in-out_infinite]">{t('pricing.yearly.price')}<span className="text-base text-gray-400">{t('pricing.yearly.period')}</span></div>
-                <p className="text-gray-400">{t('pricing.yearly.desc')}</p>
-              </div>
-              <ul className="space-y-4 mb-8">
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.yearly.features[0]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.2s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.yearly.features[1]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.4s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.yearly.features[2]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.6s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                   {t('pricing.yearly.features[3]')}
-                </li>
-              </ul>
-              <Link
-                to="/login"
-                className="w-full block text-center py-3 bg-gradient-to-r from-slate-700 to-slate-600 hover:from-slate-600 hover:to-slate-500 text-white font-semibold rounded-lg transition-all duration-300 hover:scale-105 hover:shadow-lg"
-              >
-                {t('pricing.yearly.button')}
-              </Link>
-            </div>
-
-            <div className="bg-gradient-to-br from-slate-800/60 to-slate-900/60 p-6 rounded-xl border border-slate-700/50 hover:border-purple-500/70 transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/20 animate-[slideInFromBottom_0.9s_ease-out] flex flex-col justify-between">
-              <div className="text-center mb-6">
-                <h3 className="text-xl font-bold text-white mb-2">{t('pricing.lifetime.title')}</h3>
-                <div className="text-3xl font-bold text-purple-400 mb-2 animate-[pulse_2s_ease-in-out_infinite]">{t('pricing.lifetime.price')}<span className="text-base text-gray-400">{t('pricing.lifetime.period')}</span></div>
-                <p className="text-gray-400">{t('pricing.lifetime.desc')}</p>
-              </div>
-              <ul className="space-y-4 mb-8">
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.lifetime.features[0]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.2s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.lifetime.features[1]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.4s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.lifetime.features[2]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.6s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.lifetime.features[3]')}
-                </li>
-              </ul>
-              <Link
-                to="/login"
-                className="w-full block text-center py-3 bg-gradient-to-r from-slate-700 to-slate-600 hover:from-slate-600 hover:to-slate-500 text-white font-semibold rounded-lg transition-all duration-300 hover:scale-105 hover:shadow-lg"
-              >
-                {t('pricing.lifetime.button')}
-              </Link>
-            </div>
-
-            <div className="bg-gradient-to-br from-slate-800/60 to-slate-900/60 p-6 rounded-xl border border-slate-700/50 hover:border-purple-500/70 transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/20 animate-[slideInFromBottom_1.0s_ease-out] flex flex-col justify-between">
-              <div className="text-center mb-6">
-                <h3 className="text-xl font-bold text-white mb-2">{t('pricing.custom.title')}</h3>
-                <div className="text-3xl font-bold text-purple-400 mb-2 animate-[pulse_2s_ease-in-out_infinite]">{t('pricing.custom.price')}<span className="text-base text-gray-400">{t('pricing.custom.period')}</span></div>
-                <p className="text-gray-400">{t('pricing.custom.desc')}</p>
-              </div>
-              <ul className="space-y-4 mb-8">
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.custom.features[0]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.2s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.custom.features[1]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.4s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                 {t('pricing.custom.features[2]')}
-                </li>
-                <li className="flex items-center text-gray-300">
-                  <svg className="w-5 h-5 text-green-400 mr-3 animate-[bounce_1.6s_ease-in-out]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  {t('pricing.custom.features[3]')}
-                </li>
-              </ul>
-              <Link
-                to="/login"
-                className="w-full block text-center py-3 bg-gradient-to-r from-slate-700 to-slate-600 hover:from-slate-600 hover:to-slate-500 text-white font-semibold rounded-lg transition-all duration-300 hover:scale-105 hover:shadow-lg"
-              >
-                {t('pricing.custom.button')}
-              </Link>
-            </div>
-          </div>
         </div>
-      </section>
+      ))}
 
+    </div>
+  </div>
+</section>
       {/* Contact Section */}
       <section id="contact" className="py-20 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-slate-900/40 via-purple-900/20 to-slate-900/40 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-r from-transparent via-purple-500/5 to-transparent animate-[shimmer_5s_ease-in-out_infinite]"></div>

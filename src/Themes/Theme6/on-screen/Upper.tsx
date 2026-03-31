@@ -361,7 +361,7 @@ return (
       const BAR_W = 14;
       const BAR_MAX = 60;
 
-      const WWCD_BOX_WIDTH = 330;
+      const WWCD_BOX_WIDTH = 320;
       const WWCD_BOX_HEIGHT = 35;
       const wwcdWidth = Math.max(0, (team.wwcd / 100) * WWCD_BOX_WIDTH);
 
@@ -487,12 +487,55 @@ return (
                       backgroundColor: color,
                     }}
                   />
+                  
                 </div>
               );
             })}
-
             {/* WWCD bar */}
-          
+   <div
+  style={{
+    position: "absolute",
+    top: CARD_H + 10,
+    left: 8,
+    width: WWCD_BOX_WIDTH,
+    height: WWCD_BOX_HEIGHT,
+    backgroundColor: "#111", // container background
+    overflow: "hidden",
+  }}
+>
+  {/* Diagonal animated bar */}
+  <div
+    style={{
+      position: "absolute",
+      top: 0,
+      left: 0,
+      height: "100%",
+      width: `${team.wwcd}%`,
+      background: `linear-gradient(135deg, ${wwcdColor}, #fff2)`, // adds depth
+      transform: "skewX(-20deg)", // slanted diagonal
+      transformOrigin: "left",
+      transition: "width 1s cubic-bezier(0.25, 1, 0.5, 1)", // smooth throttle
+    }}
+  />
+
+  {/* Overlay text */}
+  <span
+    style={{
+      position: "absolute",
+      width: "100%",
+      textAlign: "center",
+      top: "50%",
+      transform: "translateY(-50%)",
+      color: "white",
+      fontSize: 20,
+      fontFamily: "payBack, sans-serif",
+      textShadow: "0 0 4px black",
+      pointerEvents: "none",
+    }}
+  >
+    WWCD - {team.wwcd}%
+  </span>
+</div>
           </div>
         </div>
       );

@@ -15,8 +15,8 @@ function App() {
     <Router>
       <Routes>
       
-        <Route path="/" element={<Login />} />
-
+        <Route path="/" element={<Home />} />
+ <Route path="/login" element={<Login />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/tournaments/:tournamentId/rounds" element={<Round />} />
         <Route path="/tournaments/:tournamentId/rounds/:roundId/matches" element={<Match />} />

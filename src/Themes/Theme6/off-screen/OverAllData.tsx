@@ -20,6 +20,7 @@ interface Round {
 
 interface Player {
   _id: string;
+  uId: string; // Unique identifier for player (e.g., "player1", "player2")
   picUrl?: string;
   playerName: string;
   killNum: number;
@@ -185,15 +186,24 @@ previousTotalsRef.current.set(team.teamId, team.total ?? 0);      });
           <div className="font-[AGENCYB] text-[60px] relative left-[30px] top-[20px]">
             #1
           </div>
-          <div className="flex relative top-[-26px] left-[0px]">
-            {processedOverallData.teams[0].players.map((player, idx) => (
-              <img
-                key={idx}
-                src={player.picUrl || '/def_char.png'}
-                className="w-[500px] h-[266px] object-cover ml-[-80px] relative left-[-60px]"
-              />
-            ))}
-          </div>
+       <div className="flex relative top-[-26px] left-[0px]">
+  {processedOverallData.teams[0].players
+    // Filter to keep only the first occurrence of each unique uId
+    .filter((player, index, self) => {
+      return index === self.findIndex(p => p.uId === player.uId);
+    })
+    // Sort by kills descending
+    .sort((a, b) => b.killNum - a.killNum)
+    // Take top 4 unique uId players
+    .slice(0, 4)
+    .map((player, idx) => (
+      <img
+        key={idx}
+        src={player.picUrl || '/def_char.png'}
+        className="w-[500px] h-[266px] object-cover ml-[-80px] relative left-[-60px]"
+      />
+    ))}
+</div>
           <div className="flex relative top-[-86px] left-[0px]">
             <div className="text-[55px] absolute left-[490px] top-[190px] font-[AGENCYB]">
               {processedOverallData.teams[0].teamTag}

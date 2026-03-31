@@ -155,7 +155,7 @@ const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, matchData }) => {
   ] : [], [topPlayer]);
 
   return (
-    <div className="w-[1920px] h-[1080px] flex flex-col items-center relative bg-green-400">
+    <div className="w-[1920px] h-[1080px] flex flex-col items-center relative ">
       {!topPlayer ? (
         <div className="w-full h-full flex items-center justify-center text-white text-2xl font-[Righteous]">
           Loading MVP...

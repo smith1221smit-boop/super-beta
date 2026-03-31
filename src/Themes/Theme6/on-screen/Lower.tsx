@@ -77,7 +77,7 @@ export default function Lower({ tournament, round, match, totalMatches, matches 
       {match?.map?.toUpperCase()}
       </div>
       <div className="text-[35px] relative left-[20px] top-[-24px] ">
-      MAÇ {match?.matchNo}
+      MATCH {match?.matchNo}
       </div>
     </div>
   </div>
@@ -87,7 +87,7 @@ export default function Lower({ tournament, round, match, totalMatches, matches 
   </div>
 
   <div className="text-white font-[AGENCYB] text-[40px] w-full h-1/3 flex justify-center items-center skew-x-[-10deg]">
-    {groupName}  - Gün {round?.day}
+  MATCH {match?.matchNo} / {totalMatches}  - DAY {round?.day}
   </div>
 </div>
 </div>

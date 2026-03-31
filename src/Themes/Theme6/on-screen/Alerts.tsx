@@ -320,15 +320,10 @@ return (
               className="w-[30%] h-full"
             />
 
-            {/* Small team logo */}
-            <img
-              src={alertTeam.teamLogo}
-              alt=""
-              className="w-[9%] h-[30%] absolute top-[2px] left-[127px]"
-            />
+           
 
             {/* Logo + Background Logo */}
-            <div className="absolute top-[5px] w-[175px] h-[175px]">
+            <div className="absolute top-[5px] w-[180px] h-[180px]">
 
               {/* Background logo */}
               <img
@@ -362,7 +357,7 @@ return (
                 }}
                 className="w-full h-[25%] bg-black relative overflow-hidden font-[AGENCYB] text-[30px]"
               >
-                #{alertTeam.teamRank}-{alertTeam.totalKills} KILLS
+                RANK {alertTeam.teamRank} - {alertTeam.totalKills} KILLS
               </div>
 
               {/* TEAM TAG */}

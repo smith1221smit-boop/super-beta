@@ -211,143 +211,182 @@ const Dashboard: React.FC = () => {
   };
 
  return (
-  <div className="min-h-screen bg-gradient-to-br from-green-900 via-black to-green-900 font-mono">
-    <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&display=swap');
+  <div className="min-h-screen bg-gradient-to-br from-[#120038] via-black to-[#120038] font-mono">
+   <style>{`
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&display=swap');
 
-      * { font-family: 'Rajdhani', sans-serif; }
-      .orbitron { font-family: 'Orbitron', monospace; }
+* { font-family: 'Rajdhani', sans-serif; }
+.orbitron { font-family: 'Orbitron', monospace; }
 
-      .sidebar-btn {
-        display: flex; flex-direction: column; align-items: center;
-        color: #6b7280; cursor: pointer;
-        padding: 10px; border-radius: 12px; width: 64px;
-        border: 1px solid transparent; background: transparent;
-        text-decoration: none;
-      }
-      .sidebar-btn:hover {
-        color: #4ade80;
-        background: rgba(74,222,128,0.08);
-        border-color: rgba(74,222,128,0.3);
-        box-shadow: 0 0 16px rgba(74,222,128,0.25), inset 0 0 8px rgba(74,222,128,0.05);
-      }
-      .sidebar-btn.active {
-        color: #4ade80;
-        background: rgba(74,222,128,0.12);
-        border-color: rgba(74,222,128,0.5);
-        box-shadow: 0 0 20px rgba(74,222,128,0.3);
-      }
+.sidebar-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 10px;
+  border-radius: 12px;
+  width: 64px;
+  border: 1px solid transparent;
+  background: transparent;
+  text-decoration: none;
+}
 
-      .card-hover {
-        cursor: pointer;
-      }
-      .card-hover:hover {
-        box-shadow:
-          0 0 30px rgba(74,222,128,0.3),
-          0 0 60px rgba(74,222,128,0.12),
-          0 20px 40px rgba(0,0,0,0.5);
-      }
+.sidebar-btn:hover {
+  color: #a855f7;
+  background: rgba(168,85,247,0.08);
+  border-color: rgba(168,85,247,0.3);
+  box-shadow: 0 0 16px rgba(168,85,247,0.25), inset 0 0 8px rgba(168,85,247,0.05);
+}
 
-      .glass {
-        background: rgba(255,255,255,0.04);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        border: 1px solid rgba(74,222,128,0.2);
-      }
+.sidebar-btn.active {
+  color: #a855f7;
+  background: rgba(168,85,247,0.12);
+  border-color: rgba(168,85,247,0.5);
+  box-shadow: 0 0 20px rgba(168,85,247,0.3);
+}
 
-      .glass-dark {
-        background: rgba(0,0,0,0.5);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border: 1px solid rgba(74,222,128,0.3);
-      }
+.card-hover { cursor: pointer; }
 
-      .neon-border {
-        border: 1px solid rgba(74,222,128,0.4);
-        box-shadow: 0 0 10px rgba(74,222,128,0.15), inset 0 0 10px rgba(74,222,128,0.05);
-      }
+.card-hover:hover {
+  box-shadow:
+    0 0 30px rgba(168,85,247,0.3),
+    0 0 60px rgba(168,85,247,0.12),
+    0 20px 40px rgba(0,0,0,0.5);
+}
 
-      .card-actions { opacity: 0; }
-      .card-hover:hover .card-actions { opacity: 1; }
+.glass {
+  background: rgba(255,255,255,0.04);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(168,85,247,0.2);
+}
 
-      .input-cyber {
-        width: 100%;
-        padding: 12px 16px;
-        background: rgba(0,0,0,0.6);
-        border: 1px solid rgba(74,222,128,0.3);
-        border-radius: 8px;
-        color: #fff;
-        font-family: 'Rajdhani', sans-serif;
-        font-size: 15px;
-        letter-spacing: 0.5px;
-        outline: none;
-      }
-      .input-cyber::placeholder { color: rgba(156,163,175,0.6); }
-      .input-cyber:focus {
-        border-color: rgba(74,222,128,0.8);
-        box-shadow: 0 0 0 3px rgba(74,222,128,0.15), 0 0 15px rgba(74,222,128,0.2);
-      }
+.glass-dark {
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(168,85,247,0.3);
+}
 
-      .btn-primary {
-        background: linear-gradient(135deg, #16a34a, #15803d);
-        color: #fff; border: 1px solid rgba(74,222,128,0.5);
-        font-family: 'Orbitron', monospace; font-size: 12px;
-        letter-spacing: 1px; padding: 10px 20px; border-radius: 8px;
-        cursor: pointer; font-weight: 600;
-      }
-      .btn-primary:hover {
-        background: linear-gradient(135deg, #15803d, #166534);
-        box-shadow: 0 0 20px rgba(74,222,128,0.4);
-      }
+.neon-border {
+  border: 1px solid rgba(168,85,247,0.4);
+  box-shadow: 0 0 10px rgba(168,85,247,0.15), inset 0 0 10px rgba(168,85,247,0.05);
+}
 
-      .btn-ghost {
-        background: rgba(0,0,0,0.5);
-        color: #9ca3af; border: 1px solid rgba(74,222,128,0.2);
-        font-family: 'Rajdhani', sans-serif; font-size: 14px;
-        padding: 10px 20px; border-radius: 8px;
-        cursor: pointer; font-weight: 600;
-      }
-      .btn-ghost:hover {
-        background: rgba(74,222,128,0.08);
-        color: #4ade80;
-        border-color: rgba(74,222,128,0.4);
-      }
+.card-actions { opacity: 0; }
+.card-hover:hover .card-actions { opacity: 1; }
 
-      .scan-line {
-        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-        pointer-events: none; z-index: 999; opacity: 0.025;
-        background: repeating-linear-gradient(
-          0deg, transparent, transparent 2px,
-          rgba(74,222,128,0.4) 2px, rgba(74,222,128,0.4) 4px
-        );
-      }
+.input-cyber {
+  width: 100%;
+  padding: 12px 16px;
+  background: rgba(0,0,0,0.6);
+  border: 1px solid rgba(168,85,247,0.3);
+  border-radius: 8px;
+  color: #fff;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 15px;
+  letter-spacing: 0.5px;
+  outline: none;
+}
 
-      .hex-bg {
-        position: fixed; inset: 0; pointer-events: none;
-        background-image: radial-gradient(circle, rgba(74,222,128,0.06) 1px, transparent 1px);
-        background-size: 40px 40px; z-index: 0;
-      }
+.input-cyber::placeholder {
+  color: rgba(156,163,175,0.6);
+}
 
-      .color-swatch {
-        width: 32px; height: 32px; border-radius: 6px;
-        border: 1px solid rgba(255,255,255,0.15);
-        box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-      }
+.input-cyber:focus {
+  border-color: rgba(168,85,247,0.8);
+  box-shadow: 0 0 0 3px rgba(168,85,247,0.15),
+              0 0 15px rgba(168,85,247,0.2);
+}
 
-      .logo-mark {
-        box-shadow: 0 0 5px rgba(74,222,128,0.2);
-      }
+.btn-primary {
+  background: linear-gradient(135deg, #9333ea, #7e22ce);
+  color: #fff;
+  border: 1px solid rgba(168,85,247,0.5);
+  font-family: 'Orbitron', monospace;
+  font-size: 12px;
+  letter-spacing: 1px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
 
-      .tag {
-        display: inline-block;
-        background: rgba(74,222,128,0.1);
-        border: 1px solid rgba(74,222,128,0.25);
-        color: #4ade80; font-size: 11px;
-        padding: 2px 8px; border-radius: 4px;
-        font-family: 'Orbitron', monospace;
-        letter-spacing: 0.5px;
-      }
-    `}</style>
+.btn-primary:hover {
+  background: linear-gradient(135deg, #7e22ce, #6b21a8);
+  box-shadow: 0 0 20px rgba(168,85,247,0.4);
+}
+
+.btn-ghost {
+  background: rgba(0,0,0,0.5);
+  color: #9ca3af;
+  border: 1px solid rgba(168,85,247,0.2);
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 14px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn-ghost:hover {
+  background: rgba(168,85,247,0.08);
+  color: #a855f7;
+  border-color: rgba(168,85,247,0.4);
+}
+
+.scan-line {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 999;
+  opacity: 0.025;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(168,85,247,0.4) 2px,
+    rgba(168,85,247,0.4) 4px
+  );
+}
+
+.hex-bg {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(circle, rgba(168,85,247,0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+  z-index: 0;
+}
+
+.color-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.15);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
+.logo-mark {
+  box-shadow: 0 0 5px rgba(168,85,247,0.2);
+}
+
+.tag {
+  display: inline-block;
+  background: rgba(168,85,247,0.1);
+  border: 1px solid rgba(168,85,247,0.25);
+  color: #a855f7;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: 'Orbitron', monospace;
+  letter-spacing: 0.5px;
+}
+`}</style>
 
     {/* Ambient effects */}
     <div className="scan-line" />
@@ -359,25 +398,25 @@ const Dashboard: React.FC = () => {
     <div className="fixed left-0 top-0 h-full w-[78px] z-50 flex flex-col items-center py-6 gap-2"
       style={{
         background: 'rgba(0,0,0,0.85)',
-        borderRight: '1px solid rgba(74,222,128,0.25)',
+   borderRight: '1px solid #120038', // match your dark bg
         backdropFilter: 'blur(24px)',
         boxShadow: '4px 0 24px rgba(0,0,0,0.6), inset -1px 0 0 rgba(74,222,128,0.1)'
       }}>
       {/* Logo mark */}
       <div className="w-10 h-10 rounded-xl logo-mark mb-2 flex items-center justify-center"
-       style={{ background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.25)' }}>
-        <img src="./file.jpg" alt="logo" className="w-9 h-9 object-contain rounded" />
+       style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.25)' }}>
+        <img src="./logo.avif" alt="logo" className="w-9 h-9 object-contain rounded" />
       </div>
 
       {/* User badge */}
       {user && (
         <div style={{
           width: 48, padding: '4px 0', borderRadius: 8,
-          background: 'rgba(74,222,128,0.07)', border: '1px solid rgba(74,222,128,0.2)',
+          background: 'rgba(168,85,247,0.1', border: '1px solid rgba(168,85,247,0.25)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, marginBottom: 4
         }}>
-          <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80', boxShadow: '0 0 6px #4ade80' }} />
-          <span style={{ fontSize: 9, color: '#4ade80', letterSpacing: '0.5px', fontWeight: 700,
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'yellow', boxShadow: '0 0 6px yellow' }} />
+          <span style={{ fontSize: 9, color: 'yellow', letterSpacing: '0.5px', fontWeight: 700,
             maxWidth: 44, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             textAlign: 'center', padding: '0 4px' }}>
             {user.username}
@@ -448,7 +487,7 @@ const Dashboard: React.FC = () => {
             <div>
               <label htmlFor="tournament-logo-upload" className="input-cyber flex items-center gap-2"
                 style={{ cursor: 'pointer', display: 'flex' }}>
-                <FaUpload size={14} style={{ color: '#4ade80' }} />
+                <FaUpload size={14} style={{ color: 'yellow' }} />
                 <span>{t('dashboard.page.create.logo')}</span>
               </label>
               <input id="tournament-logo-upload" type="file" accept="image/*"
@@ -539,7 +578,7 @@ const Dashboard: React.FC = () => {
                       <div className="color-swatch" style={{ background: t.overlayBg }} title="Overlay BG" />
                     )}
                     <div style={{ flex: 1 }} />
-                    <span style={{ fontSize: 11, color: '#4ade80', opacity: 0.6 }}>VIEW →</span>
+                    <span style={{ fontSize: 11, color: 'white', opacity: 0.6 }}>Click to view rounds →</span>
                   </div>
                 </Link>
               </div>

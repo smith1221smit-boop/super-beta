@@ -3,7 +3,7 @@ import React, {
   useCallback, useMemo, useTransition, memo
 } from 'react';
 import { flushSync } from 'react-dom';
-import { FaTrash, FaEdit, FaDiscord, FaUpload, FaTrophy, FaUsers, FaEye } from 'react-icons/fa';
+import { FaTrash, FaEdit, FaDiscord, FaUpload, FaTrophy, FaUsers, FaEye, FaChevronDown, FaChevronUp, FaSearch, FaTimes } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
 import api from '../login/api.tsx';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload.tsx';
@@ -23,231 +23,338 @@ interface Team {
   players: Player[];
 }
 
-const CYBER_STYLES = `
-  @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&display=swap');
-  .cyber-root * { font-family: 'Rajdhani', sans-serif; }
-  .orbitron { font-family: 'Orbitron', monospace; }
-  .sidebar-btn {
-    display: flex; flex-direction: column; align-items: center;
-    color: #6b7280; cursor: pointer;
-    padding: 10px; border-radius: 12px; width: 64px;
-    border: 1px solid transparent; background: transparent;
-    transition: color 0.2s, background 0.2s, border-color 0.2s, box-shadow 0.2s;
-  }
-  .sidebar-btn:hover {
-    color: #4ade80; background: rgba(74,222,128,0.08);
-    border-color: rgba(74,222,128,0.3); box-shadow: 0 0 16px rgba(74,222,128,0.2);
-  }
-  .sidebar-btn.active {
-    color: #4ade80; background: rgba(74,222,128,0.12);
-    border-color: rgba(74,222,128,0.5); box-shadow: 0 0 20px rgba(74,222,128,0.3);
-  }
-  .glass-dark {
-    background: rgba(0,0,0,0.55); backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(74,222,128,0.3);
-  }
-  .neon-border {
-    border: 1px solid rgba(74,222,128,0.4);
-    box-shadow: 0 0 12px rgba(74,222,128,0.12), inset 0 0 10px rgba(74,222,128,0.03);
-  }
-  .input-cyber {
-    width: 100%; padding: 11px 14px;
-    background: rgba(0,0,0,0.6); border: 1px solid rgba(74,222,128,0.3);
-    border-radius: 8px; color: #fff; font-family: 'Rajdhani', sans-serif;
-    font-size: 14px; letter-spacing: 0.4px;
-    transition: border-color 0.2s, box-shadow 0.2s;
-    outline: none; box-sizing: border-box;
-  }
-  .input-cyber::placeholder { color: rgba(156,163,175,0.55); }
-  .input-cyber:focus {
-    border-color: rgba(74,222,128,0.8);
-    box-shadow: 0 0 0 3px rgba(74,222,128,0.12), 0 0 14px rgba(74,222,128,0.15);
-  }
-  .btn-primary {
-    background: linear-gradient(135deg, #16a34a, #15803d);
-    color: #fff; border: 1px solid rgba(74,222,128,0.5);
-    font-family: 'Orbitron', monospace; font-size: 11px;
-    letter-spacing: 1px; padding: 10px 20px; border-radius: 8px;
-    cursor: pointer; font-weight: 600;
-    transition: background 0.2s, box-shadow 0.2s;
-  }
-  .btn-primary:hover {
-    background: linear-gradient(135deg, #15803d, #166534);
-    box-shadow: 0 0 18px rgba(74,222,128,0.35);
-  }
-  .btn-ghost {
-    background: rgba(0,0,0,0.5); color: #9ca3af;
-    border: 1px solid rgba(74,222,128,0.2);
-    font-family: 'Rajdhani', sans-serif; font-size: 14px;
-    padding: 10px 20px; border-radius: 8px;
-    cursor: pointer; font-weight: 600;
-    transition: background 0.2s, color 0.2s, border-color 0.2s;
-  }
-  .btn-ghost:hover {
-    background: rgba(74,222,128,0.08); color: #4ade80;
-    border-color: rgba(74,222,128,0.4);
-  }
-  .btn-danger {
-    background: rgba(220,38,38,0.15); color: #f87171;
-    border: 1px solid rgba(220,38,38,0.3);
-    font-family: 'Rajdhani', sans-serif; font-size: 13px;
-    padding: 8px 14px; border-radius: 8px;
-    cursor: pointer; font-weight: 600;
-    transition: background 0.2s, box-shadow 0.2s;
-  }
-  .btn-danger:hover { background: rgba(220,38,38,0.3); box-shadow: 0 0 12px rgba(220,38,38,0.25); }
-  .btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-blue {
-    background: rgba(37,99,235,0.15); color: #60a5fa;
-    border: 1px solid rgba(37,99,235,0.3);
-    font-family: 'Rajdhani', sans-serif; font-size: 13px;
-    padding: 8px 14px; border-radius: 8px;
-    cursor: pointer; font-weight: 600;
-    transition: background 0.2s, box-shadow 0.2s;
-  }
-  .btn-blue:hover { background: rgba(37,99,235,0.3); box-shadow: 0 0 12px rgba(37,99,235,0.25); }
-  .btn-green-ghost {
-    background: rgba(74,222,128,0.08); color: #4ade80;
-    border: 1px solid rgba(74,222,128,0.25);
-    font-family: 'Rajdhani', sans-serif; font-size: 13px;
-    padding: 8px 16px; border-radius: 8px;
-    cursor: pointer; font-weight: 600;
-    transition: background 0.2s, box-shadow 0.2s;
-  }
-  .btn-green-ghost:hover { background: rgba(74,222,128,0.15); box-shadow: 0 0 10px rgba(74,222,128,0.18); }
-  .scan-line {
-    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-    pointer-events: none; z-index: 999; opacity: 0.022;
-    background: repeating-linear-gradient(
-      0deg, transparent, transparent 2px,
-      rgba(74,222,128,0.4) 2px, rgba(74,222,128,0.4) 4px
-    );
-  }
-  .hex-bg {
-    position: fixed; inset: 0; pointer-events: none;
-    background-image: radial-gradient(circle, rgba(74,222,128,0.06) 1px, transparent 1px);
-    background-size: 40px 40px; z-index: 0;
-  }
-  .tag {
-    display: inline-block; background: rgba(74,222,128,0.1);
-    border: 1px solid rgba(74,222,128,0.25); color: #4ade80; font-size: 10px;
-    padding: 2px 7px; border-radius: 4px;
-    font-family: 'Orbitron', monospace; letter-spacing: 0.5px;
-  }
-  .team-card {
-    background: rgba(255,255,255,0.03); backdrop-filter: blur(16px);
-    border: 1px solid rgba(74,222,128,0.15); border-radius: 16px; overflow: hidden;
-    transition: border-color 0.2s, box-shadow 0.2s;
-  }
-  .team-card:hover {
-    border-color: rgba(74,222,128,0.4);
-    box-shadow: 0 0 28px rgba(74,222,128,0.18), 0 16px 36px rgba(0,0,0,0.4);
-  }
-  .team-card .card-actions { opacity: 0; transition: opacity 0.2s; }
-  .team-card:hover .card-actions { opacity: 1; }
-  .player-row {
-    display: flex; align-items: center; gap: 8px;
-    padding: 5px 8px; border-radius: 7px; transition: background 0.15s;
-  }
-  .player-row:hover { background: rgba(74,222,128,0.06); }
-  .player-row .del-btn { opacity: 0; transition: opacity 0.15s; }
-  .player-row:hover .del-btn { opacity: 1; }
-  .checkbox-cyber {
-    width: 18px; height: 18px; border-radius: 5px;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer; flex-shrink: 0;
-    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
-  }
-  .checkbox-cyber.checked {
-    background: #16a34a; box-shadow: 0 0 8px rgba(74,222,128,0.45); border: 1px solid #4ade80;
-  }
-  .checkbox-cyber.unchecked {
-    background: rgba(0,0,0,0.4); border: 1px solid rgba(74,222,128,0.3);
-  }
-  .checkbox-cyber.unchecked:hover { border-color: #4ade80; }
-  .player-form-row {
-    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-    background: rgba(0,0,0,0.35); border: 1px solid rgba(74,222,128,0.12);
-    border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
-  }
-  .modal-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.82);
-    backdrop-filter: blur(10px); display: flex; align-items: center;
-    justify-content: center; z-index: 200; padding: 16px;
-  }
-  .modal-box {
-    width: 100%; max-width: 640px; max-height: 92vh; overflow-y: auto;
-    border-radius: 18px; background: rgba(5,10,5,0.96);
-    border: 1px solid rgba(74,222,128,0.35);
-    box-shadow: 0 0 50px rgba(74,222,128,0.1), 0 40px 80px rgba(0,0,0,0.7);
-    display: flex; flex-direction: column;
-  }
-  .modal-box::-webkit-scrollbar { width: 6px; }
-  .modal-box::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); }
-  .modal-box::-webkit-scrollbar-thumb { background: rgba(74,222,128,0.3); border-radius: 3px; }
-  .close-btn {
-    background: rgba(74,222,128,0.08); border: 1px solid rgba(74,222,128,0.2);
-    border-radius: 8px; padding: 6px 8px; cursor: pointer; color: #9ca3af;
-    display: flex; align-items: center; transition: color 0.15s, background 0.15s;
-  }
-  .close-btn:hover { color: #fff; background: rgba(74,222,128,0.15); }
+// ── Styles ────────────────────────────────────────────────────────────────────
+const STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&display=swap');
+
+.tm-root * { box-sizing: border-box; }
+.tm-root { font-family: 'Rajdhani', sans-serif; }
+.tm-orb { font-family: 'Orbitron', monospace !important; }
+
+/* ── Ambient ── */
+.tm-scan {
+  position: fixed; inset: 0; pointer-events: none; z-index: 999; opacity: 0.02;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(168,85,247,0.5) 2px, rgba(168,85,247,0.5) 4px);
+}
+.tm-hex {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image: radial-gradient(circle, rgba(168,85,247,0.05) 1px, transparent 1px);
+  background-size: 38px 38px;
+}
+
+/* ── Sidebar ── */
+.tm-sidebar-btn {
+  display: flex; flex-direction: column; align-items: center;
+  color: #6b7280; cursor: pointer;
+  padding: 10px; border-radius: 12px; width: 64px;
+  border: 1px solid transparent; background: transparent;
+}
+.tm-sidebar-btn:hover {
+  color: #a855f7; background: rgba(168,85,247,0.08);
+  border-color: rgba(168,85,247,0.3);
+  box-shadow: 0 0 16px rgba(168,85,247,0.2);
+}
+.tm-sidebar-btn.active {
+  color: #a855f7; background: rgba(168,85,247,0.12);
+  border-color: rgba(168,85,247,0.5);
+  box-shadow: 0 0 20px rgba(168,85,247,0.3);
+}
+
+/* ── Tags / Badges ── */
+.tm-tag {
+  display: inline-flex; align-items: center;
+  background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.28);
+  color: #a855f7; font-family: 'Orbitron', monospace; font-size: 10px;
+  padding: 2px 8px; border-radius: 4px; letter-spacing: 0.5px; font-weight: 700;
+}
+
+/* ── Buttons ── */
+.tm-btn-primary {
+  background: linear-gradient(135deg, #9333ea, #7e22ce);
+  color: #fff; border: 1px solid rgba(168,85,247,0.5);
+  font-family: 'Orbitron', monospace; font-size: 11px;
+  letter-spacing: 1px; padding: 10px 22px; border-radius: 8px;
+  cursor: pointer; font-weight: 700;
+}
+.tm-btn-primary:hover {
+  background: linear-gradient(135deg, #7e22ce, #6b21a8);
+  box-shadow: 0 0 18px rgba(168,85,247,0.35);
+}
+
+.tm-btn-ghost {
+  background: rgba(0,0,0,0.4); color: #9ca3af;
+  border: 1px solid rgba(168,85,247,0.18);
+  font-family: 'Rajdhani', sans-serif; font-size: 14px;
+  padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600;
+}
+.tm-btn-ghost:hover {
+  background: rgba(168,85,247,0.07); color: #a855f7;
+  border-color: rgba(168,85,247,0.35);
+}
+
+.tm-btn-danger {
+  background: rgba(220,38,38,0.12); color: #f87171;
+  border: 1px solid rgba(220,38,38,0.28);
+  font-family: 'Rajdhani', sans-serif; font-size: 13px;
+  padding: 7px 12px; border-radius: 7px; cursor: pointer; font-weight: 600;
+}
+.tm-btn-danger:hover { background: rgba(220,38,38,0.25); }
+.tm-btn-danger:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.tm-btn-edit {
+  background: rgba(37,99,235,0.15); color: #60a5fa;
+  border: 1px solid rgba(37,99,235,0.28);
+  font-family: 'Rajdhani', sans-serif; font-size: 13px;
+  padding: 7px 12px; border-radius: 7px; cursor: pointer; font-weight: 600;
+}
+.tm-btn-edit:hover { background: rgba(37,99,235,0.28); }
+
+.tm-btn-purple-ghost {
+  background: rgba(168,85,247,0.08); color: #a855f7;
+  border: 1px solid rgba(168,85,247,0.22);
+  font-family: 'Rajdhani', sans-serif; font-size: 13px;
+  padding: 7px 14px; border-radius: 7px; cursor: pointer; font-weight: 600;
+}
+.tm-btn-purple-ghost:hover { background: rgba(168,85,247,0.15); }
+
+/* ── Inputs ── */
+.tm-input {
+  width: 100%; padding: 10px 13px;
+  background: rgba(0,0,0,0.6); border: 1px solid rgba(168,85,247,0.28);
+  border-radius: 8px; color: #fff;
+  font-family: 'Rajdhani', sans-serif; font-size: 14px; letter-spacing: 0.3px; outline: none;
+}
+.tm-input::placeholder { color: #374151; }
+.tm-input:focus {
+  border-color: rgba(168,85,247,0.7);
+  box-shadow: 0 0 0 3px rgba(168,85,247,0.12), 0 0 12px rgba(168,85,247,0.12);
+}
+
+/* ── Glass panels ── */
+.tm-glass {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(168,85,247,0.15);
+  backdrop-filter: blur(16px);
+}
+.tm-glass-dark {
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(168,85,247,0.25);
+  backdrop-filter: blur(20px);
+}
+
+/* ── Team row (new layout: horizontal list) ── */
+.tm-team-row {
+  background: rgba(0,0,0,0.45);
+  border: 1px solid rgba(168,85,247,0.12);
+  border-radius: 14px; overflow: hidden; margin-bottom: 8px;
+}
+.tm-team-row:hover { border-color: rgba(168,85,247,0.32); }
+
+.tm-team-row-hdr {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 16px; cursor: pointer; user-select: none;
+}
+
+/* Accent bar left edge */
+.tm-team-row-accent {
+  width: 3px; height: 44px; border-radius: 3px; flex-shrink: 0;
+  background: linear-gradient(180deg, #a855f7, rgba(168,85,247,0.3));
+  box-shadow: 0 0 8px rgba(168,85,247,0.4);
+}
+
+.tm-team-logo {
+  width: 44px; height: 44px; border-radius: 10px;
+  object-fit: cover; border: 1px solid rgba(168,85,247,0.25); flex-shrink: 0;
+}
+.tm-team-logo-ph {
+  width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0;
+  background: rgba(168,85,247,0.07); border: 1px solid rgba(168,85,247,0.18);
+  display: flex; align-items: center; justify-content: center;
+}
+
+.tm-team-meta { flex: 1; min-width: 0; }
+.tm-team-tag {
+  font-family: 'Orbitron', monospace; font-size: 12px; font-weight: 900;
+  color: #a855f7; letter-spacing: 0.5px; line-height: 1;
+}
+.tm-team-name {
+  font-family: 'Orbitron', monospace; font-size: 13px; font-weight: 700;
+  color: #e5e7eb; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-top: 3px;
+}
+
+/* Player count pill */
+.tm-player-pill {
+  display: flex; align-items: center; gap: 5px;
+  background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.22);
+  border-radius: 20px; padding: 4px 11px;
+  font-family: 'Orbitron', monospace; font-size: 10px; font-weight: 700;
+  color: #a855f7; flex-shrink: 0;
+}
+
+.tm-row-actions { display: flex; gap: 7px; flex-shrink: 0; }
+.tm-chevron { color: #4b5563; font-size: 11px; flex-shrink: 0; }
+
+/* ── Expanded player list ── */
+.tm-player-section {
+  border-top: 1px solid rgba(168,85,247,0.08);
+  padding: 0 16px 12px;
+  background: rgba(0,0,0,0.2);
+}
+
+.tm-player-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px; padding-top: 10px;
+}
+
+.tm-player-card {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 10px; border-radius: 8px;
+  background: rgba(0,0,0,0.35); border: 1px solid rgba(168,85,247,0.1);
+}
+.tm-player-card:hover { border-color: rgba(168,85,247,0.25); }
+
+.tm-player-avatar {
+  width: 30px; height: 30px; border-radius: 50%;
+  object-fit: cover; border: 1px solid rgba(168,85,247,0.25); flex-shrink: 0;
+}
+.tm-player-avatar-ph {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(168,85,247,0.08); border: 1px solid rgba(168,85,247,0.15);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Orbitron', monospace; font-size: 9px; color: #a855f7; font-weight: 900;
+}
+
+/* Checkbox */
+.tm-checkbox {
+  width: 17px; height: 17px; border-radius: 4px; flex-shrink: 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.tm-checkbox.checked {
+  background: #9333ea; border: 1px solid #a855f7;
+  box-shadow: 0 0 6px rgba(168,85,247,0.4);
+}
+.tm-checkbox.unchecked {
+  background: rgba(0,0,0,0.4); border: 1px solid rgba(168,85,247,0.28);
+}
+.tm-checkbox.unchecked:hover { border-color: #a855f7; }
+
+.tm-player-info { flex: 1; min-width: 0; }
+.tm-player-name { font-size: 13px; color: #e5e7eb; font-weight: 600; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tm-player-id { font-size: 10px; color: #6b7280; font-family: 'Orbitron', monospace; }
+
+.tm-del-player {
+  width: 22px; height: 22px; border-radius: 5px; flex-shrink: 0;
+  background: rgba(220,38,38,0.1); border: 1px solid rgba(220,38,38,0.2);
+  color: #ef4444; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; opacity: 0;
+}
+.tm-player-card:hover .tm-del-player { opacity: 1; }
+.tm-del-player:hover { background: rgba(220,38,38,0.28); }
+
+/* ── Search ── */
+.tm-search-wrap { position: relative; max-width: 380px; }
+.tm-search-ic { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #4b5563; font-size: 12px; pointer-events: none; }
+
+/* ── Player form row ── */
+.tm-player-form-row {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  background: rgba(0,0,0,0.35); border: 1px solid rgba(168,85,247,0.12);
+  border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
+}
+
+/* ── Modal ── */
+.tm-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.82);
+  backdrop-filter: blur(10px); display: flex; align-items: center;
+  justify-content: center; z-index: 200; padding: 16px;
+}
+.tm-modal-box {
+  width: 100%; max-width: 620px; max-height: 90vh; overflow-y: auto;
+  border-radius: 18px; background: rgba(5,0,18,0.97);
+  border: 1px solid rgba(168,85,247,0.3);
+  box-shadow: 0 0 50px rgba(168,85,247,0.1), 0 40px 80px rgba(0,0,0,0.7);
+}
+.tm-modal-box::-webkit-scrollbar { width: 5px; }
+.tm-modal-box::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.3); border-radius: 4px; }
+
+/* ── Create form card ── */
+.tm-create-card {
+  background: rgba(0,0,0,0.55); border: 1px solid rgba(168,85,247,0.25);
+  border-radius: 16px; overflow: hidden; margin-bottom: 28px;
+}
+.tm-create-card-hdr {
+  padding: 16px 20px; border-bottom: 1px solid rgba(168,85,247,0.12);
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(168,85,247,0.04);
+}
+.tm-create-card-body { padding: 18px 20px; }
+
+/* ── Divider ── */
+.tm-divider {
+  height: 1px; background: rgba(168,85,247,0.08); margin: 0 0 12px;
+}
+
+/* ── Empty state ── */
+.tm-empty {
+  text-align: center; padding: 64px 24px;
+}
+.tm-empty-icon-wrap {
+  width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 20px;
+  background: rgba(168,85,247,0.07); border: 1px solid rgba(168,85,247,0.25);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 24px rgba(168,85,247,0.1);
+}
+
+@media (max-width: 600px) {
+  .tm-team-name { font-size: 12px; }
+  .tm-player-grid { grid-template-columns: 1fr; }
+  .tm-row-actions { gap: 5px; }
+}
 `;
 
-/* ─────────────────────────────────────────────
-   PlayerRow
-───────────────────────────────────────────── */
-const PlayerRow = memo(({
-  player, isSelected, onToggle, onDelete, isDeleting, teamId,
+// ── PlayerCard ────────────────────────────────────────────────────────────────
+const PlayerCard = memo(({
+  player, isSelected, onToggle, onDelete, teamId, isDeleting,
 }: {
-  player: Player;
-  isSelected: boolean;
-  onToggle: (playerId: string) => void;
+  player: Player; isSelected: boolean;
+  onToggle: (id: string) => void;
   onDelete: (teamId: string, playerId: string) => void;
-  isDeleting: boolean;
-  teamId: string;
+  teamId: string; isDeleting: boolean;
 }) => {
-  const handleToggle = useCallback(() => onToggle(player._id!), [player._id, onToggle]);
-  const handleDelete = useCallback(() => onDelete(teamId, player._id!), [teamId, player._id, onDelete]);
-
+  const initials = player.playerName?.slice(0, 2).toUpperCase() || '??';
   return (
-    <li className="player-row">
-      <div className={`checkbox-cyber ${isSelected ? 'checked' : 'unchecked'}`} onClick={handleToggle}>
+    <div className="tm-player-card">
+      <div
+        className={`tm-checkbox ${isSelected ? 'checked' : 'unchecked'}`}
+        onClick={() => player._id && onToggle(player._id)}
+      >
         {isSelected && (
-          <svg width="10" height="10" fill="none" stroke="white" viewBox="0 0 24 24">
+          <svg width="9" height="9" fill="none" stroke="#fff" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
           </svg>
         )}
       </div>
-      {player.photo && (
-        <img src={player.photo} alt={player.playerName}
-          style={{ width: 24, height: 24, borderRadius: '50%', objectFit: 'cover',
-            border: '1px solid rgba(74,222,128,0.3)', flexShrink: 0 }}
-          loading="lazy" onError={(e) => e.currentTarget.src = './def_char.png'} />
-      )}
-      <span style={{ flex: 1, fontSize: 12, color: '#d1d5db', minWidth: 0 }}>
-        <strong style={{ color: '#fff' }}>{player.playerName}</strong>
-        {player.playerId && (
-          <span style={{ color: '#6b7280', fontSize: 10, marginLeft: 3 }}>({player.playerId})</span>
-        )}
-      </span>
+      {player.photo
+        ? <img src={player.photo} alt={player.playerName} className="tm-player-avatar" loading="lazy" onError={e => e.currentTarget.src = './def_char.png'} />
+        : <div className="tm-player-avatar-ph">{initials}</div>
+      }
+      <div className="tm-player-info">
+        <div className="tm-player-name">{player.playerName}</div>
+        {player.playerId && <div className="tm-player-id">#{player.playerId}</div>}
+      </div>
       {player._id && (
-        <button className="del-btn" onClick={handleDelete} disabled={isDeleting}
-          style={{ padding: '3px 5px', background: 'rgba(220,38,38,0.12)',
-            border: '1px solid rgba(220,38,38,0.22)', borderRadius: 5,
-            cursor: 'pointer', color: '#f87171', transition: 'background 0.15s' }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(220,38,38,0.28)')}
-          onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(220,38,38,0.12)')}>
+        <button className="tm-del-player" onClick={() => onDelete(teamId, player._id!)} disabled={isDeleting}>
           <FaTrash size={9} />
         </button>
       )}
-    </li>
+    </div>
   );
 });
 
-/* ─────────────────────────────────────────────
-   TeamCard
-───────────────────────────────────────────── */
-const TeamCard = memo(({
+// ── TeamRow ───────────────────────────────────────────────────────────────────
+const TeamRow = memo(({
   team, onEdit, onDelete, onDeletePlayer, onDeleteSelectedPlayers,
   deletingTeamIds, deletingPlayerIds,
 }: {
@@ -259,21 +366,21 @@ const TeamCard = memo(({
   deletingTeamIds: Set<string>;
   deletingPlayerIds: Set<string>;
 }) => {
-  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // When team.players changes (e.g. after deletion), prune stale selected ids
   useEffect(() => {
-    setSelected((prev) => {
-      const validIds = new Set(team.players.map((p) => p._id!).filter(Boolean));
-const pruned = new Set(Array.from(prev).filter((id) => validIds.has(id)));      return pruned.size === prev.size ? prev : pruned;
+    setSelected(prev => {
+      const validIds = new Set(team.players.map(p => p._id!).filter(Boolean));
+      const pruned = new Set(Array.from(prev).filter(id => validIds.has(id)));
+      return pruned.size === prev.size ? prev : pruned;
     });
   }, [team.players]);
 
-  const togglePlayer = useCallback((playerId: string) => {
-    setSelected((prev) => {
+  const togglePlayer = useCallback((id: string) => {
+    setSelected(prev => {
       const next = new Set(prev);
-      if (next.has(playerId)) next.delete(playerId); else next.add(playerId);
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   }, []);
@@ -284,60 +391,66 @@ const pruned = new Set(Array.from(prev).filter((id) => validIds.has(id)));      
     try {
       await onDeleteSelectedPlayers(team._id, Array.from(selected));
       setSelected(new Set());
-    } catch {
-      // error already handled + alerted in root
-    }
+    } catch {}
   }, [selected, team._id, onDeleteSelectedPlayers]);
 
-  const handleEdit = useCallback(() => onEdit(team), [onEdit, team]);
-  const handleDelete = useCallback(() => onDelete(team._id), [onDelete, team._id]);
-
   return (
-    <div className="team-card" style={{ display: 'flex', flexDirection: 'column' }}>
-      <div style={{ height: 3, flexShrink: 0,
-        background: 'linear-gradient(90deg, #4ade80, #166534, transparent)' }} />
-      <div style={{ padding: '16px 16px 14px', display: 'flex', flexDirection: 'column', flex: 1 }}>
-
-        {/* Logo + name */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 12 }}>
-          {team.logo ? (
-            <img src={team.logo} alt={team.teamFullName}
-              style={{ width: 56, height: 56, objectFit: 'contain', borderRadius: 10,
-                marginBottom: 8, border: '1px solid rgba(74,222,128,0.3)' }}
-              loading="lazy" onError={(e) => e.currentTarget.src = './logo.png'} />
-          ) : (
-            <div style={{ width: 56, height: 56, borderRadius: 10, marginBottom: 8,
-              background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.2)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <FaUsers size={22} style={{ color: '#4ade80', opacity: 0.5 }} />
-            </div>
-          )}
-          <span className="tag" style={{ marginBottom: 5 }}>TEAM</span>
-          <h4 className="orbitron font-bold text-white text-center"
-            style={{ fontSize: 13, letterSpacing: 0.5, marginBottom: 2 }}>
-            {team.teamFullName}
-          </h4>
-          <span style={{ color: '#4ade80', fontSize: 11, fontFamily: 'Orbitron, monospace', opacity: 0.8 }}>
-            [{team.teamTag}]
-          </span>
+    <div className="tm-team-row">
+      {/* Header row */}
+      <div className="tm-team-row-hdr" onClick={() => setExpanded(v => !v)}>
+        <div className="tm-team-row-accent" />
+        {team.logo
+          ? <img src={team.logo} alt={team.teamFullName} className="tm-team-logo" loading="lazy" onError={e => e.currentTarget.src = './logo.png'} />
+          : <div className="tm-team-logo-ph"><FaUsers size={20} style={{ color: '#a855f7', opacity: 0.45 }} /></div>
+        }
+        <div className="tm-team-meta">
+          <div className="tm-team-tag">[{team.teamTag}]</div>
+          <div className="tm-team-name">{team.teamFullName}</div>
         </div>
 
-        {/* Players */}
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 10, color: '#6b7280', letterSpacing: 1, marginBottom: 6,
-            fontFamily: 'Orbitron, monospace',
-            borderBottom: '1px solid rgba(74,222,128,0.1)', paddingBottom: 5 }}>
-            PLAYERS ({team.players.length})
+        <div className="tm-player-pill">
+          <FaUsers size={9} />
+          {team.players.length}
+        </div>
+
+        <div className="tm-row-actions" onClick={e => e.stopPropagation()}>
+          <button className="tm-btn-edit" style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 5 }}
+            onClick={() => onEdit(team)}>
+            <FaEdit size={11} /> Edit
+          </button>
+          <button className="tm-btn-danger" style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 5 }}
+            onClick={() => onDelete(team._id)} disabled={deletingTeamIds.has(team._id)}>
+            <FaTrash size={11} /> Delete
+          </button>
+        </div>
+
+        <span className="tm-chevron">
+          {expanded ? <FaChevronUp size={11} /> : <FaChevronDown size={11} />}
+        </span>
+      </div>
+
+      {/* Expanded player section */}
+      {expanded && (
+        <div className="tm-player-section">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 10, paddingBottom: 6 }}>
+            <span style={{ fontFamily: 'Orbitron, monospace', fontSize: 9, color: '#6b7280', letterSpacing: '2px' }}>
+              PLAYERS — {team.players.length}
+            </span>
+            {selected.size > 0 && (
+              <button className="tm-btn-danger" style={{ fontSize: 11, padding: '4px 10px' }} onClick={handleDeleteSelected}>
+                Delete {selected.size} selected
+              </button>
+            )}
           </div>
+          <div className="tm-divider" />
           {team.players.length === 0 ? (
-            <p style={{ color: '#4b5563', fontSize: 12, textAlign: 'center', padding: '6px 0' }}>
-              {t('teams.teamCard.noPlayers')}
+            <p style={{ color: '#4b5563', fontSize: 12, padding: '10px 0', fontFamily: 'Orbitron, monospace', letterSpacing: 1 }}>
+              NO PLAYERS ADDED
             </p>
           ) : (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0,
-              display: 'flex', flexDirection: 'column', gap: 1 }}>
-              {team.players.map((player) => (
-                <PlayerRow
+            <div className="tm-player-grid">
+              {team.players.map(player => (
+                <PlayerCard
                   key={player._id || player.playerName}
                   player={player}
                   isSelected={selected.has(player._id!)}
@@ -347,176 +460,138 @@ const pruned = new Set(Array.from(prev).filter((id) => validIds.has(id)));      
                   teamId={team._id}
                 />
               ))}
-            </ul>
-          )}
-          {selected.size > 0 && (
-            <button className="btn-danger"
-              style={{ width: '100%', marginTop: 8, fontSize: 12 }}
-              onClick={handleDeleteSelected}>
-              {t('teams.teamCard.deleteSelected')} ({selected.size})
-            </button>
+            </div>
           )}
         </div>
-
-        {/* Edit / Delete */}
-        <div className="card-actions"
-          style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10,
-            borderTop: '1px solid rgba(74,222,128,0.1)' }}>
-          <button className="btn-blue"
-            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}
-            onClick={handleEdit}>
-            <FaEdit size={12} /> {t('teams.teamCard.edit')}
-          </button>
-          <button className="btn-danger"
-            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}
-            onClick={handleDelete} disabled={deletingTeamIds.has(team._id)}>
-            <FaTrash size={11} /> {t('teams.teamCard.delete')}
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 });
 
-/* ─────────────────────────────────────────────
-   SearchInput
-───────────────────────────────────────────── */
+// ── SearchInput ───────────────────────────────────────────────────────────────
 const SearchInput = memo(({ onSearchChange }: { onSearchChange: (q: string) => void }) => {
-  const { t } = useTranslation();
   const [localQuery, setLocalQuery] = useState('');
   const [, startTransition] = useTransition();
 
   useEffect(() => {
     const id = setTimeout(() => {
       startTransition(() => onSearchChange(localQuery));
-    }, localQuery === '' ? 0 : 300);
+    }, localQuery === '' ? 0 : 280);
     return () => clearTimeout(id);
   }, [localQuery, onSearchChange]);
 
   return (
-    <div style={{ position: 'relative', maxWidth: 420 }}>
-      <svg style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)',
-        color: '#4ade80', opacity: 0.5, pointerEvents: 'none' }}
-        width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
-          d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-      </svg>
-      <input type="text" placeholder={t('teams.search.placeholder')}
-        value={localQuery} onChange={(e) => setLocalQuery(e.target.value)}
-        className="input-cyber" style={{ paddingLeft: 38 }} />
+    <div className="tm-search-wrap" style={{ flex: 1 }}>
+      <FaSearch className="tm-search-ic" />
+      <input
+        type="text" value={localQuery}
+        onChange={e => setLocalQuery(e.target.value)}
+        placeholder="Search teams by name or tag…"
+        className="tm-input" style={{ paddingLeft: 34 }}
+      />
     </div>
   );
 });
 
-/* ─────────────────────────────────────────────
-   TeamForm (inline create)
-───────────────────────────────────────────── */
-const TeamForm = memo(({
-  form, playersForm, handleTeamInputChange, handlePlayerChange,
-  addPlayerInput, removePlayerInput, handleSubmit, editingTeamId,
-  resetForm, handleLogoUpload, handlePlayerPhotoUpload,
+// ── FormFields (shared between create + edit) ─────────────────────────────────
+const FormFields = memo(({
+  form, playersForm, editingTeamId,
+  handleTeamInputChange, handlePlayerChange,
+  addPlayerInput, removePlayerInput,
+  handleSubmit, resetForm,
+  handleLogoUpload, handlePlayerPhotoUpload,
 }: {
   form: { teamFullName: string; teamTag: string; logo: string };
-  setForm: React.Dispatch<React.SetStateAction<{ teamFullName: string; teamTag: string; logo: string }>>;
   playersForm: Player[];
-  setPlayersForm: React.Dispatch<React.SetStateAction<Player[]>>;
+  editingTeamId: string | null;
   handleTeamInputChange: (e: ChangeEvent<HTMLInputElement>) => void;
   handlePlayerChange: (index: number, e: ChangeEvent<HTMLInputElement>) => void;
   addPlayerInput: () => void;
   removePlayerInput: (index: number) => void;
   handleSubmit: (e: FormEvent) => void;
-  editingTeamId: string | null;
   resetForm: () => void;
   handleLogoUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   handlePlayerPhotoUpload: (index: number, e: ChangeEvent<HTMLInputElement>) => void;
 }) => {
-  const { t } = useTranslation();
+  const idPrefix = editingTeamId ? 'modal' : 'inline';
   return (
-    <div className="glass-dark neon-border rounded-2xl p-6 mb-8" style={{ maxWidth: 680 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-        <span className="tag">NEW</span>
-        <h3 className="orbitron text-white font-bold" style={{ fontSize: 16 }}>
-          {editingTeamId ? t('teams.form.editTitle') : t('teams.form.createTitle')}
-        </h3>
+    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+      {/* Team info */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10 }}>
+        <input type="text" name="teamFullName" placeholder="Team full name"
+          value={form.teamFullName} onChange={handleTeamInputChange} required autoFocus
+          className="tm-input" />
+        <input type="text" name="teamTag" placeholder="TAG"
+          value={form.teamTag} onChange={handleTeamInputChange} required
+          className="tm-input" style={{ width: 100 }} />
       </div>
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <input type="text" name="teamFullName"
-          placeholder={t('teams.form.teamName') || 'Team Full Name'}
-          value={form.teamFullName} onChange={handleTeamInputChange} required autoFocus className="input-cyber" />
-        <input type="text" name="teamTag"
-          placeholder={t('teams.form.teamTag') || 'Team Tag'}
-          value={form.teamTag} onChange={handleTeamInputChange} required className="input-cyber" />
-        <label htmlFor="inline-team-logo-upload" className="input-cyber"
-          style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-          <FaUpload size={14} style={{ color: '#4ade80' }} />
-          {t('teams.form.uploadLogo')}
+
+      {/* Logo upload */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <label htmlFor={`${idPrefix}-logo`} className="tm-input"
+          style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', width: 'auto', flex: 1 }}>
+          <FaUpload size={13} style={{ color: '#a855f7', flexShrink: 0 }} />
+          <span style={{ color: '#9ca3af' }}>Upload team logo</span>
         </label>
-        <input id="inline-team-logo-upload" type="file" accept="image/*"
-          onChange={handleLogoUpload} style={{ display: 'none' }} />
+        <input id={`${idPrefix}-logo`} type="file" accept="image/*" onChange={handleLogoUpload} style={{ display: 'none' }} />
         {form.logo && (
-          <img src={form.logo} alt="Logo Preview"
-            style={{ width: 72, height: 72, objectFit: 'contain', borderRadius: 10,
-              border: '1px solid rgba(74,222,128,0.4)' }}
-            loading="lazy" onError={(e) => e.currentTarget.src = './logo.png'} />
+          <img src={form.logo} alt="Logo"
+            style={{ width: 48, height: 48, objectFit: 'contain', borderRadius: 8, border: '1px solid rgba(168,85,247,0.35)', flexShrink: 0 }}
+            loading="lazy" onError={e => e.currentTarget.src = './logo.png'} />
         )}
-        <div style={{ fontSize: 10, color: '#4ade80', letterSpacing: 1,
-          fontFamily: 'Orbitron, monospace', marginTop: 4, marginBottom: 2 }}>
-          {t('teams.form.players').toUpperCase()}
-        </div>
-        {playersForm.map((player, index) => (
-          <div key={player._id || index} className="player-form-row">
-            <input type="text" name="playerName"
-              placeholder={t('teams.form.playerName')} value={player.playerName}
-              onChange={(e) => handlePlayerChange(index, e)} required
-              className="input-cyber" style={{ flex: '1 1 160px', width: 'auto' }} />
-            <input type="text" name="playerId"
-              placeholder={t('teams.form.playerId')} value={player.playerId}
-              onChange={(e) => handlePlayerChange(index, e)}
-              className="input-cyber" style={{ flex: '0 0 110px', width: 110 }} />
-            <label htmlFor={`inline-player-photo-${index}`} className="input-cyber"
-              style={{ flex: '0 0 130px', width: 130, display: 'flex', alignItems: 'center',
-                gap: 6, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-              <FaUpload size={11} style={{ color: '#4ade80' }} />
-              {t('teams.form.uploadPhoto')}
+      </div>
+
+      {/* Players */}
+      <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 9, color: '#a855f7', letterSpacing: '2px', paddingTop: 4 }}>
+        PLAYERS
+      </div>
+
+      {playersForm.map((player, index) => (
+        <div key={player._id || index} className="tm-player-form-row">
+          <input type="text" name="playerName" placeholder="Player name"
+            value={player.playerName} onChange={e => handlePlayerChange(index, e)} required
+            className="tm-input" style={{ flex: '1 1 150px', width: 'auto' }} />
+          <input type="text" name="playerId" placeholder="ID / IGN"
+            value={player.playerId} onChange={e => handlePlayerChange(index, e)}
+            className="tm-input" style={{ flex: '0 0 100px', width: 100 }} />
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <label htmlFor={`${idPrefix}-photo-${index}`} className="tm-input"
+              style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', width: 'auto', padding: '10px 12px', whiteSpace: 'nowrap' }}>
+              <FaUpload size={11} style={{ color: '#a855f7', flexShrink: 0 }} />
+              Photo
             </label>
-            <input id={`inline-player-photo-${index}`} type="file" accept="image/*"
-              onChange={(e) => handlePlayerPhotoUpload(index, e)} style={{ display: 'none' }} />
+            <input id={`${idPrefix}-photo-${index}`} type="file" accept="image/*"
+              onChange={e => handlePlayerPhotoUpload(index, e)} style={{ display: 'none' }} />
             {player.photo && (
               <img src={player.photo} alt="Preview"
-                style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover',
-                  border: '1px solid rgba(74,222,128,0.4)', flexShrink: 0 }}
-                loading="lazy" onError={(e) => e.currentTarget.src = './def_char.png'} />
+                style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', border: '1px solid rgba(168,85,247,0.35)' }}
+                loading="lazy" onError={e => e.currentTarget.src = './def_char.png'} />
             )}
             {playersForm.length > 1 && (
-              <button type="button" onClick={() => removePlayerInput(index)}
-                className="btn-danger" style={{ padding: '6px 10px', flexShrink: 0 }}>
+              <button type="button" onClick={() => removePlayerInput(index)} className="tm-btn-danger" style={{ padding: '6px 9px' }}>
                 <FaTrash size={11} />
               </button>
             )}
           </div>
-        ))}
-        <button type="button" onClick={addPlayerInput} className="btn-green-ghost"
-          style={{ alignSelf: 'flex-start' }}>
-          + {t('teams.form.addPlayer')}
-        </button>
-        <div style={{ display: 'flex', gap: 10, paddingTop: 4 }}>
-          <button type="submit" className="btn-primary">
-            {editingTeamId ? t('teams.form.updateTeam') : t('teams.form.createTeam')}
-          </button>
-          {editingTeamId && (
-            <button type="button" onClick={resetForm} className="btn-ghost">
-              {t('teams.form.cancel')}
-            </button>
-          )}
         </div>
-      </form>
-    </div>
+      ))}
+
+      <button type="button" onClick={addPlayerInput} className="tm-btn-purple-ghost" style={{ alignSelf: 'flex-start' }}>
+        + Add player
+      </button>
+
+      <div style={{ display: 'flex', gap: 10, paddingTop: 6, borderTop: '1px solid rgba(168,85,247,0.1)', marginTop: 2 }}>
+        <button type="button" onClick={resetForm} className="tm-btn-ghost">Cancel</button>
+        <button type="submit" className="tm-btn-primary">
+          {editingTeamId ? 'UPDATE TEAM' : 'CREATE TEAM'}
+        </button>
+      </div>
+    </form>
   );
 });
 
-/* ─────────────────────────────────────────────
-   FormContainer (create inline / edit modal)
-───────────────────────────────────────────── */
+// ── FormContainer ─────────────────────────────────────────────────────────────
 const FormContainer = memo(({
   showForm, setShowForm, editingTeamId, setEditingTeamId, teams, setTeams,
 }: {
@@ -527,7 +602,6 @@ const FormContainer = memo(({
   teams: Team[];
   setTeams: React.Dispatch<React.SetStateAction<Team[]>>;
 }) => {
-  const { t } = useTranslation();
   const [form, setForm] = useState({ teamFullName: '', teamTag: '', logo: '' });
   const [playersForm, setPlayersForm] = useState<Player[]>([{ playerName: '', playerId: '', photo: '' }]);
 
@@ -540,25 +614,25 @@ const FormContainer = memo(({
 
   const handleTeamInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
+    setForm(prev => ({ ...prev, [name]: value }));
   }, []);
 
   const handlePlayerChange = useCallback((index: number, e: ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setPlayersForm((prev) => { const c = [...prev]; c[index] = { ...c[index], [name]: value }; return c; });
+    setPlayersForm(prev => { const c = [...prev]; c[index] = { ...c[index], [name]: value }; return c; });
   }, []);
 
   const addPlayerInput = useCallback(() => {
-    setPlayersForm((prev) => [...prev, { playerName: '', playerId: '', photo: '' }]);
+    setPlayersForm(prev => [...prev, { playerName: '', playerId: '', photo: '' }]);
   }, []);
 
   const removePlayerInput = useCallback((index: number) => {
-    setPlayersForm((prev) => prev.filter((_, i) => i !== index));
+    setPlayersForm(prev => prev.filter((_, i) => i !== index));
   }, []);
 
   const handleLogoUpload = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
-    try { const url = await uploadToCloudinary(file, 'teams/logos', 'team_logo'); setForm((p) => ({ ...p, logo: url })); }
+    try { const url = await uploadToCloudinary(file, 'teams/logos', 'team_logo'); setForm(p => ({ ...p, logo: url })); }
     catch { alert('Upload failed'); }
   }, []);
 
@@ -566,29 +640,29 @@ const FormContainer = memo(({
     const file = e.target.files?.[0]; if (!file) return;
     try {
       const url = await uploadToCloudinary(file, 'players/photos', 'player_photo');
-      setPlayersForm((prev) => { const c = [...prev]; c[index] = { ...c[index], photo: url }; return c; });
+      setPlayersForm(prev => { const c = [...prev]; c[index] = { ...c[index], photo: url }; return c; });
     } catch { alert('Upload failed'); }
   }, []);
 
   const handleSubmit = useCallback(async (e: FormEvent) => {
     e.preventDefault();
-    if (playersForm.some((p) => p.playerName.trim() === '')) { alert('Please fill in all player names'); return; }
+    if (playersForm.some(p => p.playerName.trim() === '')) { alert('Fill in all player names'); return; }
     try {
       const payload = { ...form, players: playersForm };
       if (editingTeamId) {
         const res = await api.put(`/teams/${editingTeamId}`, payload);
-        setTeams((prev) => prev.map((t) => (t._id === editingTeamId ? res.data : t)));
+        setTeams(prev => prev.map(t => t._id === editingTeamId ? res.data : t));
       } else {
         const res = await api.post('/teams', payload);
-        setTeams((prev) => [...prev, res.data]);
+        setTeams(prev => [...prev, res.data]);
       }
       resetForm();
-    } catch (err) { alert('Failed to save team'); console.error(err); }
+    } catch { alert('Failed to save team'); }
   }, [form, playersForm, editingTeamId, setTeams, resetForm]);
 
   useEffect(() => {
     if (editingTeamId) {
-      const team = teams.find((t) => t._id === editingTeamId);
+      const team = teams.find(t => t._id === editingTeamId);
       if (team) {
         setForm({ teamFullName: team.teamFullName, teamTag: team.teamTag, logo: team.logo || '' });
         setPlayersForm(team.players.length ? team.players : [{ playerName: '', playerId: '', photo: '' }]);
@@ -599,122 +673,66 @@ const FormContainer = memo(({
 
   useEffect(() => {
     if (editingTeamId) {
-      const team = teams.find((t) => t._id === editingTeamId);
+      const team = teams.find(t => t._id === editingTeamId);
       if (team) setPlayersForm(team.players.length ? team.players : [{ playerName: '', playerId: '', photo: '' }]);
     }
   }, [teams, editingTeamId]);
 
+  const fieldProps = {
+    form, playersForm, editingTeamId,
+    handleTeamInputChange, handlePlayerChange,
+    addPlayerInput, removePlayerInput,
+    handleSubmit, resetForm,
+    handleLogoUpload, handlePlayerPhotoUpload,
+  };
+
+  // Edit modal
   if (editingTeamId) {
     return (
-      <div className="modal-overlay">
-        <div className="modal-box">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '20px 24px 16px', borderBottom: '1px solid rgba(74,222,128,0.15)' }}>
+      <div className="tm-modal-overlay">
+        <div className="tm-modal-box">
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '18px 22px 14px', borderBottom: '1px solid rgba(168,85,247,0.15)',
+            background: 'rgba(168,85,247,0.04)'
+          }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span className="tag">EDIT</span>
-              <h3 className="orbitron text-white font-bold" style={{ fontSize: 16 }}>
-                {t('teams.form.editTitle')}
-              </h3>
+              <span className="tm-tag">EDIT</span>
+              <span className="tm-orb" style={{ color: '#fff', fontSize: 14, fontWeight: 700 }}>Edit Team</span>
             </div>
-            <button className="close-btn" onClick={resetForm}>
-              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
+            <button onClick={resetForm} style={{
+              width: 30, height: 30, borderRadius: 7,
+              background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)',
+              color: '#6b7280', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+              <FaTimes size={13} />
             </button>
           </div>
-          <div style={{ padding: '20px 24px' }}>
-            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <input type="text" name="teamFullName" autoFocus
-                placeholder={t('teams.form.teamName') || 'Team Full Name'}
-                value={form.teamFullName} onChange={handleTeamInputChange} required className="input-cyber" />
-              <input type="text" name="teamTag"
-                placeholder={t('teams.form.teamTag') || 'Team Tag'}
-                value={form.teamTag} onChange={handleTeamInputChange} required className="input-cyber" />
-              <label htmlFor="modal-team-logo-upload" className="input-cyber"
-                style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                <FaUpload size={14} style={{ color: '#4ade80' }} />
-                {t('teams.form.uploadLogo')}
-              </label>
-              <input id="modal-team-logo-upload" type="file" accept="image/*"
-                onChange={handleLogoUpload} style={{ display: 'none' }} />
-              {form.logo && (
-                <img src={form.logo} alt="Logo"
-                  style={{ width: 68, height: 68, objectFit: 'contain', borderRadius: 10,
-                    border: '1px solid rgba(74,222,128,0.4)', alignSelf: 'center' }}
-                  loading="lazy" onError={(e) => e.currentTarget.src = './logo.png'} />
-              )}
-              <div style={{ fontSize: 10, color: '#4ade80', letterSpacing: 1,
-                fontFamily: 'Orbitron, monospace', marginTop: 4 }}>
-                {t('teams.form.players').toUpperCase()}
-              </div>
-              {playersForm.map((player, index) => (
-                <div key={player._id || index} className="player-form-row">
-                  <input type="text" name="playerName"
-                    placeholder={t('teams.form.playerName')} value={player.playerName}
-                    onChange={(e) => handlePlayerChange(index, e)} required
-                    className="input-cyber" style={{ flex: '1 1 140px', width: 'auto' }} />
-                  <input type="text" name="playerId"
-                    placeholder={t('teams.form.playerId')} value={player.playerId}
-                    onChange={(e) => handlePlayerChange(index, e)}
-                    className="input-cyber" style={{ flex: '0 0 100px', width: 100 }} />
-                  <label htmlFor={`modal-player-photo-${index}`} className="input-cyber"
-                    style={{ flex: '0 0 120px', width: 120, display: 'flex', alignItems: 'center',
-                      gap: 6, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                    <FaUpload size={11} style={{ color: '#4ade80' }} />
-                    {t('teams.form.uploadPhoto')}
-                  </label>
-                  <input id={`modal-player-photo-${index}`} type="file" accept="image/*"
-                    onChange={(e) => handlePlayerPhotoUpload(index, e)} style={{ display: 'none' }} />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
-                    {player.photo && (
-                      <img src={player.photo} alt="Preview"
-                        style={{ width: 34, height: 34, borderRadius: '50%', objectFit: 'cover',
-                          border: '1px solid rgba(74,222,128,0.4)' }}
-                        loading="lazy" onError={(e) => e.currentTarget.src = './def_char.png'} />
-                    )}
-                    {playersForm.length > 1 && (
-                      <button type="button" onClick={() => removePlayerInput(index)}
-                        className="btn-danger" style={{ padding: '6px 9px' }}>
-                        <FaTrash size={11} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-              <button type="button" onClick={addPlayerInput} className="btn-green-ghost"
-                style={{ alignSelf: 'flex-start' }}>
-                + {t('teams.form.addPlayer')}
-              </button>
-              <div style={{ display: 'flex', gap: 10, paddingTop: 8,
-                borderTop: '1px solid rgba(74,222,128,0.12)', marginTop: 4 }}>
-                <button type="button" onClick={resetForm} className="btn-ghost" style={{ flex: 1 }}>
-                  {t('teams.form.cancel')}
-                </button>
-                <button type="submit" className="btn-primary" style={{ flex: 1 }}>
-                  {t('teams.form.updateTeam')}
-                </button>
-              </div>
-            </form>
+          <div style={{ padding: '18px 22px' }}>
+            <FormFields {...fieldProps} />
           </div>
         </div>
       </div>
     );
   }
 
+  // Inline create form
+  if (!showForm) return null;
   return (
-    <div style={{ display: showForm ? 'block' : 'none' }}>
-      <TeamForm form={form} setForm={setForm} playersForm={playersForm} setPlayersForm={setPlayersForm}
-        handleTeamInputChange={handleTeamInputChange} handlePlayerChange={handlePlayerChange}
-        addPlayerInput={addPlayerInput} removePlayerInput={removePlayerInput}
-        handleSubmit={handleSubmit} editingTeamId={editingTeamId} resetForm={resetForm}
-        handleLogoUpload={handleLogoUpload} handlePlayerPhotoUpload={handlePlayerPhotoUpload} />
+    <div className="tm-create-card" style={{ maxWidth: 680 }}>
+      <div className="tm-create-card-hdr">
+        <div style={{ width: 3, height: 18, borderRadius: 2, background: '#a855f7', boxShadow: '0 0 8px rgba(168,85,247,0.6)' }} />
+        <span className="tm-tag">NEW</span>
+        <span className="tm-orb" style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>Create Team</span>
+      </div>
+      <div className="tm-create-card-body">
+        <FormFields {...fieldProps} />
+      </div>
     </div>
   );
 });
 
-/* ─────────────────────────────────────────────
-   Teams — root
-───────────────────────────────────────────── */
+// ── Teams root ────────────────────────────────────────────────────────────────
 const Teams: React.FC = () => {
   const { t } = useTranslation();
   const [teams, setTeams] = useState<Team[]>([]);
@@ -722,8 +740,8 @@ const Teams: React.FC = () => {
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [deletingPlayerIds, setDeletingPlayerIds] = useState<Set<string>>(new Set());
   const [deletingTeamIds, setDeletingTeamIds] = useState<Set<string>>(new Set());
+  const [deletingPlayerIds, setDeletingPlayerIds] = useState<Set<string>>(new Set());
 
   const deletingTeamIdsRef = React.useRef(deletingTeamIds);
   const deletingPlayerIdsRef = React.useRef(deletingPlayerIds);
@@ -743,7 +761,7 @@ const Teams: React.FC = () => {
   const visibleTeams = useMemo(() => {
     if (!searchQuery) return teams;
     const q = searchQuery.toLowerCase();
-    return teams.filter((t) =>
+    return teams.filter(t =>
       t.teamFullName.toLowerCase().includes(q) || t.teamTag.toLowerCase().includes(q)
     );
   }, [teams, searchQuery]);
@@ -762,97 +780,104 @@ const Teams: React.FC = () => {
   const deleteTeam = useCallback(async (id: string) => {
     if (!window.confirm('Delete this team?')) return;
     if (deletingTeamIdsRef.current.has(id)) return;
-    setDeletingTeamIds((prev) => new Set(prev).add(id));
-    setTeams((prev) => prev.filter((t) => t._id !== id));
+    setDeletingTeamIds(prev => new Set(prev).add(id));
+    setTeams(prev => prev.filter(t => t._id !== id));
     try { await api.delete(`/teams/${id}`); }
-    catch (err) { alert('Failed to delete team'); console.error(err); fetchTeams(); }
-    finally { setDeletingTeamIds((prev) => { const c = new Set(prev); c.delete(id); return c; }); }
+    catch { alert('Failed to delete team'); fetchTeams(); }
+    finally { setDeletingTeamIds(prev => { const c = new Set(prev); c.delete(id); return c; }); }
   }, [fetchTeams]);
 
   const deletePlayer = useCallback(async (teamId: string, playerId: string) => {
     if (!window.confirm('Delete this player?')) return;
     if (deletingPlayerIdsRef.current.has(playerId)) return;
-    setDeletingPlayerIds((prev) => new Set(prev).add(playerId));
+    setDeletingPlayerIds(prev => new Set(prev).add(playerId));
     try {
       await api.delete(`/teams/${teamId}/players/${playerId}`);
-      // ✅ Update parent state immediately so the card re-renders with player removed
-      setTeams((prev) => prev.map((t) =>
-        t._id === teamId ? { ...t, players: t.players.filter((p) => p._id !== playerId) } : t
+      setTeams(prev => prev.map(t =>
+        t._id === teamId ? { ...t, players: t.players.filter(p => p._id !== playerId) } : t
       ));
-    } catch (err) { alert('Failed to delete player'); console.error(err); }
-    finally { setDeletingPlayerIds((prev) => { const c = new Set(prev); c.delete(playerId); return c; }); }
+    } catch { alert('Failed to delete player'); }
+    finally { setDeletingPlayerIds(prev => { const c = new Set(prev); c.delete(playerId); return c; }); }
   }, []);
 
-  // ✅ Root owns the API call + state update; TeamCard just clears its local selection
   const deleteSelectedPlayers = useCallback(async (teamId: string, playerIds: string[]) => {
     try {
       await api.delete(`/teams/${teamId}/players`, { data: { playerIds } });
-      // ✅ This triggers TeamCard to re-render with updated players prop,
-      //    which triggers the useEffect that prunes stale selected ids
-      setTeams((prev) => prev.map((t) =>
-        t._id === teamId
-          ? { ...t, players: t.players.filter((p) => !playerIds.includes(p._id!)) }
-          : t
+      setTeams(prev => prev.map(t =>
+        t._id === teamId ? { ...t, players: t.players.filter(p => !playerIds.includes(p._id!)) } : t
       ));
-    } catch (err) {
+    } catch {
       alert('Failed to delete selected players');
-      console.error(err);
-      throw err; // re-throw so TeamCard's catch fires and does NOT clear selection
+      throw new Error('delete failed');
     }
   }, []);
 
   return (
-    <div className="cyber-root min-h-screen"
-      style={{ background: 'linear-gradient(135deg, #052005 0%, #000000 50%, #052005 100%)' }}>
-      <style>{CYBER_STYLES}</style>
-
-      <div className="scan-line" />
-      <div className="hex-bg" />
-      <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0,
-        background: 'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(74,222,128,0.09), transparent)' }} />
+    <div className="tm-root" style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #120038 0%, #000000 50%, #120038 100%)'
+    }}>
+      <style>{STYLES}</style>
+      <div className="tm-scan" />
+      <div className="tm-hex" />
+      <div style={{
+        position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0,
+        background: 'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(168,85,247,0.1), transparent)'
+      }} />
 
       {/* ── SIDEBAR ── */}
       <div style={{
         position: 'fixed', left: 0, top: 0, height: '100%', width: 78, zIndex: 50,
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         padding: '24px 0', gap: 8,
-        background: 'rgba(0,0,0,0.88)', borderRight: '1px solid rgba(74,222,128,0.2)',
-        backdropFilter: 'blur(24px)', boxShadow: '4px 0 24px rgba(0,0,0,0.6)'
+        background: 'rgba(0,0,0,0.88)',
+        borderRight: '1px solid #120038',
+        backdropFilter: 'blur(24px)',
+        boxShadow: '4px 0 24px rgba(0,0,0,0.6), inset -1px 0 0 rgba(168,85,247,0.08)'
       }}>
-        <div style={{ width: 40, height: 40, borderRadius: 12, marginBottom: 8,
+        <div style={{
+          width: 40, height: 40, borderRadius: 12, marginBottom: 8,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          border: '1px solid rgba(74,222,128,0.45)', background: 'rgba(74,222,128,0.08)',
-          boxShadow: '0 0 10px rgba(74,222,128,0.18)' }}>
-          <img src="./logo.png" alt="logo" style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 6 }} />
+          background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.25)'
+        }}>
+          <img src="./logo.avif" alt="logo" style={{ width: 36, height: 36, objectFit: 'contain', borderRadius: 8 }} />
         </div>
+
         {user && (
-          <div style={{ width: 50, padding: '4px 2px', borderRadius: 8, marginBottom: 4,
-            background: 'rgba(74,222,128,0.07)', border: '1px solid rgba(74,222,128,0.2)',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%',
-              background: '#4ade80', boxShadow: '0 0 6px #4ade80' }} />
-            <span style={{ fontSize: 9, color: '#4ade80', letterSpacing: '0.5px', fontWeight: 700,
+          <div style={{
+            width: 50, padding: '4px 2px', borderRadius: 8, marginBottom: 4,
+            background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3
+          }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'yellow', boxShadow: '0 0 6px yellow' }} />
+            <span style={{
+              fontSize: 9, color: 'yellow', letterSpacing: '0.5px', fontWeight: 700,
               maxWidth: 46, overflow: 'hidden', textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap', textAlign: 'center', padding: '0 3px' }}>
+              whiteSpace: 'nowrap', textAlign: 'center', padding: '0 3px'
+            }}>
               {user.username}
             </span>
           </div>
         )}
-        <div style={{ width: 40, height: 1, background: 'rgba(74,222,128,0.2)', margin: '2px 0 6px' }} />
-        <button className="sidebar-btn" onClick={() => (window.location.href = '/dashboard')}>
+
+        <div style={{ width: 40, height: 1, background: 'rgba(168,85,247,0.2)', margin: '2px 0 6px' }} />
+
+        <button className="tm-sidebar-btn" onClick={() => window.location.href = '/dashboard'}>
           <FaTrophy size={20} />
           <span style={{ fontSize: 10, marginTop: 4, letterSpacing: '0.5px', fontWeight: 600 }}>TOUR</span>
         </button>
-        <button className="sidebar-btn active">
+        <button className="tm-sidebar-btn active">
           <FaUsers size={20} />
           <span style={{ fontSize: 10, marginTop: 4, letterSpacing: '0.5px', fontWeight: 600 }}>TEAMS</span>
         </button>
-        <button className="sidebar-btn" onClick={() => window.open('/displayhud', '_blank', 'noopener,noreferrer')}>
+        <button className="tm-sidebar-btn" onClick={() => window.open('/displayhud', '_blank', 'noopener,noreferrer')}>
           <FaEye size={20} />
           <span style={{ fontSize: 10, marginTop: 4, letterSpacing: '0.5px', fontWeight: 600 }}>HUD</span>
         </button>
+
         <div style={{ flex: 1 }} />
-        <button className="sidebar-btn"
+
+        <button className="tm-sidebar-btn"
           onClick={() => window.open('https://discord.com/channels/623776491682922526/1426117227257663558', '_blank')}>
           <FaDiscord size={20} />
           <span style={{ fontSize: 10, marginTop: 4, letterSpacing: '0.5px', fontWeight: 600 }}>HELP</span>
@@ -860,68 +885,92 @@ const Teams: React.FC = () => {
       </div>
 
       {/* ── MAIN ── */}
-      <main style={{ marginLeft: 78, padding: '32px 28px', position: 'relative', zIndex: 1 }}>
-        <div style={{ marginBottom: 28 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-            <span className="tag">TEAMS</span>
+      <main style={{ marginLeft: 78, padding: '32px 28px', position: 'relative', zIndex: 1, maxWidth: 1200 }}>
+
+        {/* Page header */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+            <span className="tm-tag">TEAMS</span>
           </div>
-          <h2 className="orbitron font-black text-white"
-            style={{ fontSize: 26, letterSpacing: 1, marginBottom: 4 }}>
+          <h2 className="tm-orb" style={{ fontSize: 26, fontWeight: 900, color: '#fff', letterSpacing: 1, marginBottom: 4 }}>
             {t('teams.header.title')}
           </h2>
           <p style={{ color: '#6b7280', fontSize: 14 }}>{t('teams.header.subtitle')}</p>
         </div>
 
-        <button className="btn-primary" style={{ padding: '12px 28px', marginBottom: 28 }}
+        <button className="tm-btn-primary" style={{ padding: '12px 28px', marginBottom: 28 }}
           onClick={handleAddTeamClick}>
-          {showForm ? t('teams.form.cancel') : `+ ${t('dashboard.nav.teams')}`}
+          {showForm ? 'CANCEL' : '+ CREATE TEAM'}
         </button>
 
-        <FormContainer showForm={showForm} setShowForm={setShowForm}
+        {/* Create form */}
+        <FormContainer
+          showForm={showForm} setShowForm={setShowForm}
           editingTeamId={editingTeamId} setEditingTeamId={setEditingTeamId}
-          teams={teams} setTeams={setTeams} />
+          teams={teams} setTeams={setTeams}
+        />
 
-        <div style={{ marginBottom: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-            <span className="tag">ROSTER</span>
-            <h3 className="orbitron font-bold text-white" style={{ fontSize: 15 }}>
-              {t('dashboard.nav.teams')}
-            </h3>
-            <span style={{ marginLeft: 'auto', fontSize: 12, color: '#4b5563',
-              fontFamily: 'Orbitron, monospace' }}>
+        {/* Roster section */}
+        <div style={{ marginBottom: 16 }}>
+          {/* Section header + search inline */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 3, height: 18, borderRadius: 2, background: '#a855f7', boxShadow: '0 0 8px rgba(168,85,247,0.6)' }} />
+              <span className="tm-tag">ROSTER</span>
+              <span className="tm-orb" style={{ color: '#fff', fontSize: 14, fontWeight: 700 }}>
+                All Teams
+              </span>
+            </div>
+            <SearchInput onSearchChange={handleSearchChange} />
+            <span className="tm-orb" style={{ fontSize: 11, color: '#4b5563', marginLeft: 'auto' }}>
               {visibleTeams.length} / {teams.length}
             </span>
           </div>
-          <SearchInput onSearchChange={handleSearchChange} />
+
+          {/* Stats strip */}
+          <div style={{
+            display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap'
+          }}>
+            {[
+              { label: 'TOTAL TEAMS', value: teams.length },
+              { label: 'TOTAL PLAYERS', value: teams.reduce((s, t) => s + t.players.length, 0) },
+              { label: 'AVG SQUAD SIZE', value: teams.length ? (teams.reduce((s, t) => s + t.players.length, 0) / teams.length).toFixed(1) : '—' },
+            ].map(stat => (
+              <div key={stat.label} style={{
+                background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(168,85,247,0.15)',
+                borderRadius: 10, padding: '10px 18px', display: 'flex', flexDirection: 'column', gap: 2
+              }}>
+                <span style={{ fontFamily: 'Orbitron, monospace', fontSize: 8, color: '#6b7280', letterSpacing: '2px' }}>
+                  {stat.label}
+                </span>
+                <span className="tm-orb" style={{ fontSize: 20, fontWeight: 900, color: '#a855f7' }}>
+                  {stat.value}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
 
+        {/* Team list */}
         {visibleTeams.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '64px 24px' }}>
-            <div style={{ width: 72, height: 72, borderRadius: '50%', margin: '0 auto 20px',
-              background: 'rgba(74,222,128,0.07)', border: '1px solid rgba(74,222,128,0.25)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 0 20px rgba(74,222,128,0.1)' }}>
-              <FaUsers size={28} style={{ color: '#4ade80', opacity: 0.6 }} />
+          <div className="tm-empty">
+            <div className="tm-empty-icon-wrap">
+              <FaUsers size={28} style={{ color: '#a855f7', opacity: 0.6 }} />
             </div>
-            <h3 className="orbitron font-bold text-white" style={{ fontSize: 17, marginBottom: 8 }}>
+            <h3 className="tm-orb" style={{ fontSize: 16, color: '#fff', marginBottom: 8 }}>
               {t('teams.messages.noTeams')}
             </h3>
             <p style={{ color: '#6b7280', marginBottom: 24, fontSize: 14 }}>
               {t('teams.messages.createFirst')}
             </p>
-            <button className="btn-primary" style={{ padding: '12px 32px' }}
-              onClick={() => setShowForm(true)}>
-              + {t('dashboard.nav.teams')}
+            <button className="tm-btn-primary" style={{ padding: '12px 32px' }} onClick={() => setShowForm(true)}>
+              + CREATE TEAM
             </button>
           </div>
         ) : (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
-            gap: 18
-          }}>
-            {visibleTeams.map((team) => (
-              <TeamCard
+          <div>
+            {visibleTeams.map(team => (
+              <TeamRow
                 key={team._id}
                 team={team}
                 onEdit={startEditTeam}

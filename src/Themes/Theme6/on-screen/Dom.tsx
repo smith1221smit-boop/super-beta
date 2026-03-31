@@ -137,9 +137,9 @@ function detectAlert(
       const cur  = p.killNum || 0;
       const prev = snapKills[p.playerName] ?? 0;
       if (cur > prev) {
-        if (cur >= 8 && prev < 8) return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: '7. SKOR' };
-        if (cur >= 5 && prev < 5) return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: '5. SKOR' };
-        if (cur >= 3 && prev < 3) return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: '3. SKOR' };
+        if (cur >= 8 && prev < 8) return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'UNSTOPABLE' };
+        if (cur >= 5 && prev < 5) return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'RAMPAGE' };
+        if (cur >= 3 && prev < 3) return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'DOMINATION' };
       }
     }
   }
@@ -179,7 +179,7 @@ function detectAlert(
       const cur  = p.gotAirDropNum || 0;
       const prev = snapAirdrop[p.playerName] ?? 0;
       if (cur > prev) {
-        return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'AİRDROP AÇTI' };
+        return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'AIRDROP LOOTED' };
       }
     }
   }
@@ -196,7 +196,7 @@ function detectAlert(
       const curBracket  = Math.floor(cur  / 600);
       const prevBracket = Math.floor(prev / 600);
       if (curBracket > prevBracket && cur >= 600) {
-        return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: '600 HASAR' };
+        return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: '600+ DAMAGE' };
       }
     }
   }
@@ -209,7 +209,7 @@ function detectAlert(
       const curCm   = p.maxKillDistance || 0;
       const prevCm  = snapDistance[p.playerName] ?? 0;
       if (curCm >= 30000 && prevCm < 30000) {
-        return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: '300m SKORU' };
+        return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: '300m KILL' };
       }
     }
   }

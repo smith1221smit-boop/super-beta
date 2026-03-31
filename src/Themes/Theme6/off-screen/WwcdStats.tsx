@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import SocketManager from '../../../dashboard/socketManager.tsx';
-
+import { FaSkull, FaHeartbeat, FaBomb, FaBullseye  } from 'react-icons/fa';
 interface Tournament {
   _id: string;
   tournamentName: string;
@@ -31,6 +31,7 @@ interface Player {
   killNum: number;
   bHasDied: boolean;
   picUrl?: string;
+  heal?: number;
   damage?: string | number;
   survivalTime?: number;
   assists?: number;
@@ -329,8 +330,8 @@ DAY {round?.day} MATCH {match?.matchNo}
 </div>
 
 <div className='absolute left-[140px] top-[200px]  w-[500px] h-[750px]'>
-<div className='w-[300px] h-[300px] absolute left-[100px]'>
-  <img src={winner?.teamLogo} alt="" className='w-[100%] h-[100%]'/>
+<div className='w-[300px] h-[300px] absolute left-[80px]'>
+  <img src={winner?.teamLogo} alt="" className='w-[100%] h-[100%] bg-[#0000009b]'/>
 </div>
 <div 
 
@@ -359,12 +360,12 @@ className='text-white font-[AGENCYB] text-[100px] absolute left-[136px] top-[520
 </div>
 <div className='w-[1400px] h-[800px]  absolute left-[520px] top-[180px] flex'>
 {winner?.players?.map((player, index) => (
-  <div key={player._id} className='w-[353px] h-[110%] bg-white ml-[20px]'>
+  <div key={player._id} className='w-[353px] h-[106%] bg-[#000000c8] ml-[20px]'>
   <div
   style={{
     backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)`,
   }}
-  className="w-full h-[400px] relative overflow-hidden rounded-lg"
+  className="w-full h-[400px] relative overflow-hidden "
 >
   <img
     src={player?.picUrl || "/def_char.png"}
@@ -384,59 +385,76 @@ className='text-white font-[AGENCYB] text-[100px] absolute left-[136px] top-[520
     <div className='text-white text-[58px] '>{player?.playerName}</div>
     
    </div>
-   <div
-   style={{
-   backgroundImage: `linear-gradient(135deg, ${
-  tournament.primaryColor || '#000'
-}, #000)`
-
-  }}
-    className='w-[99%] h-[70px] m-[2px] bg-black'>
-<div className='text-white font-[AGENCYB] flex items-center justify-around h-[83%] text-[3rem] w-[300px]'>
- <div>DAMAGE</div>
- <div>{player?.damage}</div>
-</div>
-  
+  <div className="flex flex-col w-[99%] mx-[2px] gap-4">
+  {/* DAMAGE */}
+  <div
+    style={{
+      backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)`,
+    }}
+    className="w-full h-[70px] flex items-center px-4"
+  >
+    <div className="flex items-center gap-4 w-[300px] h-[83%]">
+      <FaSkull className="text-white text-[2.5rem]" />
+      <div className="flex justify-between w-full text-white font-[AGENCYB] text-[3rem]">
+        <span>DAMAGE</span>
+        <span>{player?.damage}</span>
+      </div>
     </div>
-      <div
-   style={{
-   backgroundImage: `linear-gradient(135deg, ${
-  tournament.primaryColor || '#000'
-}, #000)`
+  </div>
 
-  }}
-    className='w-[99%] h-[70px] m-[2px] bg-black mt-[30px]'>
-      <div className='text-white font-[AGENCYB] flex items-center justify-around h-[83%] text-[3rem] w-[300px]'>
- <div>ELIMS</div>
- <div>{player?.killNum}</div>
-</div>
+  {/* ELIMS */}
+  <div
+    style={{
+      backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)`,
+    }}
+    className="w-full h-[70px] flex items-center px-4"
+  >
+    <div className="flex items-center gap-4 w-[300px] h-[83%]">
+      <FaBullseye  className="text-white text-[2.5rem]" />
+      <div className="flex justify-between w-full text-white font-[AGENCYB] text-[3rem]">
+        <span>ELIMS</span>
+        <span>{player?.killNum}</span>
+      </div>
     </div>
-      <div
-   style={{
-   backgroundImage: `linear-gradient(135deg, ${
-  tournament.primaryColor || '#000'
-}, #000)`
+  </div>
 
-  }}
-    className='w-[99%] h-[70px] m-[2px] bg-black mt-[30px]'>
-     <div className='text-white font-[AGENCYB] flex items-center justify-around h-[83%] text-[3rem] w-[300px]'>
-<div>THORWABLE</div>
-<div>{(player?.useSmokeGrenadeNum || 0) + (player?.useFragGrenadeNum || 0) + (player?.useBurnGrenadeNum || 0) + (player?.useFlashGrenadeNum || 0)}</div>
-</div>
+  {/* THROWABLE */}
+  <div
+    style={{
+      backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)`,
+    }}
+    className="w-full h-[70px] flex items-center px-4"
+  >
+    <div className="flex items-center gap-4 w-[300px] h-[83%]">
+      <FaBomb className="text-white text-[2.5rem]" />
+      <div className="flex justify-between w-full text-white font-[AGENCYB] text-[3rem]">
+        <span>THROWABLE</span>
+        <span>
+          {(player?.useSmokeGrenadeNum || 0) +
+            (player?.useFragGrenadeNum || 0) +
+            (player?.useBurnGrenadeNum || 0) +
+            (player?.useFlashGrenadeNum || 0)}
+        </span>
+      </div>
     </div>
-      <div
-   style={{
-   backgroundImage: `linear-gradient(135deg, ${
-  tournament.primaryColor || '#000'
-}, #000)`
+  </div>
 
-  }}
-    className='w-[99%] h-[70px] m-[2px] bg-black mt-[30px]'>
-      <div className='text-white font-[AGENCYB] flex items-center justify-around h-[83%] text-[3rem] w-[300px]'>
- <div>DAMAGE</div>
- <div>{player?.damage}</div>
-</div>
+  {/* HEAL */}
+  <div
+    style={{
+      backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)`,
+    }}
+    className="w-full h-[70px] flex items-center px-4"
+  >
+    <div className="flex items-center gap-4 w-[300px] h-[83%]">
+      <FaHeartbeat className="text-white text-[2.5rem]" />
+      <div className="flex justify-between w-full text-white font-[AGENCYB] text-[3rem]">
+        <span>HEAL</span>
+        <span>{player?.heal}</span>
+      </div>
     </div>
+  </div>
+</div>
   </div>
   
   

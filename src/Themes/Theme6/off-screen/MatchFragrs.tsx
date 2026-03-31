@@ -136,7 +136,7 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
   }
 
   return (
-    <div className="w-[1920px] h-[1080px] relative bg-green-900">
+    <div className="w-[1920px] h-[1080px] relative ">
       {/* Header */}
       <div
         style={{
@@ -210,8 +210,8 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
             )}
 
             {/* Player Name */}
-            <div className="w-full bg-black h-[80px] absolute top-[280px] flex items-center justify-center z-20">
-              <div className="text-[50px]" style={{ color: tournament.primaryColor }}>
+            <div className="w-full bg-black h-[80px] text-white absolute top-[280px] flex items-center justify-center z-20">
+              <div className="text-[50px]" >
                 {player.playerName.toUpperCase()}
               </div>
             </div>

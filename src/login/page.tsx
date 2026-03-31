@@ -112,41 +112,51 @@ const Login: React.FC = () => {
 
 
 return (
-  <div className="min-h-screen bg-black flex items-center justify-center relative overflow-hidden">
-    
-    {/* Background glow effects */}
-    <div className="absolute w-[500px] h-[500px] bg-green-500/20 blur-[120px] top-[-100px] left-[-100px] animate-pulse"></div>
-    <div className="absolute w-[400px] h-[400px] bg-green-700/20 blur-[120px] bottom-[-100px] right-[-100px] animate-pulse"></div>
+  <div className="min-h-screen bg-gradient-to-br from-[#0b0014] via-[#140024] to-[#1f0033] flex items-center justify-center relative overflow-hidden">
 
-    {/* Main container */}
-    <div className="w-full max-w-5xl grid md:grid-cols-2 bg-black/70 backdrop-blur-xl border border-green-700/30 rounded-2xl shadow-2xl overflow-hidden">
+    {/* Background glow */}
+    <div className="absolute w-[600px] h-[600px] bg-purple-500/20 blur-[140px] top-[-150px] left-[-150px] animate-pulse"></div>
+    <div className="absolute w-[500px] h-[500px] bg-pink-500/20 blur-[140px] bottom-[-150px] right-[-150px] animate-pulse"></div>
 
-      {/* Left esports panel */}
-      <div className="hidden md:flex flex-col justify-center items-center bg-gradient-to-br from-green-900/40 to-black p-10 relative">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,255,150,0.15),transparent_70%)]"></div>
+    {/* Main Card */}
+    <div className="w-full max-w-6xl grid md:grid-cols-2 bg-black/40 backdrop-blur-2xl border border-purple-500/20 rounded-3xl shadow-2xl overflow-hidden">
+
+      {/* Left Branding Panel */}
+      <div className="hidden md:flex flex-col justify-center items-center bg-gradient-to-br from-purple-900/40 via-purple-800/20 to-black p-12 relative">
+
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(168,85,247,0.25),transparent_70%)]"></div>
 
         <img
-          src="./file.jpg"
+          src="./logo.avif"
           alt="logo"
-          className="w-24 h-24 mb-6 z-10 drop-shadow-[0_0_15px_rgba(0,255,150,0.6)]"
+          className="w-28 h-28 mb-6 z-10 drop-shadow-[0_0_25px_rgba(168,85,247,0.8)]"
         />
 
-       
+        <h2 className="text-3xl font-bold text-purple-400 z-10">
+          SCORE SYNC
+        </h2>
 
-        <p className="text-gray-400 text-center mt-3 text-sm z-10">
-          Real-time esports control panel & analytics
+        <p className="text-gray-400 text-center mt-4 text-sm z-10 max-w-xs">
+          Real-time esports tournament control system with live analytics,
+          automation and smart match tracking.
         </p>
+
+        <div className="mt-10 text-purple-300 text-xs z-10">
+          Powered by Advanced Tournament Engine
+        </div>
       </div>
 
-      {/* Right login panel */}
-      <div className="p-8 md:p-10">
-        
+      {/* Right Login Panel */}
+      <div className="p-10 md:p-12 flex flex-col justify-center">
+
         {/* Title */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-green-400 mb-2">
-          WELCOME 
+        <div className="mb-10">
+          <h1 className="text-3xl font-bold text-purple-400 mb-2">
+            Welcome Back 👋
           </h1>
-         
+          <p className="text-gray-400 text-sm">
+            Login to continue to your dashboard
+          </p>
         </div>
 
         {error && (
@@ -155,10 +165,11 @@ return (
           </div>
         )}
 
-        <form onSubmit={handleLogin} className="space-y-5">
-          
+        <form onSubmit={handleLogin} className="space-y-6">
+
           {/* Email */}
-          <div className="group">
+          <div>
+            <label className="text-sm text-gray-400">Email</label>
             <input
               type="email"
               placeholder={t('login.emailPlaceholder')}
@@ -166,12 +177,13 @@ return (
               onChange={(e) => setEmail(e.target.value)}
               disabled={loading}
               required
-              className="w-full px-4 py-3 bg-black/60 border border-green-700/30 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500 transition-all duration-300 group-hover:border-green-500"
+              className="mt-2 w-full px-4 py-3 bg-black/50 border border-purple-500/30 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
             />
           </div>
 
           {/* Password */}
-          <div className="group">
+          <div>
+            <label className="text-sm text-gray-400">Password</label>
             <input
               type="password"
               placeholder={t('login.passwordPlaceholder')}
@@ -179,24 +191,19 @@ return (
               onChange={(e) => setPassword(e.target.value)}
               disabled={loading}
               required
-              className="w-full px-4 py-3 bg-black/60 border border-green-700/30 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500 transition-all duration-300 group-hover:border-green-500"
+              className="mt-2 w-full px-4 py-3 bg-black/50 border border-purple-500/30 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
             />
           </div>
 
-          <div className="flex justify-end">
-            <a href="/forgot-password" className="text-xs text-green-400 hover:text-green-300">
-              {t('login.forgotPassword')}
-            </a>
-          </div>
 
           {/* Button */}
           <button
             type="submit"
             disabled={loading}
-            className={`w-full py-3 rounded-lg font-semibold text-white tracking-wide transition-all duration-300 ${
+            className={`w-full py-3 rounded-xl font-semibold text-white tracking-wide transition-all duration-300 ${
               loading
-                ? "bg-green-900 opacity-50 cursor-not-allowed"
-                : "bg-green-600 hover:bg-green-700 hover:shadow-[0_0_20px_rgba(0,255,150,0.5)]"
+                ? "bg-purple-900 opacity-50 cursor-not-allowed"
+                : "bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 hover:shadow-[0_0_25px_rgba(168,85,247,0.7)]"
             }`}
           >
             {loading ? t('login.signingIn') : t('login.signIn')}
@@ -204,7 +211,9 @@ return (
         </form>
 
         {/* Footer */}
-       
+        <div className="mt-10 text-center text-gray-500 text-xs">
+          © 2026 ScoreSync. All rights reserved.
+        </div>
       </div>
     </div>
   </div>

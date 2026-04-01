@@ -257,7 +257,7 @@ const MatchSummary: React.FC<MatchSummaryProps> = ({
   },
   {
     header: 'LONGEST DIST. ELIMS',
-    value: `${((stats?.longestDistElim || 0) / 100).toFixed(0)}m`,
+    value: `${((stats?.longestDistElim || 0)).toFixed(0)}m`,
     image: '/theme4assets/longest dist elims.webp'
   },
   {

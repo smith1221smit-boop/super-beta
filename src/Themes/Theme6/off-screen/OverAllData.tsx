@@ -69,7 +69,9 @@ const previousTotalsRef = useRef<Map<string, number>>(new Map());
   const teamsPerPage = 8;
 
   // Pagination logic
-  const totalPages = processedOverallData && processedOverallData.teams.length > 16 ? 2 : 1;
+  const totalPages = processedOverallData
+  ? Math.ceil(processedOverallData.teams.length / teamsPerPage)
+  : 1;
 
   useEffect(() => {
     if (totalPages <= 1) return;

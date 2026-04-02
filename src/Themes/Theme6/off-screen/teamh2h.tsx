@@ -32,6 +32,7 @@ interface Player {
   knockouts?: number;
   damage?: number;
   picUrl?: string;
+  heal?: number;
 }
 
 interface Team {
@@ -69,7 +70,8 @@ const TeamH2H: React.FC<TeamH2HProps> = ({ tournament, round, match, matchData }
       const totalKills = team.players.reduce((sum, p) => sum + Number(p.killNum || 0), 0);
       const totalDamage = team.players.reduce((sum, p) => sum + Number(p.damage || 0), 0);
       const total = Number(team.placePoints || 0) + totalKills;
-      return { ...team, total, totalKills, totalDamage,knockouts };
+        const totalHeal = team.players.reduce((sum, p) => sum + Number(p.heal || 0), 0);
+      return { ...team, total, totalKills, totalDamage,knockouts,totalHeal };
     });
 
     enriched.sort((a, b) => b.total - a.total);
@@ -155,7 +157,7 @@ className='font-[AGENCYB] text-[30px] bg-white'>
           }}
   className='bg-white w-[200px] h-[185px] border-2 border-black flex items-center justify-center flex-col'>
     TOTAL HEALS
-      <span className='text-[4rem] mt-[-20px]'>{first.totalDamage}</span>
+      <span className='text-[4rem] mt-[-20px]'>{first.totalHeal}</span>
   </div>
 
   <div
@@ -175,14 +177,14 @@ className='font-[AGENCYB] text-[30px] bg-white'>
    style={{
       backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)`,
     }}
-className='w-[590px] h-[100%] absolute left-[0%] flex items-end '>
+className='w-[590px] h-[100%] absolute left-[0%] flex items-center '>
 
-<img src={first.teamLogo} alt="" className='absolute top-[0px]'/>
+<img src={first.teamLogo} alt="" className=''/>
   <div
     style={{
       backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)`,
     }}
-  className='w-[100%] h-[20%] border-[2px] border-solid border-white font-[AGENCYB] text-white text-[80px] text-center'>
+  className='w-[100%] h-[20%] border-[2px] border-solid border-white font-[AGENCYB] text-white text-[80px] text-center absolute top-[600px]'>
 
     {first.teamName}
   </div>
@@ -243,7 +245,7 @@ className='font-[AGENCYB] text-[30px] bg-white'>
           }}
   className='bg-white w-[200px] h-[185px] border-2 border-black flex items-center justify-center flex-col'>
     TOTAL HEALS
-      <span className='text-[4rem] mt-[-20px]'>{second.totalDamage}</span>
+      <span className='text-[4rem] mt-[-20px]'>{second.totalHeal}</span>
   </div>
 
   <div
@@ -262,14 +264,14 @@ className='font-[AGENCYB] text-[30px] bg-white'>
   style={{
       backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)`,
     }}
-className='bg-slate-400 w-[600px] h-[100%] absolute right-[0%] flex items-end '>
+className='w-[590px] h-[100%] absolute right-[0%] flex items-center '>
 
-<img src={second.teamLogo} alt="" className='absolute top-[0px]'/>
+<img src={second.teamLogo} alt="" className='absolute top-[0px] '/>
   <div 
     style={{
       backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, #000)`,
     }}
-  className='bg-white w-[100%] h-[20%] border-[2px] border-solid border-white font-[AGENCYB] text-white text-[80px] text-center'>
+  className='w-[100%] h-[20%] border-[2px] border-solid border-white font-[AGENCYB] text-white text-[80px] text-center absolute top-[600px]'>
 
     {second.teamName}
   </div>

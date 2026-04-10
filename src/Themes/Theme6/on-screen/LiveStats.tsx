@@ -690,40 +690,41 @@ const LiveStats: React.FC<LiveStatsProps> = ({
   }, [propOverallData]);
 
   // ── Sorted teams ──────────────────────────────
-  const sortedTeams = useMemo(() => {
-    if (!matchData) return [];
+const sortedTeams = useMemo(() => {
+  if (!matchData) return [];
 
-    return matchData.teams
-      .map(team => {
-        const teamKey =
-          (team as any).teamId?.toString?.() ??
-          team._id?.toString?.() ??
-          team._id;
+  return matchData.teams
+    .map(team => {
+      const teamKey =
+        (team as any).teamId?.toString?.() ??
+        team._id?.toString?.() ??
+        team._id;
 
-        const totalPoints = overallMap.get(teamKey) ?? 0;
+      const totalPoints = overallMap.get(teamKey) ?? 0;
 
-        const totalKills = team.players.reduce(
-          (sum, p) => sum + (p.killNum || 0),
-          0
-        );
-
-        const isAllDead = team.players.every(
-          p => p.liveState === 5 || p.bHasDied
-        );
-
-        const hasOutsideBlueCircle = team.players.some(
-          p => p.isOutsideBlueCircle === true
-        );
-
-        return { ...team, totalKills, totalPoints, isAllDead, hasOutsideBlueCircle } as any;
-      })
-      .sort((a: any, b: any) =>
-        b.totalKills !== a.totalKills
-          ? b.totalKills - a.totalKills
-          : b.totalPoints - a.totalPoints
+      const totalKills = team.players.reduce(
+        (sum, p) => sum + (p.killNum || 0),
+        0
       );
-  }, [matchData, overallMap]);
 
+      const isAllDead = team.players.every(
+        p => p.liveState === 5 || p.bHasDied
+      );
+
+      const hasOutsideBlueCircle = team.players.some(
+        p => p.isOutsideBlueCircle === true
+      );
+
+      return {
+        ...team,
+        totalKills,
+        totalPoints,
+        isAllDead,
+        hasOutsideBlueCircle,
+      } as any;
+    })
+    .sort((a: any, b: any) => b.totalPoints - a.totalPoints); // ✅ only overall
+}, [matchData, overallMap]);
   // ── Layout constants ──────────────────────────
   const { baseRowHeight, baseHealthBar, scaleY } = useMemo(() => {
     const listTopOffset = 250;

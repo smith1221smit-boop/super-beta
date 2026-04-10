@@ -309,7 +309,7 @@ const EliminatedOverlay = memo(
               whiteSpace: 'nowrap',
             }}
           >
-            ELENDİ
+            ELIMINATED
           </span>
         </div>
       </div>

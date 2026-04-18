@@ -522,9 +522,12 @@ const AnimatedTeamRow = ({
             {team.totalPoints}
           </div>
 
+<div className="w-[0px] flex items-center justify-center text-center">
+            + 
+          </div>
           {/* Live Kills — real-time */}
           <div className="w-[60px] flex items-center justify-center text-white text-center">
-            {team.totalKills}
+           {team.totalKills}
           </div>
         </div>
 

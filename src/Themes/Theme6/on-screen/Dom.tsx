@@ -123,7 +123,7 @@ function detectAlert(
     for (const team of md.teams) {
       for (const p of team.players) {
         if ((p.killNum || 0) === 1 && (snapKills[p.playerName] ?? 0) === 0) {
-          return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'İLK KAN' };
+          return { ...p, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'FIRST BLOOD' };
         }
       }
     }

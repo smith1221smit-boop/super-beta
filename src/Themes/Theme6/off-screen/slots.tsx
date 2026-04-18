@@ -174,7 +174,7 @@ const Slots: React.FC<SlotsProps> = ({
                 <rect
                   width={boxW}
                   height={boxH}
-                  fill="white"
+                  fill="rgba(0, 0, 0, 0.82)"
                   clipPath={`url(#clip_${index})`}
                 />
 

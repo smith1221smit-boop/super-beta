@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import api from '../../../login/api';
 import { motion } from 'framer-motion';
 
 interface Tournament {
@@ -50,13 +51,13 @@ interface ScheduleProps {
 const getMapImage = (mapName?: string) => {
   switch (mapName?.toLowerCase()) {
     case "erangel":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1759656542/erag_ijugzi.png";
+      return "/schedulePic/erag.avif";
     case "miramar":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1759656542/miramar_leezqf.png";
+      return "/schedulePic/miramar.avif";
     case "sanhok":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1759656543/sanhok_kojxj7.png";
+      return "/schedulePic/sanhok.avif";
     case "rondo":
-      return "https://res.cloudinary.com/dqckienxj/image/upload/v1759656543/rondo_huj3bl.png";
+      return "/schedulePic/rondo1.avif";
     case "bermuda":
       return "https://res.cloudinary.com/dqckienxj/image/upload/v1761360885/bermuda_axt2w0.jpg";
     case "alpine":
@@ -93,23 +94,23 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
         try {
           setLoading(true);
           setError(null);
-          const res = await fetch(`https://backend-prod-530t.onrender.com/api/public/rounds/${round._id}/matches`);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const matchesData: Match[] = await res.json();
+          const res = await api.get(`/public/rounds/${round._id}/matches`);
+          if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+          const matchesData: Match[] = res.data;
 
           // Fetch selected match
-          const selectedRes = await fetch(`https://backend-prod-530t.onrender.com/api/public/tournaments/${tournament._id}/rounds/${round._id}/selected-match`);
+          const selectedRes = await api.get(`/public/tournaments/${tournament._id}/rounds/${round._id}/selected-match`);
           let selectedMatchId = null;
-          if (selectedRes.ok) {
-            const selectedData = await selectedRes.json();
+          if (selectedRes.status === 200) {
+            const selectedData = selectedRes.data;
             selectedMatchId = selectedData.matchId;
           }
           setSelectedMatchId(selectedMatchId);
 
           // Fetch matchData for each match to get teams
           const matchDataPromises = matchesData.map(match =>
-            fetch(`https://backend-prod-530t.onrender.com/api/public/matches/${match._id}/matchdata`)
-              .then(res => res.ok ? res.json() : null)
+            api.get(`/public/matches/${match._id}/matchdata`)
+              .then(res => res ? res.data : null)
               .catch(() => null)
           );
           const matchDatas = await Promise.all(matchDataPromises);
@@ -167,17 +168,17 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
   }
 
   return (
-    <div className="w-[2200px] h-[1080px] relative overflow-hidden ">
+    <div className="w-[1920px] h-[1080px] relative overflow-hidden ">
       {/* Header */}
       <motion.div
-        className="absolute z-10 top-[60px] text-[5rem] font-bebas font-[300] w-full text-center"
+        className="absolute z-10 top-[60px] text-[5rem] font-[tungsten] font-[300] w-full text-center  justify-center item"
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: 'easeOut' }}
       >
         <h1 className="text-white font-bold whitespace-pre text-[7rem]">TODAY'S SCHEDULE</h1>
         <motion.p
-          className="text-white text-[2rem] font-[Righteous] whitespace-pre p-[10px] mt-[-20px] w-[800px] mx-auto"
+          className="text-white text-[2.7rem] font-[AGENCYB] whitespace-pre p-[0px] mt-[-20px] w-[800px] mx-auto"
           style={{ background: `linear-gradient(45deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})` }}
           animate={{ opacity: [0.9, 1, 0.9] }}
           transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
@@ -187,7 +188,7 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
       </motion.div>
 
       {/* Matches list */}
-      <div className="absolute top-[220px] left-[0px] w-[1900px]">
+      <div className="absolute top-[220px] left-1/2 -translate-x-1/2 w-[1900px]">
     
         <div className="mt-[80px] flex flex-row flex-wrap gap-4 justify-center">
           {sortedMatches.map((m, idx) => (

@@ -23,7 +23,10 @@ const retryWithBackoff = async (fn: () => Promise<any>, maxRetries = 3, baseDela
 
 interface Player {
   _id: string; playerName: string; killNum: number;
+  uId?: string | number;
   bHasDied: boolean; damage?: number; survivalTime?: number; assists?: number;
+  location?: { x: number; y: number; z: number };
+  health?: number; liveState?: number; isFiring?: boolean; isOutsideBlueCircle?: boolean;
   [key: string]: any;
 }
 interface Team {
@@ -32,7 +35,6 @@ interface Team {
 }
 interface MatchData { _id: string; teams: Team[]; [key: string]: any; }
 
-// ── Styles ─────────────────────────────────────────────────────────────────────
 // ── Styles ─────────────────────────────────────────────────────────────────────
 const STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&display=swap');
@@ -224,8 +226,13 @@ const STYLES = `
     display: flex; align-items: center; gap: 8px;
     padding: 8px 10px; border-radius: 8px;
     background: rgba(168,85,247,0.04); border: 1px solid rgba(168,85,247,0.1);
+    transition: border-color 0.3s, background 0.3s;
   }
   .md-player-row.dead { background: rgba(220,38,38,0.05); border-color: rgba(220,38,38,0.15); }
+
+  /* Flash animation for live delta updates */
+  @keyframes md-flash { 0% { border-color: #a855f7; box-shadow: 0 0 8px rgba(168,85,247,0.5); } 100% { border-color: rgba(168,85,247,0.1); box-shadow: none; } }
+  .md-player-row.flashing { animation: md-flash 0.8s ease-out forwards; }
 
   .md-player-name {
     flex: 1; font-size: 14px; font-weight: 600; color: #d1d5db;
@@ -420,28 +427,43 @@ const MatchDataViewer: React.FC = () => {
   const { t } = useTranslation();
   const { tournamentId, roundId, matchId } = useParams<{ tournamentId: string; roundId: string; matchId: string }>();
 
-  const [matchData, setMatchData]           = useState<any>(null);
-  const [loading, setLoading]               = useState(false);
-  const [error, setError]                   = useState<string | null>(null);
+  const [matchData, setMatchData]             = useState<any>(null);
+  const [loading, setLoading]                 = useState(false);
+  const [error, setError]                     = useState<string | null>(null);
   const [highlightedTeam, setHighlightedTeam] = useState<string | null>(null);
-  const [sortBy, setSortBy]                 = useState<'slot' | 'placePoints'>('slot');
-  const [editingTeam, setEditingTeam]       = useState<null | { teamIndex: number; teamId: string; teamName: string }>(null);
+  const [sortBy, setSortBy]                   = useState<'slot' | 'placePoints'>('slot');
+  const [editingTeam, setEditingTeam]         = useState<null | { teamIndex: number; teamId: string; teamName: string }>(null);
   const [availablePlayers, setAvailablePlayers] = useState<any[]>([]);
   const [selectedPlayers, setSelectedPlayers]   = useState<string[]>([]);
-  const [playersLoading, setPlayersLoading] = useState(false);
-  const [savingRoster, setSavingRoster]     = useState(false);
-  const [newPlayerName, setNewPlayerName]   = useState('');
-  const [newPlayerId, setNewPlayerId]       = useState('');
-  const [newPlayerPhoto, setNewPlayerPhoto] = useState<File | null>(null);
-  const [addingPlayer, setAddingPlayer]     = useState(false);
+  const [playersLoading, setPlayersLoading]   = useState(false);
+  const [savingRoster, setSavingRoster]       = useState(false);
+  const [newPlayerName, setNewPlayerName]     = useState('');
+  const [newPlayerId, setNewPlayerId]         = useState('');
+  const [newPlayerPhoto, setNewPlayerPhoto]   = useState<File | null>(null);
+  const [addingPlayer, setAddingPlayer]       = useState(false);
 
-  const teamRefs         = useRef<Record<string, HTMLDivElement | null>>({});
-  const lastUpdateRef    = useRef<Record<string, number>>({});
+  // ✅ Track which player rows are flashing from live delta updates
+  const [flashingPlayers, setFlashingPlayers] = useState<Set<string>>(new Set());
+
+  const teamRefs          = useRef<Record<string, HTMLDivElement | null>>({});
+  const lastUpdateRef     = useRef<Record<string, number>>({});
   const killUpdateBatcher  = useRef(new UpdateBatcher<{ change: number }>(3000, (e, n) => ({ change: e.change + n.change })));
   const pointsUpdateBatcher = useRef(new UpdateBatcher<{ points: number }>(4000));
   const deathUpdateBatcher  = useRef(new UpdateBatcher<{ bHasDied: boolean }>(2500));
 
   const setTeamRef = (id: string) => (el: HTMLDivElement | null) => { if (el) teamRefs.current[id] = el; };
+
+  // ✅ Flash a player row briefly when a live delta arrives
+  const flashPlayer = useCallback((playerId: string) => {
+    setFlashingPlayers(prev => new Set(prev).add(playerId));
+    setTimeout(() => {
+      setFlashingPlayers(prev => {
+        const next = new Set(prev);
+        next.delete(playerId);
+        return next;
+      });
+    }, 900);
+  }, []);
 
   const fetchMatchData = useCallback(async () => {
     setLoading(true); setError(null);
@@ -461,44 +483,118 @@ const MatchDataViewer: React.FC = () => {
 
   useEffect(() => {
     if (!socket) return;
+
+    // ── existing handlers ────────────────────────────────────────────────────
     const handleLiveMatchUpdate = (data: any) => {
       if (!data) return;
       const inId = typeof data.matchId === 'object' && data.matchId?._id ? data.matchId._id : data.matchId;
       if (inId?.toString?.() !== matchId?.toString?.()) return;
-      setMatchData({ ...data, teams: Array.isArray(data?.teams) ? data.teams.map((t: any) => ({ ...t, _id: t?._id || t?.teamId || null, placePoints: t.placePoints ?? 0 })) : [] });
+      setMatchData({
+        ...data,
+        teams: Array.isArray(data?.teams)
+          ? data.teams.map((t: any) => ({ ...t, _id: t?._id || t?.teamId || null, placePoints: t.placePoints ?? 0 }))
+          : [],
+      });
     };
+
     const handleTeamUpdate = (data: any) => {
       setMatchData((prev: any) => {
         if (!prev?.teams) return prev;
-        return { ...prev, teams: prev.teams.map((team: any) => {
-          if (team._id !== data.teamId) return team;
-          const changes = data?.changes || {};
-          const next: any = { ...team, ...changes };
-          if (Array.isArray(changes.players)) {
-            const byId = new Map(changes.players.map((p: any) => [p._id?.toString?.() || p._id, p]));
-            next.players = (team.players || []).map((p: any) => { const k = p._id?.toString?.() || p._id; const u = byId.get(k); return u ? { ...p, ...u } : p; });
-          }
-          return next;
-        })};
+        return {
+          ...prev,
+          teams: prev.teams.map((team: any) => {
+            if (team._id !== data.teamId) return team;
+            const changes = data?.changes || {};
+            const next: any = { ...team, ...changes };
+            if (Array.isArray(changes.players)) {
+              const byId = new Map(changes.players.map((p: any) => [p._id?.toString?.() || p._id, p]));
+              next.players = (team.players || []).map((p: any) => {
+                const k = p._id?.toString?.() || p._id;
+                const u = byId.get(k);
+                return u ? { ...p, ...u } : p;
+              });
+            }
+            return next;
+          }),
+        };
       });
     };
+
     const handlePlayerUpdate = (data: any) => {
       setMatchData((prev: any) => {
         if (!prev?.teams) return prev;
-        return { ...prev, teams: prev.teams.map((team: any) => team._id !== data.teamId ? team : { ...team, players: team.players.map((p: any) => p._id === data.playerId ? { ...p, ...data.updates } : p) }) };
+        return {
+          ...prev,
+          teams: prev.teams.map((team: any) =>
+            team._id !== data.teamId ? team : {
+              ...team,
+              players: team.players.map((p: any) =>
+                p._id === data.playerId ? { ...p, ...data.updates } : p
+              ),
+            }
+          ),
+        };
       });
     };
-    socket.on('liveMatchUpdate', handleLiveMatchUpdate);
-    socket.on('matchDataUpdated', handleTeamUpdate);
+
+    // ✅ NEW: Handle live delta updates from the PUBG socket engine
+    const handlePlayerDeltaUpdate = (data: any) => {
+      if (!data) return;
+
+      // Only process events for the current match
+      if (data.matchId?.toString() !== matchId?.toString()) return;
+
+      setMatchData((prev: any) => {
+        if (!prev?.teams) return prev;
+
+        let updatedPlayerId: string | null = null;
+
+        const updatedTeams = prev.teams.map((team: any) => {
+          const updatedPlayers = team.players.map((player: any) => {
+            // ✅ Match by uId (PUBG player ID stored as String in schema)
+            if (String(player.uId) !== String(data.uId)) return player;
+
+            updatedPlayerId = player._id?.toString();
+
+            return {
+              ...player,
+              ...data.changes,
+              // ✅ Merge nested location object rather than replacing entirely
+              ...(data.changes.location && {
+                location: { ...player.location, ...data.changes.location },
+              }),
+              // ✅ If liveState indicates death (5 = dead in PUBG), sync bHasDied
+              ...(data.changes.liveState !== undefined && {
+                bHasDied: data.changes.liveState === 5,
+              }),
+            };
+          });
+
+          return { ...team, players: updatedPlayers };
+        });
+
+        // ✅ Flash the updated player row so the operator can see the live change
+        if (updatedPlayerId) flashPlayer(updatedPlayerId);
+
+        return { ...prev, teams: updatedTeams };
+      });
+    };
+
+    socket.on('liveMatchUpdate',    handleLiveMatchUpdate);
+    socket.on('matchDataUpdated',   handleTeamUpdate);
     socket.on('playerStatsUpdated', handlePlayerUpdate);
+    socket.on('playerDeltaUpdate',  handlePlayerDeltaUpdate); // ✅ NEW
+
     return () => {
-      socket.off('liveMatchUpdate', handleLiveMatchUpdate);
-      socket.off('matchDataUpdated', handleTeamUpdate);
+      socket.off('liveMatchUpdate',    handleLiveMatchUpdate);
+      socket.off('matchDataUpdated',   handleTeamUpdate);
       socket.off('playerStatsUpdated', handlePlayerUpdate);
+      socket.off('playerDeltaUpdate',  handlePlayerDeltaUpdate); // ✅ NEW
       SocketManager.getInstance().disconnect();
     };
-  }, []);
+  }, [matchId, flashPlayer]);
 
+  // ── Handlers ────────────────────────────────────────────────────────────────
   const updateKillCount = async (teamIndex: number, playerIndex: number, change: number) => {
     if (!matchData) return;
     const now = Date.now(); const key = `${teamIndex}-${playerIndex}`;
@@ -507,10 +603,18 @@ const MatchDataViewer: React.FC = () => {
     const team = matchData.teams[teamIndex]; const player = team.players[playerIndex];
     const newKillNum = Math.max(0, player.killNum + change);
     const actualChange = newKillNum - player.killNum;
-    setMatchData((prev: any) => { if (!prev) return prev; const t = [...prev.teams]; t[teamIndex] = { ...team, players: team.players.map((p: Player, i: number) => i === playerIndex ? { ...p, killNum: newKillNum } : p) }; return { ...prev, teams: t }; });
+    setMatchData((prev: any) => {
+      if (!prev) return prev;
+      const t = [...prev.teams];
+      t[teamIndex] = { ...team, players: team.players.map((p: Player, i: number) => i === playerIndex ? { ...p, killNum: newKillNum } : p) };
+      return { ...prev, teams: t };
+    });
     if (actualChange === 0) return;
     killUpdateBatcher.current.batch(`${teamIndex}-${playerIndex}`, { change: actualChange }, async (u) => {
-      await retryWithBackoff(() => api.patch(`/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${matchData._id}/team/${team._id}/player/${player._id}/stats`, { killNumChange: u.change }));
+      await retryWithBackoff(() => api.patch(
+        `/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${matchData._id}/team/${team._id}/player/${player._id}/stats`,
+        { killNumChange: u.change }
+      ));
     });
   };
 
@@ -519,9 +623,17 @@ const MatchDataViewer: React.FC = () => {
     const now = Date.now(); const key = `${teamId}-points`;
     if (lastUpdateRef.current[key] && now - lastUpdateRef.current[key] < 300) return;
     lastUpdateRef.current[key] = now;
-    setMatchData((prev: any) => { if (!prev?.teams?.[teamIndex]) return prev; const t = [...prev.teams]; t[teamIndex] = { ...t[teamIndex], placePoints: typeof newPoints === 'number' ? newPoints : 0 }; return { ...prev, teams: t }; });
+    setMatchData((prev: any) => {
+      if (!prev?.teams?.[teamIndex]) return prev;
+      const t = [...prev.teams];
+      t[teamIndex] = { ...t[teamIndex], placePoints: typeof newPoints === 'number' ? newPoints : 0 };
+      return { ...prev, teams: t };
+    });
     pointsUpdateBatcher.current.batch(`${teamId}-points`, { points: newPoints }, async (u) => {
-      await retryWithBackoff(() => api.patch(`/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${matchData._id}/team/${teamId}/points`, { placePoints: u.points }));
+      await retryWithBackoff(() => api.patch(
+        `/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${matchData._id}/team/${teamId}/points`,
+        { placePoints: u.points }
+      ));
     });
   };
 
@@ -532,9 +644,17 @@ const MatchDataViewer: React.FC = () => {
     lastUpdateRef.current[key] = now;
     const team = matchData.teams[teamIndex]; const player = team.players[playerIndex];
     const newVal = !player.bHasDied;
-    setMatchData((prev: MatchData | null) => { if (!prev) return prev; const t = [...prev.teams]; t[teamIndex] = { ...team, players: team.players.map((p: Player, i: number) => i === playerIndex ? { ...p, bHasDied: newVal } : p) }; return { ...prev, teams: t }; });
-    deathUpdateBatcher.current.batch(`${key}`, { bHasDied: newVal }, async (u) => {
-      await retryWithBackoff(() => api.patch(`/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${matchData._id}/team/${team._id}/player/${player._id}/stats`, { bHasDied: u.bHasDied }));
+    setMatchData((prev: MatchData | null) => {
+      if (!prev) return prev;
+      const t = [...prev.teams];
+      t[teamIndex] = { ...team, players: team.players.map((p: Player, i: number) => i === playerIndex ? { ...p, bHasDied: newVal } : p) };
+      return { ...prev, teams: t };
+    });
+    deathUpdateBatcher.current.batch(key, { bHasDied: newVal }, async (u) => {
+      await retryWithBackoff(() => api.patch(
+        `/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${matchData._id}/team/${team._id}/player/${player._id}/stats`,
+        { bHasDied: u.bHasDied }
+      ));
     });
   };
 
@@ -545,9 +665,17 @@ const MatchDataViewer: React.FC = () => {
     lastUpdateRef.current[key] = now;
     const team = matchData.teams[teamIndex];
     const newVal = !team.players.every((p: Player) => p.bHasDied);
-    setMatchData((prev: MatchData | null) => { if (!prev) return prev; const t = [...prev.teams]; t[teamIndex] = { ...team, players: team.players.map((p: Player) => ({ ...p, bHasDied: newVal })) }; return { ...prev, teams: t }; });
+    setMatchData((prev: MatchData | null) => {
+      if (!prev) return prev;
+      const t = [...prev.teams];
+      t[teamIndex] = { ...team, players: team.players.map((p: Player) => ({ ...p, bHasDied: newVal })) };
+      return { ...prev, teams: t };
+    });
     requestQueue.add(async () => {
-      await api.patch(`/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${matchData._id}/team/${team._id}/bulk`, { bHasDied: newVal });
+      await api.patch(
+        `/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${matchData._id}/team/${team._id}/bulk`,
+        { bHasDied: newVal }
+      );
     }).catch(console.error);
   };
 
@@ -556,11 +684,16 @@ const MatchDataViewer: React.FC = () => {
     try {
       const { data: teamData } = await api.get(`/teams/${teamId}`);
       const playersForTeam = (teamData.players || []).filter((p: any) => p && p.playerName && p._id);
-      const preselected = (matchData?.teams?.[teamIndex]?.players || []).filter((p: any) => p && p.playerName && p._id);
+      const preselected    = (matchData?.teams?.[teamIndex]?.players || []).filter((p: any) => p && p.playerName && p._id);
       const norm = (n: string) => n.trim().toLowerCase();
-      const preMap = new Map<string, any>(); preselected.forEach((p: Player) => preMap.set(norm(p.playerName), p));
-      const filtered = playersForTeam.filter((p: Player) => { const pre = preMap.get(norm(p.playerName)); return !(pre && pre._id !== p._id); });
-      const combined = new Map<string, any>(); [...preselected, ...filtered].forEach((p: any) => combined.set(p._id.toString(), p));
+      const preMap = new Map<string, any>();
+      preselected.forEach((p: Player) => preMap.set(norm(p.playerName), p));
+      const filtered = playersForTeam.filter((p: Player) => {
+        const pre = preMap.get(norm(p.playerName));
+        return !(pre && pre._id !== p._id);
+      });
+      const combined = new Map<string, any>();
+      [...preselected, ...filtered].forEach((p: any) => combined.set(p._id.toString(), p));
       setAvailablePlayers(Array.from(combined.values()));
       setSelectedPlayers(preselected.map((p: Player) => p._id.toString()).filter((id: string) => combined.has(id)));
     } catch (err: any) { setError(err.message || 'Failed to fetch team players'); }
@@ -572,9 +705,12 @@ const MatchDataViewer: React.FC = () => {
     setAddingPlayer(true);
     try {
       let photoUrl = '';
-      if (newPlayerPhoto) photoUrl = await uploadToCloudinary(newPlayerPhoto, "players/photos", "player_photo");
-      const { data: team } = await api.get(`/teams/${editingTeam.teamId}`);
-      const { data: updatedTeam } = await api.put(`/teams/${editingTeam.teamId}`, { ...team, players: [...team.players, { playerName: newPlayerName.trim(), playerId: newPlayerId.trim() || undefined, photo: photoUrl || undefined }] });
+      if (newPlayerPhoto) photoUrl = await uploadToCloudinary(newPlayerPhoto, 'players/photos', 'player_photo');
+      const { data: team }        = await api.get(`/teams/${editingTeam.teamId}`);
+      const { data: updatedTeam } = await api.put(`/teams/${editingTeam.teamId}`, {
+        ...team,
+        players: [...team.players, { playerName: newPlayerName.trim(), playerId: newPlayerId.trim() || undefined, photo: photoUrl || undefined }],
+      });
       const newPlayer = updatedTeam.players.find((p: any) => p.playerName === newPlayerName.trim() && (!newPlayerId.trim() || p.playerId === newPlayerId.trim()));
       if (!newPlayer) throw new Error('Failed to find newly added player');
       setAvailablePlayers(prev => [...prev, newPlayer]);
@@ -590,17 +726,32 @@ const MatchDataViewer: React.FC = () => {
     try {
       const oldPlayers = matchData.teams[editingTeam.teamIndex].players.map((p: any) => p._id.toString());
       const newPlayers = selectedPlayers.map(id => id.toString());
-      const removed = oldPlayers.filter((id: string) => !newPlayers.includes(id));
-      const added = newPlayers.filter(id => !oldPlayers.includes(id));
-      const replacements = removed.map((oldId: string, i: number) => ({ oldPlayerId: oldId, newPlayerId: added[i] })).filter((r: any) => r.newPlayerId !== undefined);
-      if (replacements.length > 0) await api.put(`/matchdata/${matchData._id}/team/${editingTeam.teamId}/replace`, { replacements });
-      if (added.length > removed.length) await api.post(`/matchdata/${matchData._id}/team/${editingTeam.teamId}/player/add`, { newPlayerIds: added.slice(removed.length) });
-      if (removed.length > added.length) await api.delete(`/matchdata/${matchData._id}/team/${editingTeam.teamId}/players/remove`, { data: { playerIds: removed.slice(added.length) } });
+      const removed    = oldPlayers.filter((id: string) => !newPlayers.includes(id));
+      const added      = newPlayers.filter(id => !oldPlayers.includes(id));
+      const replacements = removed
+        .map((oldId: string, i: number) => ({ oldPlayerId: oldId, newPlayerId: added[i] }))
+        .filter((r: any) => r.newPlayerId !== undefined);
+      if (replacements.length > 0)
+        await api.put(`/matchdata/${matchData._id}/team/${editingTeam.teamId}/replace`, { replacements });
+      if (added.length > removed.length)
+        await api.post(`/matchdata/${matchData._id}/team/${editingTeam.teamId}/player/add`, { newPlayerIds: added.slice(removed.length) });
+      if (removed.length > added.length)
+        await api.delete(`/matchdata/${matchData._id}/team/${editingTeam.teamId}/players/remove`, { data: { playerIds: removed.slice(added.length) } });
       setMatchData((prev: any) => {
         if (!prev) return prev;
         const t = [...prev.teams];
         const current = t[editingTeam.teamIndex].players;
-        t[editingTeam.teamIndex] = { ...t[editingTeam.teamIndex], players: selectedPlayers.map(id => { const ex = current.find((p: any) => p._id.toString() === id); if (ex) return ex; const fa = availablePlayers.find(p => p._id.toString() === id); return fa ? { ...fa, killNum: 0, damage: 0, survivalTime: 0, assists: 0, bHasDied: false } : null; }).filter(Boolean) };
+        t[editingTeam.teamIndex] = {
+          ...t[editingTeam.teamIndex],
+          players: selectedPlayers
+            .map(id => {
+              const ex = current.find((p: any) => p._id.toString() === id);
+              if (ex) return ex;
+              const fa = availablePlayers.find(p => p._id.toString() === id);
+              return fa ? { ...fa, killNum: 0, damage: 0, survivalTime: 0, assists: 0, bHasDied: false } : null;
+            })
+            .filter(Boolean),
+        };
         return { ...prev, teams: t };
       });
       setEditingTeam(null); setNewPlayerName(''); setNewPlayerId(''); setNewPlayerPhoto(null);
@@ -619,8 +770,7 @@ const MatchDataViewer: React.FC = () => {
 
   // ── Loading / Error ──────────────────────────────────────────────────────────
   if (loading) return (
-    <>
-      <style>{STYLES}</style>
+    <><style>{STYLES}</style>
       <div className="md-root md-center">
         <div className="md-spinner" />
         <p className="md-spin-txt">LOADING MATCH DATA</p>
@@ -629,8 +779,7 @@ const MatchDataViewer: React.FC = () => {
   );
 
   if (error) return (
-    <>
-      <style>{STYLES}</style>
+    <><style>{STYLES}</style>
       <div className="md-root md-center">
         <p style={{ fontFamily: 'Orbitron,monospace', color: '#f87171', fontSize: 14 }}>ERROR: {error}</p>
       </div>
@@ -638,14 +787,14 @@ const MatchDataViewer: React.FC = () => {
   );
 
   if (!matchData) return (
-    <>
-      <style>{STYLES}</style>
+    <><style>{STYLES}</style>
       <div className="md-root md-center">
         <p style={{ fontFamily: 'Orbitron,monospace', color: '#374151', fontSize: 12, letterSpacing: 2 }}>NO MATCH DATA</p>
       </div>
     </>
   );
 
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <>
       <style>{STYLES}</style>
@@ -656,7 +805,6 @@ const MatchDataViewer: React.FC = () => {
 
         {/* ── Sticky Top Bar ── */}
         <div className="md-topbar">
-          {/* Live stats */}
           <div className="md-live-row">
             <div className="md-live-pill">
               <span className="md-live-pill-lbl">Teams Alive</span>
@@ -669,7 +817,6 @@ const MatchDataViewer: React.FC = () => {
             </div>
           </div>
 
-          {/* Slot nav */}
           <div className="md-slot-nav">
             {matchData.teams.map((team: any) => {
               const dead = team.players.length > 0 && team.players.every((p: any) => p.bHasDied);
@@ -683,7 +830,7 @@ const MatchDataViewer: React.FC = () => {
                     setTimeout(() => setHighlightedTeam(p => p === team._id ? null : p), 1800);
                   }}
                 >
-                  {`${team.slot} - ${team.teamTag} `}
+                  {`${team.slot} - ${team.teamTag}`}
                 </button>
               );
             })}
@@ -725,16 +872,13 @@ const MatchDataViewer: React.FC = () => {
                       {team.teamTag && <div className="md-team-tag">[{team.teamTag}]</div>}
                     </div>
                   </div>
-
                   <div className="md-card-hdr-r">
-                    {/* Elim toggle */}
                     <div className="md-elim-toggle" onClick={() => toggleAllPlayersDeath(teamIndex)}>
                       <span className="md-orb md-elim-lbl">ELIM</span>
                       <div className={`md-toggle-track${allDead ? ' on' : ''}`}>
                         <div className="md-toggle-thumb" />
                       </div>
                     </div>
-                    {/* Edit roster */}
                     <button
                       className="md-edit-roster-btn"
                       onClick={() => openChangePlayers(teamIndex, team.teamId || team._id, team.teamName)}
@@ -756,7 +900,8 @@ const MatchDataViewer: React.FC = () => {
                         const v = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
                         setMatchData((prev: MatchData | null) => {
                           if (!prev) return prev;
-                          const t = [...prev.teams]; t[teamIndex] = { ...t[teamIndex], placePoints: isNaN(v) ? 0 : v };
+                          const t = [...prev.teams];
+                          t[teamIndex] = { ...t[teamIndex], placePoints: isNaN(v) ? 0 : v };
                           return { ...prev, teams: t };
                         });
                       }}
@@ -781,31 +926,39 @@ const MatchDataViewer: React.FC = () => {
 
                 {/* Players */}
                 <div className="md-players">
-                  {team.players.map((player: any, pi: number) => (
-                    <div key={player._id} className={`md-player-row${player.bHasDied ? ' dead' : ''}`}>
-                      <span className="md-bar md-player-name" title={player.playerName}>{player.playerName}</span>
-
-                      {/* Kill counter */}
-                      <div className="md-kill-group">
-                        <button className="md-kill-btn minus" onClick={() => updateKillCount(teamIndex, pi, -1)}>−</button>
-                        <span className="md-orb md-kill-val">{player.killNum ?? 0}</span>
-                        <button className="md-kill-btn plus"  onClick={() => updateKillCount(teamIndex, pi, 1)}>+</button>
-                      </div>
-
-                      {/* Death toggle */}
+                  {team.players.map((player: any, pi: number) => {
+                    const isFlashing = flashingPlayers.has(player._id?.toString());
+                    return (
                       <div
-                        className={`md-death-toggle${player.bHasDied ? ' dead' : ''}`}
-                        onClick={() => togglePlayerDeath(teamIndex, pi)}
-                        title={player.bHasDied ? 'Mark ALIVE' : 'Mark DEAD'}
+                        key={player._id}
+                        className={`md-player-row${player.bHasDied ? ' dead' : ''}${isFlashing ? ' flashing' : ''}`}
                       >
-                        <div className="md-death-thumb" />
-                        {player.bHasDied
-                          ? <span className="md-death-lbl dead">OUT</span>
-                          : <span className="md-death-lbl alive">IN</span>
-                        }
+                        <span className="md-bar md-player-name" title={player.playerName}>
+                          {player.playerName}
+                        </span>
+
+                        {/* Kill counter */}
+                        <div className="md-kill-group">
+                          <button className="md-kill-btn minus" onClick={() => updateKillCount(teamIndex, pi, -1)}>−</button>
+                          <span className="md-orb md-kill-val">{player.killNum ?? 0}</span>
+                          <button className="md-kill-btn plus"  onClick={() => updateKillCount(teamIndex, pi, 1)}>+</button>
+                        </div>
+
+                        {/* Death toggle */}
+                        <div
+                          className={`md-death-toggle${player.bHasDied ? ' dead' : ''}`}
+                          onClick={() => togglePlayerDeath(teamIndex, pi)}
+                          title={player.bHasDied ? 'Mark ALIVE' : 'Mark DEAD'}
+                        >
+                          <div className="md-death-thumb" />
+                          {player.bHasDied
+                            ? <span className="md-death-lbl dead">OUT</span>
+                            : <span className="md-death-lbl alive">IN</span>
+                          }
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -816,7 +969,6 @@ const MatchDataViewer: React.FC = () => {
         {editingTeam && (
           <div className="md-modal-overlay">
             <div className="md-modal">
-
               <div className="md-modal-hdr">
                 <div className="md-modal-hdr-l">
                   <span className="md-modal-tag">ROSTER</span>
@@ -825,7 +977,10 @@ const MatchDataViewer: React.FC = () => {
                     <div className="md-modal-team">{editingTeam.teamName}</div>
                   </div>
                 </div>
-                <button className="md-modal-close" onClick={() => { setEditingTeam(null); setNewPlayerName(''); setNewPlayerId(''); setNewPlayerPhoto(null); }}>
+                <button
+                  className="md-modal-close"
+                  onClick={() => { setEditingTeam(null); setNewPlayerName(''); setNewPlayerId(''); setNewPlayerPhoto(null); }}
+                >
                   <FaTimes size={13} />
                 </button>
               </div>
@@ -840,11 +995,9 @@ const MatchDataViewer: React.FC = () => {
                   {/* Left — player selection */}
                   <div className="md-modal-col">
                     <div className="md-orb md-modal-col-title">SELECT PLAYERS</div>
-                    <p className="md-sel-count">
-                      SELECTED <span>{selectedPlayers.length}</span> / 4
-                    </p>
+                    <p className="md-sel-count">SELECTED <span>{selectedPlayers.length}</span> / 4</p>
                     {availablePlayers.map(player => {
-                      const id = player._id.toString();
+                      const id    = player._id.toString();
                       const isSel = selectedPlayers.includes(id);
                       return (
                         <div
@@ -892,7 +1045,11 @@ const MatchDataViewer: React.FC = () => {
                     <label htmlFor="new-player-photo" className="md-upload-lbl">
                       <FaUpload size={13} color="#4ade80" /> Upload Photo
                     </label>
-                    <input id="new-player-photo" type="file" accept="image/*" style={{ display: 'none' }} onChange={e => setNewPlayerPhoto(e.target.files?.[0] || null)} />
+                    <input
+                      id="new-player-photo" type="file" accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={e => setNewPlayerPhoto(e.target.files?.[0] || null)}
+                    />
                     {newPlayerPhoto && (
                       <img src={URL.createObjectURL(newPlayerPhoto)} alt="Preview" className="md-photo-preview" loading="lazy" />
                     )}
@@ -912,7 +1069,10 @@ const MatchDataViewer: React.FC = () => {
               )}
 
               <div className="md-modal-footer">
-                <button className="md-btn-cancel" onClick={() => { setEditingTeam(null); setNewPlayerName(''); setNewPlayerId(''); setNewPlayerPhoto(null); }}>
+                <button
+                  className="md-btn-cancel"
+                  onClick={() => { setEditingTeam(null); setNewPlayerName(''); setNewPlayerId(''); setNewPlayerPhoto(null); }}
+                >
                   Cancel
                 </button>
                 <button className="md-btn-save" onClick={saveChangedPlayers} disabled={savingRoster}>
@@ -931,4 +1091,3 @@ const MatchDataViewer: React.FC = () => {
 };
 
 export default MatchDataViewer;
-  

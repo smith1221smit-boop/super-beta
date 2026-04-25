@@ -130,7 +130,7 @@ const TeamH2H: React.FC<TeamH2HProps> = ({ tournament, round, match }) => {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: 'easeOut' }}
       >
-        <h1 className="text-white font-bold whitespace-pre text-[7rem]">TEAM HEAD TO HEAD</h1>
+        <h1 className="text-white font-bold whitespace-pre text-[7rem]">TEAMS HEAD TO HEAD</h1>
         <motion.p
           className="text-white text-[2rem] font-[Righteous] whitespace-pre p-[10px] mt-[-20px] w-[800px] mx-auto mb-[20px] "
           style={{ background: `linear-gradient(45deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})` }}

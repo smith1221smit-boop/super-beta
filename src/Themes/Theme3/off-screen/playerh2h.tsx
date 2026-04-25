@@ -156,7 +156,7 @@ const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchDa
           animate={{ opacity: [0.9, 1, 0.9] }}
           transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
         >
-          {round?.roundName || '-'}  • DAY  {round?.day || '-'} • MATCH {match?.matchNo}
+          {tournament?.tournamentName || '-'} •   {round?.roundName || '-'} • MATCH {match?.matchNo}
         </motion.p>
       </motion.div>
 
@@ -170,31 +170,23 @@ const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchDa
             }}
             className="w-[600px] h-[505px] p-8 flex flex-col items-center justify-center ">
         
-            <img 
-              src={first.picUrl || 'https://res.cloudinary.com/dqckienxj/image/upload/v1735718663/defult_chach_apsjhc_jydubc.png'} 
-              alt={first.playerName} 
-              className="w-[200px] h-[200px] object-cover  top-[100px] absolute " 
+           <img
+              src={first.picUrl || '/def_char.avif'}
+              alt={first.playerName}
+              className="w-[300px] h-[300px] object-cover  top-[100px] absolute z-0"
             />
-            <div className="text-[3rem] font-bebas text-black mb-[30px] w-[400px] flex justify-center bg-gradient-to-r from-[#FFD700] via-[#FFA500] to-[#FFD700]">{first.playerName}</div>
+           <div className="text-[3rem] font-bebas text-black px-[20px] flex justify-center bg-gradient-to-r from-[#FFD700] via-[#FFA500] to-[#FFD700] z-10">
+              {first.playerName}
+            </div>
            
             
-            <div className="grid grid-cols-4 gap-0 w-[600px] text-center bg-[#000000b8] h-[200px] pt-[30px] top-[400px] absolute ">
-              <div>
-                <div className="text-[5rem] font-bebas text-yellow-300">{first.killNum}</div>
-                <div className="text-sm font-[Righteous]">KILLS</div>
+            <div className=" w-[600px] text-center bg-[#000000b8] h-[200px] pt-[30px] top-[400px] absolute flex items-center justify-between px-[120px]">
+              <div className='w-[100%] text-center'>
+                <div className="text-[8rem] font-[AGENCYB] text-yellow-300 ">{first.killNum} KILLS</div>
+                
               </div>
-              <div>
-                <div className="text-[5rem] font-bebas text-yellow-300">{first.damage}</div>
-                <div className="text-sm font-[Righteous]">DAMAGE</div>
-              </div>
-              <div>
-                <div className="text-[5rem] font-bebas text-yellow-300">{first.knockouts}</div>
-                <div className="text-sm font-[Righteous]">KNOCKOUTS</div>
-              </div>
-              <div>
-                <div className="text-[5rem] font-bebas text-yellow-300">{first.assists}</div>
-                <div className="text-sm font-[Righteous]">ASSISTS</div>
-              </div>
+            
+             
             </div>
           </div>
         </div>
@@ -211,39 +203,21 @@ const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchDa
             className="w-[600px] h-[505px] p-8 flex flex-col items-center justify-center "
           >
             <img
-              src={second.picUrl || 'https://res.cloudinary.com/dqckienxj/image/upload/v1735718663/defult_chach_apsjhc_jydubc.png'}
+              src={second.picUrl || '/def_char.avif'}
               alt={second.playerName}
-              className="w-[200px] h-[200px] object-cover  top-[100px] absolute"
+              className="w-[300px] h-[300px] object-cover  top-[100px] absolute z-0"
             />
-            <div className="text-[3rem] font-bebas text-black mb-[30px] w-[400px] flex justify-center bg-gradient-to-r from-[#FFD700] via-[#FFA500] to-[#FFD700]">
+            <div className="text-[3rem] font-bebas text-black px-[20px] flex justify-center bg-gradient-to-r from-[#FFD700] via-[#FFA500] to-[#FFD700] z-10">
               {second.playerName}
             </div>
 
-            <div className="grid grid-cols-4 gap-0 w-[600px] text-center bg-[#000000b8] h-[200px] pt-[30px] top-[400px] absolute">
-              <div>
-                <div className="text-[5rem] font-bebas text-yellow-300">
-                  {second.killNum}
-                </div>
-                <div className="text-sm font-[Righteous]">KILLS</div>
+             <div className=" w-[600px] text-center bg-[#000000b8] h-[200px] pt-[30px] top-[400px] absolute flex items-center justify-between px-[120px]">
+              <div className='w-[100%] text-center'>
+                <div className="text-[8rem] font-[AGENCYB] text-yellow-300 ">{second.killNum} KILLS</div>
+                
               </div>
-              <div>
-                <div className="text-[5rem] font-bebas text-yellow-300">
-                  {second.damage}
-                </div>
-                <div className="text-sm font-[Righteous]">DAMAGE</div>
-              </div>
-              <div>
-                <div className="text-[5rem] font-bebas text-yellow-300">
-                  {second.knockouts}
-                </div>
-                <div className="text-sm font-[Righteous]">KNOCKOUTS</div>
-              </div>
-              <div>
-                <div className="text-[5rem] font-bebas text-yellow-300">
-                  {second.assists}
-                </div>
-                <div className="text-sm font-[Righteous]">ASSISTS</div>
-              </div>
+            
+             
             </div>
           </div>
         </div>

@@ -149,7 +149,7 @@ const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match }) => {
           animate={{ opacity: [0.9, 1, 0.9] }}
           transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
         >
-          {round?.roundName || '-'}  • DAY  {round?.day || '-'} • MATCH {match?.matchNo}
+          {round?.roundName || '-'}  •• MATCH {match?.matchNo}
         </motion.p>
       </motion.div>
 

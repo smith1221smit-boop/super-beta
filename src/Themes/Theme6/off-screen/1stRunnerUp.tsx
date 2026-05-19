@@ -128,7 +128,14 @@ const FirstRunnerUp: React.FC<secondPlacesProps> = ({ tournament, round, matchDa
       return { ...team, total, totalKills } as Team & { total: number; totalKills: number };
     });
 
-    enriched.sort((a, b) => b.total - a.total);
+    enriched.sort((a: any, b: any) => {
+  if (b.total !== a.total) return b.total - a.total;
+  if (b.placePoints !== a.placePoints) return b.placePoints - a.placePoints;
+  if ((b.wwcd || 0) !== (a.wwcd || 0))
+    return (b.wwcd || 0) - (a.wwcd || 0);
+    
+  return (b.totalKills || 0) - (a.totalKills || 0);
+});
 
     if (enriched.length < 2) return null;
 

@@ -22,7 +22,7 @@ class SocketManager {
 
     if (!this.socket || this.socket.disconnected) {
       console.log('SocketManager: Creating new socket connection');
-      this.socket = io("https://super-back-507l.onrender.com/", {
+      this.socket = io("https://ramus-back-40fi.onrender.com", {
         transports: ["websocket"],
         withCredentials: true,
         reconnection: true,

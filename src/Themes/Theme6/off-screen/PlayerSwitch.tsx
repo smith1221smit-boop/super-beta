@@ -1,275 +1,417 @@
-import React, { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+
 
 interface Player {
-  uId: string;
-  playerName: string;
-  picUrl?: string;
-  killNum?: number;
+  uId:string;
+  playerName:string;
+  picUrl?:string;
 }
+
 
 interface Team {
-  teamId: string;
-  teamName: string;
-  teamTag: string;
-  teamLogo: string;
-  players: Player[];
+  teamId:string;
+  teamName:string;
+  teamTag:string;
+  teamLogo:string;
+  players:Player[];
 }
 
-interface Match {
-  _id: string;
-  matchName?: string;
-  matchNo?: number;
-  _matchNo?: number;
-}
 
 interface MatchData {
-  _id: string;
-  matchId: string;
-  userId: string;
-  teams: Team[];
+  _id:string;
+  matchId:string;
+  userId:string;
+  teams:Team[];
 }
+
 
 interface PlayerSwitchProps {
-  match: Match | null;
-  matchData: MatchData | null;
-  loading: boolean;
-  error: string | null;
+  matchData:MatchData|null;
+  loading:boolean;
+  error:string|null;
 }
 
-const PlayerSwitch: React.FC<PlayerSwitchProps> = ({ match, matchData, loading, error }) => {
-  const [currentPairIndex, setCurrentPairIndex] = useState(0);
-  const [playerPairs, setPlayerPairs] = useState<Array<{ left: { player: Player; team: Team }, right: { player: Player; team: Team } }>>([]);
-  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
 
- useEffect(() => {
-  if (!matchData?.teams) return;
 
-  const validTeams = matchData.teams
-    .map(team => ({
-      ...team,
-      players: team.players.filter(p => p.picUrl && p.picUrl.trim() !== ''),
-    }))
-    .filter(team => team.players.length > 0);
+const PlayerSwitch:React.FC<PlayerSwitchProps> = ({
+matchData,
+loading,
+error
+})=>{
 
-  if (validTeams.length < 2) return;
 
-  const pairs = [];
-  const teamCount = validTeams.length;
 
-  let teamIndex = 0;
-  let playerIndex = 0;
+const [players,setPlayers]=useState<
+{
+player:Player;
+team:Team;
+}[]
+>([]);
 
-  while (true) {
-    const leftTeam = validTeams[teamIndex % teamCount];
-    const rightTeam = validTeams[(teamIndex + 1) % teamCount];
 
-    const leftPlayer = leftTeam.players[playerIndex % leftTeam.players.length];
-    const rightPlayer = rightTeam.players[playerIndex % rightTeam.players.length];
 
-    if (!leftPlayer || !rightPlayer) break;
+const [current,setCurrent]=useState<any>(null);
 
-    pairs.push({
-      left: { player: leftPlayer, team: leftTeam },
-      right: { player: rightPlayer, team: rightTeam },
-    });
+const [lastTeam,setLastTeam]=useState("");
 
-    teamIndex++;
-    if (teamIndex % teamCount === 0) playerIndex++;
+const [badImages,setBadImages]=useState<Record<string,boolean>>({});
 
-    if (playerIndex > 50) break; // safety cap
-  }
 
-  setPlayerPairs(pairs);
-  setCurrentPairIndex(0);
-}, [matchData]);
 
-  // Auto-cycle through pairs every 5 seconds
-  useEffect(() => {
-    if (playerPairs.length === 0) return;
 
-    const interval = setInterval(() => {
-      setCurrentPairIndex(prev => (prev + 1) % playerPairs.length);
-    }, 5000);
 
-    return () => clearInterval(interval);
-  }, [playerPairs]);
 
-  const handleImageError = (playerId: string) => {
-    setImageErrors(prev => ({ ...prev, [playerId]: true }));
-  };
+useEffect(()=>{
 
-  const getPlayerImage = (player: Player) => {
-    if (imageErrors[player.uId]) {
-      return '/def_char.png';
-    }
-    return player.picUrl || '/def_char.png';
-  };
 
-  if (loading) {
-    return (
-      <div style={{
-        width: '1920px',
-        height: '1080px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '24px',
-        color: '#fff',
-        background: '#000'
-      }}>
-        Loading...
-      </div>
-    );
-  }
+if(!matchData?.teams) return;
 
-  if (error) {
-    return (
-      <div style={{
-        width: '1920px',
-        height: '1080px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '24px',
-        color: '#fff',
-        background: '#000'
-      }}>
-        {error}
-      </div>
-    );
-  }
 
-  if (playerPairs.length === 0) {
-    return (
-      <div style={{
-        width: '1920px',
-        height: '1080px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '24px',
-        color: '#fff',
-      }}>
-        No player images available
-      </div>
-    );
-  }
 
-  const currentPair = playerPairs[currentPairIndex];
+const list:any[]=[];
 
-  return (
-    <div 
-      
-      style={{
-        width: '1920px',
-        height: '1080px',
-        display: 'flex',
-        position: 'relative',
-        overflow: 'hidden'
-      }}
-    >
-      {/* Left Player */}
-      <div style={{
-        width: '50%',
-        height: '100%',
-        position: 'relative',
-      }}>
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={`left-${currentPairIndex}`}
-            initial={{ y: 1080, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 1080, opacity: 0 }}
-            transition={{
-              duration: 0.8,
-              ease: [0.6, 0.05, 0.01, 0.9]
-            }}
-            className='absolute right-[200px] top-[100px]'
-            style={{ 
-              width: '900px', 
-              height: '100%', 
-            }}
-          >
-            <img 
-              src={getPlayerImage(currentPair.left.player)} 
-              alt={currentPair.left.player.playerName}
-              onError={() => handleImageError(currentPair.left.player.uId)}
-              style={{ 
-                width: '100%', 
-                height: '100%', 
-                objectFit: 'contain' 
-              }} 
-            />
-          </motion.div>
-        </AnimatePresence>
-        
-        {/* Player Info Overlay */}
-        <div style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          background: 'linear-gradient(to top, rgba(0, 0, 0, 1), transparent)',
-          padding: '60px',
-          color: '#fff'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          </div>
-        </div>
-      </div>
 
-      {/* Right Player */}
-      <div style={{
-        width: '50%',
-        height: '100%',
-        position: 'relative'
-      }}>
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={`right-${currentPairIndex}`}
-            initial={{ y: 1080, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 1080, opacity: 0 }}
-            transition={{
-              duration: 0.8,
-              ease: [0.6, 0.05, 0.01, 0.9]
-            }}
-            className='absolute left-[200px] top-[100px]'
-            style={{ 
-              width: '900px', 
-              height: '100%', 
-            }}
-          >
-            <img 
-              src={getPlayerImage(currentPair.right.player)} 
-              alt={currentPair.right.player.playerName}
-              onError={() => handleImageError(currentPair.right.player.uId)}
-              style={{ 
-                width: '100%', 
-                height: '100%', 
-                objectFit: 'contain' 
-              }} 
-            />
-          </motion.div>
-        </AnimatePresence>
-        
-        {/* Player Info Overlay */}
-        <div style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          background: 'linear-gradient(to top, rgba(0,0,0,0.9), transparent)',
-          padding: '60px',
-          color: '#fff'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '15px', justifyContent: 'flex-end' }}>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+
+matchData.teams.forEach(team=>{
+
+
+team.players.forEach(player=>{
+
+
+const img =
+player.picUrl?.toLowerCase() || "";
+
+
+
+if(
+
+img &&
+
+!img.includes("def_char") &&
+
+!img.includes("default") &&
+
+!badImages[player.uId]
+
+){
+
+
+list.push({
+
+player,
+
+team
+
+});
+
+
+}
+
+
+});
+
+
+});
+
+
+
+setPlayers(list);
+
+
+
+},[matchData,badImages]);
+
+
+
+
+
+
+
+
+
+
+useEffect(()=>{
+
+
+if(players.length===0) return;
+
+
+
+const nextPlayer=()=>{
+
+
+let available =
+players.filter(
+
+p=>p.team.teamId !== lastTeam
+
+);
+
+
+
+if(available.length===0)
+
+available = players;
+
+
+
+const random =
+
+available[
+Math.floor(Math.random()*available.length)
+];
+
+
+
+setLastTeam(random.team.teamId);
+
+setCurrent(random);
+
+
 };
+
+
+
+nextPlayer();
+
+
+
+const timer=setInterval(()=>{
+
+
+nextPlayer();
+
+
+},5000);
+
+
+
+return ()=>clearInterval(timer);
+
+
+
+},[players]);
+
+
+
+
+
+
+
+
+
+const removePlayer=(id:string)=>{
+
+
+setBadImages(prev=>({
+
+...prev,
+
+[id]:true
+
+}));
+
+
+};
+
+
+
+
+
+
+
+
+
+if(loading)
+
+return (
+
+<div className="w-[1920px] h-[1080px] bg-black text-white flex justify-center items-center">
+
+Loading...
+
+</div>
+
+);
+
+
+
+if(error)
+
+return (
+
+<div className="w-[1920px] h-[1080px] bg-black text-white flex justify-center items-center">
+
+{error}
+
+</div>
+
+);
+
+
+
+if(!current)
+
+return null;
+
+
+
+
+
+
+
+
+return (
+
+
+<div
+
+style={{
+
+width:"1920px",
+
+height:"1080px",
+
+position:"relative",
+
+overflow:"hidden",
+
+background:"transparent"
+
+}}
+
+>
+
+
+
+<AnimatePresence mode="wait">
+
+
+
+
+
+<motion.img
+
+
+key={current.player.uId}
+
+
+
+src={current.player.picUrl}
+
+
+
+onError={()=>removePlayer(current.player.uId)}
+
+
+
+
+
+
+initial={{
+
+y:1200,
+
+opacity:0,
+
+scale:.85,
+
+rotate:5
+
+}}
+
+
+
+
+animate={{
+
+y:0,
+
+opacity:1,
+
+scale:1,
+
+rotate:0
+
+}}
+
+
+
+
+
+exit={{
+
+y:1200,
+
+opacity:0,
+
+scale:.85,
+
+rotate:-5
+
+}}
+
+
+
+
+
+transition={{
+
+duration:1.15,
+
+ease:[0.16,1,0.3,1]
+
+}}
+
+
+
+
+
+
+style={{
+
+position:"absolute",
+
+bottom:"-100px",
+
+left:"460px",
+
+
+// FORCE SAME SIZE
+
+width:"900px",
+
+height:"1100px",
+
+
+objectFit:"contain",
+
+
+zIndex:2
+
+
+}}
+
+
+/>
+
+
+
+
+
+</AnimatePresence>
+
+
+
+
+</div>
+
+
+)
+
+}
+
+
 
 export default PlayerSwitch;

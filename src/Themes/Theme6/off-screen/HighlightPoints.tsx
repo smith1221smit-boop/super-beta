@@ -180,67 +180,210 @@ const HighlightPoints: React.FC<OverAllDataProps> = ({
   if (error || !processedOverallData) return <div>{error || 'No data available'}</div>;
 
   return (
-    <div className=' w-full h-screen p-8 flex flex-col font-[AGENCYB]'>
+  <div className="w-full h-screen flex items-center ">
+    <div className="ml-12 w-[650px]">
 
-      {/* Header row */}
-      <div className='flex w-full mb-[40px] text-[1.5rem] '>
-        <div className='w-1/6 absolute left-[50px]'
+      {/* HEADER */}
+      <motion.div
+        initial={{ opacity: 0, y: -25 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="mb-6"
+      >
+        <h1
+          className="text-[44px] font-[AGENCYB] tracking-[6px]"
           style={{
-            backgroundImage: `linear-gradient(135deg, ${tournament.secondaryColor || "#ff0"}, #000)`,
+            background: `linear-gradient(90deg,${
+              tournament.secondaryColor || "#FFD84A"
+            },white)`,
             WebkitBackgroundClip: "text",
             WebkitTextFillColor: "transparent",
-          }}>RANK</div>
-        <div className='w-4/6 absolute left-[180px]'
+          }}
+        >
+          OVERALL STANDINGS
+        </h1>
+
+        <div
+          className="h-[3px] rounded-full mt-2"
           style={{
-            backgroundImage: `linear-gradient(135deg, ${tournament.secondaryColor || "#ff0"}, #000)`,
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-          }}>TEAM</div>
-        <div className='w-1/6 absolute left-[475px]'
-          style={{
-            backgroundImage: `linear-gradient(135deg, ${tournament.secondaryColor || "#ff0"}, #000)`,
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-          }}>TOTAL</div>
+            background: `linear-gradient(to right,${
+              tournament.primaryColor || "#8B5CF6"
+            },transparent)`
+          }}
+        />
+      </motion.div>
+
+      {/* TABLE HEADER */}
+      <div
+        className="h-12 rounded-xl flex items-center px-5 mb-3 backdrop-blur-md"
+        style={{
+          background: "rgba(255,255,255,.08)",
+          border: "1px solid rgba(255,255,255,.15)"
+        }}
+      >
+        <div className="w-20 text-white/70 text-lg tracking-wider">RANK</div>
+        <div className="flex-1 text-white/70 text-lg tracking-wider">
+          TEAM
+        </div>
+        <div className="w-24 text-center text-white/70 text-lg tracking-wider">
+          PTS
+        </div>
       </div>
 
-      {/* Content boxes */}
-      <div className='flex flex-col w-[500px] gap-2'>
-        <AnimatePresence>
-          {paginatedTeams.map((team, index) => (
-            <motion.div
-              key={team.teamId}
-              className='flex w-full gap-2 text-[22px]'
-              custom={index}
-              initial="hidden"
-              animate="visible"
-              exit="exit"
-              variants={listVariants}
-            >
-              {/* Yellow Box - RANK */}
-              <div
-                style={{ boxShadow: `0 0 0 2px ${"#000"}` }}
-                className='bg-white w-1/6 p-2 flex justify-center items-center  shadow'>
-                <span className='font-bold text-black'>{currentPage * teamsPerPage + index + 1}</span>
-              </div>
+      {/* TEAM LIST */}
+      <AnimatePresence mode="wait">
+        <div className="flex flex-col gap-3">
+          {paginatedTeams.map((team, index) => {
+            const rank = currentPage * teamsPerPage + index + 1;
 
-              {/* Purple Box - TEAM NAME + TOTAL */}
-              <div
-                style={{ backgroundImage: `linear-gradient(135deg, ${tournament.primaryColor || "#ff0"}, #000)` }}
-                className='bg-purple-900 w-5/6 p-2 flex justify-between items-center  shadow'>
-                <div className='flex items-center gap-3'>
-                  <img src={team.teamLogo || "/def_logo.png"} alt={team.teamName} className='w-10 h-10 object-contain' />
-                  <span className='font-bold text-white'>{team.teamName}</span>
+            return (
+              <motion.div
+                key={team.teamId}
+                layout
+                custom={index}
+                initial={{ opacity: 0, x: -80 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 80 }}
+                transition={{
+                  duration: .45,
+                  delay: index * .05
+                }}
+                className="relative overflow-hidden rounded-2xl"
+              >
+                {/* Background */}
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    background:
+                      "linear-gradient(90deg,rgba(255,255,255,.12),rgba(255,255,255,.04))",
+                    backdropFilter: "blur(20px)"
+                  }}
+                />
+
+                {/* Left Accent */}
+                <div
+                  className="absolute left-0 top-0 h-full w-2"
+                  style={{
+                    background:
+                      rank === 1
+                        ? "#FFD84A"
+                        : rank === 2
+                        ? "#D7D7D7"
+                        : rank === 3
+                        ? "#D68E42"
+                        : tournament.primaryColor
+                  }}
+                />
+
+                <div className="relative h-[74px] flex items-center px-4">
+
+                  {/* Rank */}
+                  <div
+                    className={`w-14 h-14 rounded-full flex items-center justify-center text-2xl font-bold mr-5
+                    ${
+                      rank === 1
+                        ? "bg-yellow-400 text-black"
+                        : rank === 2
+                        ? "bg-gray-300 text-black"
+                        : rank === 3
+                        ? "bg-orange-500 text-white"
+                        : "bg-white/10 text-white"
+                    }`}
+                  >
+                    {rank}
+                  </div>
+
+                  {/* Logo */}
+                  <div className="relative mr-4">
+                    <div
+                      className="absolute inset-0 rounded-full blur-xl opacity-50"
+                      style={{
+                        background: tournament.primaryColor || "#7c3aed"
+                      }}
+                    />
+
+                    <img
+                      src={team.teamLogo || "/def_logo.png"}
+                      className="relative w-14 h-14 object-contain"
+                    />
+                  </div>
+
+                  {/* Team */}
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3">
+
+                      <span className="text-white text-[28px] font-[AGENCYB] tracking-wide">
+                        {team.teamTag || team.teamName}
+                      </span>
+
+                    
+                    </div>
+
+                    <div className="text-white/55 text-sm tracking-widest uppercase">
+                      {team.teamName}
+                    </div>
+
+                    {/* Progress */}
+                    <div className="mt-2 w-[220px] h-1 rounded-full bg-white/10 overflow-hidden">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{
+                          width: `${
+                            ((team.total || 0) /
+                              (processedOverallData.teams[0].total || 1)) *
+                            100
+                          }%`
+                        }}
+                        transition={{ duration: 1 }}
+                        className="h-full rounded-full"
+                        style={{
+                          background: tournament.secondaryColor || "#FFD84A"
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                 
+
+                  {/* Total */}
+                  <motion.div
+                    whileHover={{ scale: 1.05 }}
+                    className="w-24 h-14 rounded-xl flex items-center justify-center"
+                    style={{
+                      background: `linear-gradient(135deg,${
+                        tournament.primaryColor || "#7c3aed"
+                      },#1F1B2E)`,
+                      boxShadow:
+                        "0 0 20px rgba(124,58,237,.35)"
+                    }}
+                  >
+                    <span className="text-white text-[30px] font-[AGENCYB]">
+                      {team.total}
+                    </span>
+                  </motion.div>
                 </div>
-                <span className='text-white font-bold mr-[15px]'>{team.total}</span>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      </AnimatePresence>
 
+      {/* Footer */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="flex justify-between mt-6 text-white/50 text-sm"
+      >
+        <span>
+          PAGE {currentPage + 1} / {totalPages}
+        </span>
+
+        <span>
+          MATCH {match?.matchNo || "-"} COMPLETE
+        </span>
+      </motion.div>
     </div>
-  );
+  </div>
+);
 };
 
 export default HighlightPoints;

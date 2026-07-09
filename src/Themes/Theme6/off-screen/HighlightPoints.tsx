@@ -251,10 +251,9 @@ const HighlightPoints: React.FC<OverAllDataProps> = ({
               >
                 {/* Background */}
                 <div
-                  className="absolute inset-0"
+                  className="absolute inset-0 bg-[#000000cc]"
                   style={{
-                    background:
-                      "linear-gradient(90deg,rgba(255,255,255,.12),rgba(255,255,255,.04))",
+                   
                     backdropFilter: "blur(20px)"
                   }}
                 />

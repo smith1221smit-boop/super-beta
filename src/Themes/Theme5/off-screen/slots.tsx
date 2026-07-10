@@ -69,8 +69,8 @@ const Slots: React.FC<SlotsProps> = ({
   const BASE_BOX_W = 200;
   const BASE_BOX_H = 200;
 
-  const GAP_X = 20;
-  const GAP_Y = 40;
+  const GAP_X = 80;
+  const GAP_Y = 20;
 
   const GRID_MAX_WIDTH = 1720; // inside 1920
   const GRID_MAX_HEIGHT = 730;
@@ -171,32 +171,20 @@ const Slots: React.FC<SlotsProps> = ({
                   </linearGradient>
                 </defs>
 
-                <rect
-                  width={boxW}
-                  height={boxH}
-                  fill="white"
-                  clipPath={`url(#clip_${index})`}
-                />
-
-                <rect
-                  y={boxH * 0.72}
-                  width={boxW}
-                  height={boxH * 0.28}
-                  fill={`url(#grad_${index})`}
-                />
+              
 
                 <image
                   href={team.teamLogo || '/def_logo.png'}
-                  x={boxW * 0.1}
+                  x={boxW * 0.17}
                   y={boxH * 0.05}
-                  width={boxW * 0.8}
-                  height={boxH * 0.65}
+                  width={boxW * 0.9}
+                  height={boxH * 0.75}
                   clipPath={`url(#clip_${index})`}
                 />
 
                 <text
-                  x={boxW / 2}
-                  y={boxH - 10}
+                  x={boxW / 1.6}
+                  y={boxH + 0}
                   textAnchor="middle"
                   fill="white"
                   fontSize={Math.max(12, boxW * 0.17)}

@@ -109,7 +109,12 @@ const rightTeams = pageTeams.slice(pageMid);
     <div className="w-[1920px] h-[1080px] flex justify-center relative top-[0px] ">
       {/* Tournament and Round Info */}
       <div className="absolute top-[0px] right-[250px] text-white  flex justify-end w-[100%]">
-        <div className='text-[6rem] font-bebas relative right-[250px]'>MATCH STANDINGS</div>
+        <div 
+        
+         style={{
+            background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})`,
+          }}
+        className='text-[70px] font-bebas relative right-[250px] px-[20px] '>MATCH STANDINGS</div>
          <div
           style={{
             backgroundImage: `linear-gradient(to left, transparent, ${tournament.primaryColor})`,
@@ -151,7 +156,7 @@ const rightTeams = pageTeams.slice(pageMid);
                 src={
                   player.picUrl
                     ? player.picUrl
-                    : '/def_char.png'
+                    : '/def_char.avif'
                 }
                 alt={player.playerName}
                 className="w-full h-full object-cover rounded"
@@ -176,7 +181,7 @@ const rightTeams = pageTeams.slice(pageMid);
  
   {topTeam.placePoints === 10 && (   // 👈 show only if placePoints is 10
    <img
-  src="/chicken.png"
+  src="/chicken.avif"
   alt="Chicken Icon"
   className="w-[8%] relative left-[180px] top-[30px] filter invert-[100%]"
 />
@@ -258,9 +263,9 @@ const rightTeams = pageTeams.slice(pageMid);
           {team.teamTag}
             {team.placePoints === 10 && (
             <img
-              src="https://res.cloudinary.com/dqckienxj/image/upload/v1753019880/roast-chicken_oyt00t.png"
+              src="/chicken.avif"
               alt="Chicken Icon"
-              className="w-[50px]  ml-[50px]"
+              className="w-[70px]  ml-[50px] invert"
             />
           )}
           </div>
@@ -330,7 +335,7 @@ const rightTeams = pageTeams.slice(pageMid);
           {team.teamTag}
             {team.placePoints === 10 && (
             <img
-              src="https://res.cloudinary.com/dqckienxj/image/upload/v1753019880/roast-chicken_oyt00t.png"
+               src="/chicken.avif"
               alt="Chicken Icon"
               className="w-[50px]  ml-[50px]"
             />

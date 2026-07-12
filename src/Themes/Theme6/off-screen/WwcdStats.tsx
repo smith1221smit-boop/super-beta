@@ -368,7 +368,7 @@ className='text-white font-[AGENCYB] text-[100px] absolute left-[136px] top-[520
   className="w-full h-[400px] relative overflow-hidden "
 >
   <img
-    src={player?.picUrl || "/def_char.png"}
+    src={player?.picUrl || "/def_char.avif"}
     alt={player.playerName}
     className="absolute top-0 left-0 w-full h-full object-cover"
   />

@@ -180,7 +180,7 @@ className='text-[167px] ml-[90px] font-[AGENCYB]  text-white absolute flex'>
           </defs>
         </svg>
         {topTeam?.players.map((player, index) => (
-          <img key={player._id} src={player.picUrl || "/def_char.png"} className="absolute " style={{left: `${index * 182.75}px`, top: '6px', width: '322.75px', height: '322px'}} />
+          <img key={player._id} src={player.picUrl || "/def_char.avif"} className="absolute " style={{left: `${index * 182.75}px`, top: '6px', width: '322.75px', height: '322px'}} />
         ))}
         <div>{topTeam?.placePoints === 10 && (
   <img

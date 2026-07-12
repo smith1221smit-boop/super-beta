@@ -215,7 +215,7 @@ type StatKey =
 <div className="w-full h-[780px] relative overflow-hidden">
   {/* Background Logo */}
   <img
-    src={player.teamLogo || '/def_char.png'} // fallback if teamLogo is missing
+    src={player.teamLogo || '/def_char.avif'} // fallback if teamLogo is missing
     alt="logo-bg"
     className="absolute inset-0 w-full h-full -rotate-45 opacity-40 object-contain filter grayscale blur-[1px] scale-[3.5] z-0"
     style={{ mixBlendMode: 'overlay' }}
@@ -242,7 +242,7 @@ type StatKey =
 
   {/* Player Image */}
   <img
-    src={player.picUrl || "/def_char.png"}
+    src={player.picUrl || "/def_char.avif"}
     alt={player.playerName}
     className="w-full h-full object-cover relative z-10"
   />

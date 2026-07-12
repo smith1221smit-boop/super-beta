@@ -188,7 +188,7 @@ borderColor: `${tournament.primaryColor}`
           </defs>
         </svg>
         {topTeam?.players.map((player, index) => (
-          <img key={player._id} src={player.picUrl || "/def_char.png"} className="absolute " style={{left: `${index * 102.75}px`, top: '-4px', width: '202.75px', height: '202px'}} />
+          <img key={player._id} src={player.picUrl || "/def_char.avif"} className="absolute " style={{left: `${index * 102.75}px`, top: '-4px', width: '202.75px', height: '202px'}} />
         ))}
         <div>{topTeam?.placePoints === 10 && (
   <img

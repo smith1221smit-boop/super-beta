@@ -450,7 +450,7 @@ secondaryValue: topPlayer?.numericDamage?.toFixed(2) || "0.00",
             className="absolute left-[-160px] top-[280px]"
             style={{ width: "1000px", height: "800px" }}>
             <img
-              src={playerPhotos[topPlayers[0].uId] || topPlayers[0].picUrl || "/def_char.png"}
+              src={playerPhotos[topPlayers[0].uId] || topPlayers[0].picUrl || "/def_char.avif"}
               alt={topPlayers[0].playerName || "Player"}
               style={{ width: "850px", height: "800px"}} />
           </div>

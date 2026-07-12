@@ -230,7 +230,7 @@ background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tou
       <img
         src={
           p.picUrl ||
-          '/def_char.png'
+           '/def_char.avif'
         }
         alt={p.playerName}
         className="w-full h-full object-cover m-0 p-0"

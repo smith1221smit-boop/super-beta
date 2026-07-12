@@ -150,7 +150,7 @@ const MatchDataComponent: React.FC<MatchDataProps> = ({ tournament, round, match
               {topTeam?.players.map((player, idx) => (
                 <img
                   key={idx}
-                  src={player.picUrl || "/def_char.png"}
+                  src={player.picUrl || "/def_char.avif"}
                   alt={player.playerName}
                   className="w-[200px] h-[200px] object-cover top-[65px] relative ml-[-60px]"
                 />

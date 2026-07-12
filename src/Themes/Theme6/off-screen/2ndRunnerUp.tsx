@@ -348,7 +348,7 @@ const SecondRunnerUp: React.FC<ChampionsProps> = ({ tournament, round, matchData
    
              {/* Player Image */}
              <img
-               src={playerPhotos[player.uId] || player.picUrl || '/def_char.png'}
+               src={playerPhotos[player.uId] || player.picUrl || '/def_char.avif'}
                className="w-[840px] h-[500px] scale-150 absolute object-contain top-[280px] ml-[40px]"
              />
    

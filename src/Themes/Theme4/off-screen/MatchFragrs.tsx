@@ -214,7 +214,7 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
   className="w-full h-[400px] overflow-hidden relative rounded-lg"
 >
   <img
-    src={player?.picUrl || "/def_char.png"}
+    src={player?.picUrl || "/def_char.avif"}
     alt={player.playerName}
     className="w-full h-full object-cover object-center"
   />

@@ -156,6 +156,7 @@ import HighlightSchedule6 from '../Themes/Theme6/off-screen/HighlightSchedule.ts
 import RosterShowCase6 from '../Themes/Theme6/off-screen/RosterShowCase.tsx'
 import PlayerSwitch6 from '../Themes/Theme6/off-screen/PlayerSwitch.tsx'
 import TopFragger6 from '../Themes/Theme6/off-screen/TopFragger.tsx'
+import Battlebar from "../Themes/Theme6/on-screen/battlebar.tsx"
 
 
 interface Tournament {
@@ -398,6 +399,7 @@ const PublicThemeRenderer: React.FC = () => {
       RosterShowCase: RosterShowCase6,
       PlayerSwitch: PlayerSwitch6,
       TopFragger: TopFragger6,
+      Battlebar: Battlebar,
     },
   };
 const activeTheme = themes[theme as 'Theme1'  | 'Theme3' | 'Theme4' | 'Theme5' | 'Theme6'] || themes['Theme1'];
@@ -430,7 +432,7 @@ const activeTheme = themes[theme as 'Theme1'  | 'Theme3' | 'Theme4' | 'Theme5' |
     MapPreview: MapPreviewComp,
     Slots: SlotsComp,
     Mvp: MvpComp,
-    
+    Battlebar : BattlebarComp,
       Achive: AchiveComp,
     HighlightPoints: HighlightPointsComp,
     HighlightSchedule: HighlightScheduleComp,
@@ -463,7 +465,7 @@ const activeTheme = themes[theme as 'Theme1'  | 'Theme3' | 'Theme4' | 'Theme5' |
         const needsMatches = true;
         const needsMatchDatas = [ 'Schedule', 'highlightPoints', 'HighlightSchedule'].includes(view);
         const needsOverallWithMatch = false; // OverallFrags uses round-level overall data, not match-specific
-        const needsMatchData = ['Upper', 'Dom', 'Alerts', 'LiveStats', 'LiveFrags', 'MatchData', 'Achive','MatchFragrs', 'WwcdSummary', 'WwcdStats', 'playerH2H', 'mapPreview', 'slots', 'TeamH2H', 'mvp', 'RosterShowCase', 'MatchSummary', 'Champions','1stRunnerUp', '2ndRunnerUp', 'EventMvp', 'PlayerSwitch'].includes(view);
+        const needsMatchData = ['Upper', 'Dom', 'Alerts', 'LiveStats', 'LiveFrags', 'MatchData', 'Achive','MatchFragrs', 'WwcdSummary', 'WwcdStats', 'playerH2H', 'mapPreview', 'slots', 'TeamH2H', 'mvp', 'RosterShowCase', 'MatchSummary', 'Champions','1stRunnerUp', '2ndRunnerUp', 'EventMvp', 'PlayerSwitch' ,'Battlebar'].includes(view);
         const needsBackpackInfo = [ 'Upper',].includes(view);
 
         // Always fetch basic data
@@ -710,6 +712,17 @@ const activeTheme = themes[theme as 'Theme1'  | 'Theme3' | 'Theme4' | 'Theme5' |
           return <RosterShowCaseComp tournament={tournament} round={round} match={match} matchData={matchData} />
         case 'PlayerSwitch':
           return PlayerSwitchComp ? <PlayerSwitchComp match={match} matchData={matchData} loading={loading} error={error} /> : null;
+          case 'Battlebar':
+  return (
+    <BattlebarComp
+      tournament={tournament}
+      round={round}
+      match={match}
+      matchData={matchData}
+      loading={loading}
+      error={error}
+    />
+  );
       default:
         return (
           <div style={{

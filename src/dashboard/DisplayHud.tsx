@@ -25,7 +25,7 @@ const VIEW_GROUPS = [
       { key: 'intro', label: 'Intro' },
       { key: 'LiveStats', label: 'Live Stats' },
       { key: 'LiveFrags', label: 'Live Frags' },
-           
+       { key: 'Battlebar', label: 'Battlebar' },    
     ]
   },
   {

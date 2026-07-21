@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate } from 'react-router-dom';
-import { FaEdit, FaTrash, FaClock, FaMap, FaChevronRight } from 'react-icons/fa';
+import { FaEdit, FaTrash, FaClock, FaMap, FaChevronRight, FaPlus } from 'react-icons/fa';
 import api from '../login/api.tsx';
 
 interface Match {
@@ -26,14 +26,16 @@ interface GroupData {
 const MAPS = ['Erangel', 'Miramar', 'Rondo', 'Sanhok'] as const;
 type MapName = typeof MAPS[number];
 
+// Muted broadcast-safe identifiers — distinct enough to scan a list fast,
+// desaturated so they sit quietly inside the red/black system instead of
+// competing with the tally-red accent.
 const MAP_COLORS: Record<MapName, string> = {
-  Erangel: '#4ade80',
-  Miramar: '#f59e0b',
-  Rondo:   '#60a5fa',
-  Sanhok:  '#34d399',
+  Erangel: '#5BC98A',
+  Miramar: '#E0A64D',
+  Rondo:   '#5B9FE0',
+  Sanhok:  '#4DBFA8',
 };
 
-// Map descriptors shown in the picker card
 const MAP_DESC: Record<MapName, string> = {
   Erangel: 'Temperate · 8×8 km',
   Miramar: 'Desert · 8×8 km',
@@ -42,310 +44,299 @@ const MAP_DESC: Record<MapName, string> = {
 };
 
 // ── Styles ─────────────────────────────────────────────────────────────────────
+// PERF NOTES (mirrors home.tsx):
+// - No backdrop-blur anywhere (recomputes every scroll/paint frame on some GPUs).
+// - No decorative keyframe animation — only the two functional spinners.
+// - Hover states are instant color/border swaps, no transition on color/background
+//   so interaction never waits on a tween. The few `transition` rules that remain
+//   are opacity-only on transform-free properties and kept under 120ms.
+// - Single font import, three weights per family max.
+// - Selectors are single-class where possible to keep specificity flat and cheap.
 const STYLES = `
-  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
-  .m-root { font-family: 'Rajdhani', sans-serif; }
-  .m-root *, .m-root *::before, .m-root *::after { box-sizing: border-box; }
-  .m-orb { font-family: 'Orbitron', monospace !important; }
+  .m-root {
+    --bg: #0B0C0E;
+    --panel: #131418;
+    --panel-raised: #17181D;
+    --line: #24262B;
+    --text: #F4F2EE;
+    --text-muted: #93959C;
+    --text-dim: #55565C;
+    --tally: #E11D2E;
+    --tally-dim: #8C1220;
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  }
+  .m-root, .m-root *, .m-root *::before, .m-root *::after { box-sizing: border-box; }
+  .m-display { font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; }
+  .m-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 
-  /* ── Page ── */
-  .m-page {
-    min-height: 100vh;
-    background: linear-gradient(135deg, #120038 0%, #000000 50%, #120038 100%);
-    padding: 32px; position: relative; overflow: hidden;
+  .m-root a, .m-root button, .m-root input { font-family: inherit; }
+  .m-root button:focus-visible, .m-root input:focus-visible {
+    outline: 2px solid var(--tally); outline-offset: 2px;
   }
-  .m-hex {
-    position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    background-image: radial-gradient(circle, rgba(139,92,246,0.05) 1px, transparent 1px);
-    background-size: 40px 40px;
-  }
-  .m-scan {
-    position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.02;
-    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(139,92,246,0.5) 2px, rgba(139,92,246,0.5) 4px);
-  }
-  .m-glow {
-    position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    background: radial-gradient(ellipse 80% 40% at 50% -5%, rgba(139,92,246,0.1), transparent);
-  }
-  .m-inner { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; }
+
+  /* ── Page shell ── */
+  .m-page { min-height: 100vh; background: var(--bg); padding: 40px 32px 64px; position: relative; }
+  .m-inner { max-width: 1100px; margin: 0 auto; }
 
   /* ── Page header ── */
   .m-page-hdr {
-    display: flex; justify-content: space-between; align-items: flex-start;
-    margin-bottom: 32px; padding-bottom: 24px;
-    border-bottom: 1px solid rgba(139,92,246,0.18);
+    display: flex; justify-content: space-between; align-items: flex-end; gap: 20px;
+    margin-bottom: 28px; padding-bottom: 24px; border-bottom: 1px solid var(--line);
   }
-  .m-tag {
-    display: inline-block;
-    background: rgba(139,92,246,0.1); border: 1px solid rgba(139,92,246,0.3);
-    color: #8b5cf6; font-family: 'Orbitron', monospace;
-    font-size: 10px; letter-spacing: 1px;
-    padding: 3px 10px; border-radius: 4px; margin-bottom: 8px;
-  }
-  .m-page-title { font-family: 'Orbitron', monospace; font-size: 26px; font-weight: 900; color: #fff; letter-spacing: 1px; margin: 0 0 4px; }
-  .m-page-sub { color: #9ca3af; font-size: 13px; letter-spacing: 0.3px; }
-
-  /* ── Stats bar ── */
-  .m-statsbar { display: flex; gap: 14px; margin-bottom: 28px; }
-  .m-stat {
-    background: rgba(0,0,0,0.5); border: 1px solid rgba(139,92,246,0.14);
-    border-radius: 10px; padding: 13px 20px;
-    display: flex; flex-direction: column; gap: 2px; min-width: 100px;
-  }
-  .m-stat-val { font-family: 'Orbitron', monospace; font-size: 22px; font-weight: 900; color: yellow; }
-  .m-stat-lbl { font-size: 11px; color: #9ca3af; letter-spacing: 0.5px; text-transform: uppercase; }
+  .m-eyebrow { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .m-eyebrow-dot { width: 6px; height: 6px; background: var(--tally); flex-shrink: 0; }
+  .m-eyebrow-txt { font-size: 11px; letter-spacing: 0.22em; color: var(--text-muted); text-transform: uppercase; }
+  .m-page-title { font-size: 30px; font-weight: 800; color: var(--text); letter-spacing: -0.01em; text-transform: uppercase; margin: 0 0 6px; line-height: 1.05; }
+  .m-page-sub { color: var(--text-muted); font-size: 14px; }
 
   /* ── Buttons ── */
   .m-btn-primary {
-    background: linear-gradient(135deg, #a855f7, #7e22ce);
-    color: #fff; border: 1px solid rgba(139,92,246,0.5);
-    font-family: 'Orbitron', monospace; font-size: 11px; font-weight: 700;
-    letter-spacing: 1px; padding: 11px 24px; border-radius: 8px; cursor: pointer;
-    display: flex; align-items: center; gap: 8px;
+    background: var(--tally); color: #fff; border: 1px solid var(--tally);
+    font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700;
+    letter-spacing: 0.01em; padding: 12px 22px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
   }
-  .m-btn-primary:hover { box-shadow: 0 0 18px rgba(139,92,246,0.35); }
-  .m-btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+  .m-btn-primary:hover { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .m-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .m-btn-primary:disabled:hover { background: var(--tally); color: #fff; border-color: var(--tally); }
 
   .m-btn-ghost {
-    background: rgba(0,0,0,0.45); color: #9ca3af;
-    border: 1px solid rgba(139,92,246,0.18);
-    font-family: 'Rajdhani', sans-serif; font-size: 14px; font-weight: 600;
-    padding: 11px 22px; border-radius: 8px; cursor: pointer;
+    background: transparent; color: var(--text); border: 1px solid var(--line);
+    font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700;
+    padding: 12px 22px; cursor: pointer; white-space: nowrap;
   }
-  .m-btn-ghost:hover { background: rgba(0,0,0,0.06); color: #8b5cf6; border-color: rgba(139,92,246,0.4); }
+  .m-btn-ghost:hover { border-color: var(--tally); color: var(--tally); }
 
   .m-btn-save {
-    background: linear-gradient(135deg, #a855f7, #7e22ce);
-    color: #fff; border: 1px solid rgba(139,92,246,0.4);
-    font-family: 'Orbitron', monospace; font-size: 10px; font-weight: 700;
-    letter-spacing: 1px; padding: 9px 18px; border-radius: 7px; cursor: pointer;
+    background: var(--tally); color: #fff; border: 1px solid var(--tally);
+    font-family: 'Space Grotesk', sans-serif; font-size: 12px; font-weight: 700;
+    padding: 10px 18px; cursor: pointer;
   }
-  .m-btn-save:hover { box-shadow: 0 0 14px rgba(139,92,246,0.3); }
+  .m-btn-save:hover { background: var(--tally-dim); border-color: var(--tally-dim); }
 
   .m-btn-cancel {
-    background: rgba(0,0,0,0.4); color: #6b7280;
-    border: 1px solid rgba(255,255,255,0.08);
-    font-family: 'Rajdhani', sans-serif; font-size: 14px; font-weight: 600;
-    padding: 9px 18px; border-radius: 7px; cursor: pointer;
+    background: transparent; color: var(--text-muted); border: 1px solid var(--line);
+    font-size: 13px; font-weight: 600; padding: 10px 18px; cursor: pointer;
   }
-  .m-btn-cancel:hover { color: #9ca3af; }
+  .m-btn-cancel:hover { color: var(--text); border-color: var(--text-dim); }
 
-  /* ══════════════════════════════════════════
-     REMODELED FORM
-  ══════════════════════════════════════════ */
-  .m-form-panel {
-    background: rgba(0,0,0,0.55);
-    border: 1px solid rgba(139,92,246,0.22);
-    border-radius: 18px; margin-bottom: 28px;
-    overflow: hidden;
-    box-shadow: 0 0 40px rgba(139,92,246,0.05);
-  }
+  /* ── Stats bar ── */
+  .m-statsbar { display: flex; flex-wrap: wrap; gap: 1px; background: var(--line); border: 1px solid var(--line); margin-bottom: 28px; }
+  .m-stat { background: var(--panel); padding: 16px 22px; display: flex; flex-direction: column; gap: 4px; min-width: 130px; flex: 1; }
+  .m-stat-val { font-family: 'Space Grotesk', sans-serif; font-size: 24px; font-weight: 800; color: var(--tally); }
+  .m-stat-lbl { font-size: 10px; color: var(--text-muted); letter-spacing: 0.14em; text-transform: uppercase; }
 
-  /* Form top bar */
+  /* ── Form panel ── */
+  .m-form-panel { background: var(--panel); border: 1px solid var(--line); margin-bottom: 28px; }
+
   .m-form-topbar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 18px 28px;
-    background: rgba(0,0,0,0.4);
-    border-bottom: 1px solid rgba(139,92,246,0.12);
+    display: flex; align-items: center; gap: 10px; padding: 16px 24px;
+    border-bottom: 1px solid var(--line); background: var(--panel-raised);
   }
-  .m-form-topbar-l { display: flex; align-items: center; gap: 10px; }
-  .m-form-title { font-family: 'Orbitron', monospace; font-size: 14px; font-weight: 700; color: #fff; letter-spacing: 0.5px; }
+  .m-form-tag {
+    background: var(--tally); color: #fff; font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; letter-spacing: 0.1em; padding: 3px 8px; text-transform: uppercase;
+  }
+  .m-form-title { font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700; color: var(--text); letter-spacing: 0.01em; text-transform: uppercase; }
 
-  /* Form body — two column layout */
-  .m-form-body { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
-  .m-form-left { padding: 24px 28px; border-right: 1px solid rgba(139,92,246,0.1); }
-  .m-form-right { padding: 24px 28px; display: flex; flex-direction: column; }
+  .m-form-body { display: grid; grid-template-columns: 1fr 1fr; }
+  .m-form-left { padding: 24px; border-right: 1px solid var(--line); }
+  .m-form-right { padding: 24px; display: flex; flex-direction: column; min-height: 0; }
 
-  .m-field-lbl { font-size: 10px; color: #9ca3af; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
-  .m-field-lbl::before { content: ''; width: 3px; height: 11px; background: #8b5cf6; border-radius: 2px; box-shadow: 0 0 5px #8b5cf6; }
+  .m-field-lbl {
+    font-size: 10px; color: var(--text-muted); letter-spacing: 0.12em; text-transform: uppercase;
+    margin: 0 0 8px; display: flex; align-items: center; gap: 7px;
+  }
+  .m-field-lbl::before { content: ''; width: 3px; height: 11px; background: var(--tally); }
 
   .m-input {
-    width: 100%; padding: 11px 14px;
-    background: rgba(0,0,0,0.6); border: 1px solid rgba(139,92,246,0.2);
-    border-radius: 8px; color: #fff;
-    font-family: 'Rajdhani', sans-serif; font-size: 15px; outline: none;
+    width: 100%; padding: 11px 13px; background: var(--bg); border: 1px solid var(--line);
+    color: var(--text); font-size: 15px; outline: none; color-scheme: dark;
   }
-  .m-input::placeholder { color: rgba(156,163,175,0.35); }
-  .m-input:focus { border-color: rgba(139,92,246,0.6); box-shadow: 0 0 0 2px rgba(139,92,246,0.1); }
+  .m-input::placeholder { color: var(--text-dim); }
+  .m-input:focus { border-color: var(--tally); }
 
-  /* Two small fields side by side */
-  .m-fields-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+  .m-fields-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 22px; }
 
-  /* ── Map picker cards ── */
+  /* ── Map picker ── */
   .m-map-picker-lbl { margin-bottom: 12px; }
   .m-map-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
   .m-map-card {
     position: relative; cursor: pointer; user-select: none;
-    background: rgba(0,0,0,0.5);
-    border: 1px solid rgba(139,92,246,0.12);
-    border-radius: 11px; padding: 14px 14px 12px;
-    overflow: hidden;
+    background: var(--bg); border: 1px solid var(--line); padding: 13px 13px 11px;
   }
-  .m-map-card:hover { border-color: rgba(139,92,246,0.35); background: rgba(139,92,246,0.04); }
-
-  .m-map-card.mc-sel {
-    border-color: var(--mc);
-    background: rgba(0,0,0,0.7);
-    box-shadow: 0 0 0 1px var(--mc), 0 0 18px color-mix(in srgb, var(--mc) 25%, transparent);
-  }
-
-  .m-map-card-bar { position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--mc); opacity: 0.4; }
+  .m-map-card:hover { border-color: var(--text-dim); }
+  .m-map-card.mc-sel { border-color: var(--mc); box-shadow: inset 0 0 0 1px var(--mc); }
+  .m-map-card-bar { position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--mc); opacity: 0.35; }
   .m-map-card.mc-sel .m-map-card-bar { opacity: 1; }
-
-  .m-map-card-name { font-family: 'Orbitron', monospace; font-size: 13px; font-weight: 900; color: #9ca3af; letter-spacing: 0.5px; margin-bottom: 3px; }
+  .m-map-card-name { font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.01em; margin-bottom: 3px; text-transform: uppercase; }
   .m-map-card.mc-sel .m-map-card-name { color: var(--mc); }
-
-  .m-map-card-desc { font-size: 11px; color: #374151; font-family: 'Barlow Condensed', sans-serif; font-weight: 600; letter-spacing: 0.3px; }
-  .m-map-card.mc-sel .m-map-card-desc { color: #6b7280; }
-
+  .m-map-card-desc { font-size: 11px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; }
   .m-map-check {
-    position: absolute; top: 8px; right: 9px;
-    width: 16px; height: 16px; border-radius: 50%;
-    background: var(--mc); display: none;
-    align-items: center; justify-content: center;
+    position: absolute; top: 8px; right: 9px; width: 15px; height: 15px;
+    background: var(--mc); display: none; align-items: center; justify-content: center;
     font-size: 9px; font-weight: 900; color: #000;
   }
-  .m-map-card.mc-sel .m-map-check { display: flex; box-shadow: 0 0 6px var(--mc); }
+  .m-map-card.mc-sel .m-map-check { display: flex; }
 
   /* ── Group chips ── */
   .m-groups-lbl { margin-bottom: 12px; }
-  .m-groups-list { display: flex; flex-direction: column; gap: 7px; flex: 1; overflow-y: auto; }
+  .m-groups-list { display: flex; flex-direction: column; gap: 6px; flex: 1; overflow-y: auto; max-height: 260px; }
 
   .m-group-chip {
-    display: flex; align-items: center; gap: 10px;
-    padding: 11px 14px; border-radius: 9px; cursor: pointer;
-    background: rgba(0,0,0,0.4); border: 1px solid rgba(139,92,246,0.1);
-    user-select: none;
+    display: flex; align-items: center; gap: 10px; padding: 11px 13px; cursor: pointer;
+    background: var(--bg); border: 1px solid var(--line); user-select: none;
   }
-  .m-group-chip:hover { border-color: rgba(139,92,246,0.32); background: rgba(139,92,246,0.04); }
-  .m-group-chip.gc-active { background: rgba(139,92,246,0.09); border-color: #8b5cf6; }
-
-  .m-group-chip-dot {
-    width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
-    background: rgba(139,92,246,0.2); border: 1px solid rgba(139,92,246,0.3);
-  }
-  .m-group-chip.gc-active .m-group-chip-dot { background: #8b5cf6; box-shadow: 0 0 6px #8b5cf6; border-color: #8b5cf6; }
-
-  .m-group-chip-name { font-family: 'Orbitron', monospace; font-size: 11px; font-weight: 700; color: #9ca3af; letter-spacing: 0.3px; flex: 1; }
-  .m-group-chip.gc-active .m-group-chip-name { color: #8b5cf6; }
-
-  .m-group-chip-check {
-    font-size: 10px; color: #8b5cf6; font-weight: 900; opacity: 0;
-  }
+  .m-group-chip:hover { border-color: var(--text-dim); }
+  .m-group-chip.gc-active { border-color: var(--tally); background: rgba(225,29,46,0.06); }
+  .m-group-chip-dot { width: 6px; height: 6px; flex-shrink: 0; background: var(--line); border: 1px solid var(--text-dim); }
+  .m-group-chip.gc-active .m-group-chip-dot { background: var(--tally); border-color: var(--tally); }
+  .m-group-chip-name { font-family: 'Space Grotesk', sans-serif; font-size: 12px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.01em; flex: 1; text-transform: uppercase; }
+  .m-group-chip.gc-active .m-group-chip-name { color: var(--text); }
+  .m-group-chip-check { font-size: 10px; color: var(--tally); font-weight: 900; opacity: 0; }
   .m-group-chip.gc-active .m-group-chip-check { opacity: 1; }
 
-  .m-no-groups { font-family: 'Orbitron', monospace; font-size: 10px; color: #1f2937; letter-spacing: 1px; text-align: center; padding: 24px; border: 1px dashed rgba(139,92,246,0.08); border-radius: 9px; }
-
-  /* Form footer */
-  .m-form-footer {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 28px;
-    border-top: 1px solid rgba(139,92,246,0.1);
-    background: rgba(0,0,0,0.35);
+  .m-no-groups {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim);
+    letter-spacing: 0.08em; text-align: center; padding: 28px; border: 1px dashed var(--line);
   }
-  .m-form-footer-info { font-size: 12px; color: #374151; font-family: 'Orbitron', monospace; letter-spacing: 0.5px; }
-  .m-form-footer-info span { color: #8b5cf6; font-weight: 900; }
+
+  /* ── Form footer ── */
+  .m-form-footer {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    padding: 16px 24px; border-top: 1px solid var(--line); background: var(--panel-raised);
+  }
+  .m-form-footer-info { font-size: 11px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; letter-spacing: 0.06em; }
+  .m-form-footer-info b { color: var(--tally); font-weight: 700; }
   .m-form-footer-actions { display: flex; gap: 10px; }
 
-  /* ── Spinner sm ── */
   .m-spinner-sm {
-    width: 14px; height: 14px;
-    border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff;
-    border-radius: 50%; animation: mspin 0.8s linear infinite; display: inline-block;
+    width: 13px; height: 13px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
+    border-radius: 50%; animation: m-spin 0.7s linear infinite; display: inline-block;
   }
 
-  /* ══════════════════════════════════════════
-     MATCH LIST
-  ══════════════════════════════════════════ */
-  .m-divider {
-    display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
-  }
-  .m-divider span { font-family: 'Orbitron', monospace; font-size: 10px; letter-spacing: 2px; color: #8b5cf6; white-space: nowrap; }
-  .m-divider::before, .m-divider::after { content: ''; flex: 1; height: 1px; background: rgba(139,92,246,0.2); }
+  /* ── Section divider ── */
+  .m-divider { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .m-divider-txt { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.2em; color: var(--tally); white-space: nowrap; text-transform: uppercase; }
+  .m-divider-line { flex: 1; height: 1px; background: var(--line); }
 
-  .m-list { display: flex; flex-direction: column; gap: 10px; padding-bottom: 48px; }
+  /* ── Match list ── */
+  .m-list { display: flex; flex-direction: column; gap: 1px; background: var(--line); border: 1px solid var(--line); }
 
-  .m-row {
-    position: relative; overflow: hidden;
-    background: rgba(0,0,0,0.45); border: 1px solid rgba(139,92,246,0.12);
-    border-radius: 14px; cursor: pointer;
-  }
-  .m-row:hover { border-color: rgba(139,92,246,0.38); box-shadow: 0 0 20px rgba(139,92,246,0.07); }
+  .m-row { position: relative; background: var(--panel); cursor: pointer; }
+  .m-row:hover { background: var(--panel-raised); }
 
-  .m-row-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
-  .m-row-body { padding: 18px 20px 18px 24px; display: flex; align-items: center; gap: 16px; }
+  .m-row-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+  .m-row-body { padding: 16px 18px; display: flex; align-items: center; gap: 16px; }
 
   .m-match-num {
-    font-family: 'Orbitron', monospace; font-size: 11px; font-weight: 900; color: #000;
-    border-radius: 7px; padding: 6px 12px; flex-shrink: 0; letter-spacing: 0.5px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: #000;
+    padding: 6px 11px; flex-shrink: 0; letter-spacing: 0.03em;
   }
 
   .m-map-block { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-  .m-map-name { font-family: 'Orbitron', monospace; font-size: 16px; font-weight: 900; color: #fff; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .m-map-name { font-family: 'Space Grotesk', sans-serif; font-size: 16px; font-weight: 700; color: var(--text); letter-spacing: 0.01em; margin-bottom: 5px; text-transform: uppercase; }
   .m-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
   .m-time-chip {
-    display: flex; align-items: center; gap: 5px; font-size: 12px; color: #9ca3af;
-    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
-    padding: 3px 10px; border-radius: 5px;
+    display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace; border: 1px solid var(--line); padding: 3px 9px;
   }
   .m-group-pill {
-    font-size: 11px; color: #8b5cf6;
-    background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.2);
-    padding: 2px 9px; border-radius: 4px;
-    font-family: 'Orbitron', monospace; letter-spacing: 0.3px;
+    font-size: 10px; color: var(--tally); border: 1px solid rgba(225,29,46,0.35);
+    padding: 3px 9px; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.04em;
   }
 
   .m-row-actions { display: flex; gap: 6px; flex-shrink: 0; opacity: 0; }
   .m-row:hover .m-row-actions { opacity: 1; }
-  .m-nav-arrow { color: #1f2937; flex-shrink: 0; }
-  .m-row:hover .m-nav-arrow { color: #8b5cf6; }
+  .m-nav-arrow { color: var(--line); flex-shrink: 0; }
+  .m-row:hover .m-nav-arrow { color: var(--tally); }
 
-  .m-ic-btn { width: 32px; height: 32px; border-radius: 7px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-  .m-ic-edit { background: rgba(37,99,235,0.75); }
-  .m-ic-edit:hover { background: rgba(37,99,235,1); box-shadow: 0 0 10px rgba(59,130,246,0.4); }
-  .m-ic-del { background: rgba(220,38,38,0.75); }
-  .m-ic-del:hover { background: rgba(220,38,38,1); box-shadow: 0 0 10px rgba(239,68,68,0.4); }
+  .m-ic-btn { width: 32px; height: 32px; border: 1px solid var(--line); background: var(--bg); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .m-ic-edit:hover { border-color: #5B9FE0; background: rgba(91,159,224,0.1); }
+  .m-ic-del:hover { border-color: var(--tally); background: rgba(225,29,46,0.1); }
 
   /* ── Inline edit ── */
-  .m-edit-form { padding: 16px 22px; border-top: 1px solid rgba(139,92,246,0.1); background: rgba(0,0,0,0.3); }
+  .m-edit-header { padding: 14px 18px 0; display: flex; align-items: center; gap: 10px; }
+  .m-edit-flag { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--tally); letter-spacing: 0.16em; text-transform: uppercase; }
+  .m-edit-form { padding: 14px 18px 18px; }
   .m-edit-grid { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 12px; margin-bottom: 14px; }
 
-  /* ── Map picker inline (edit mode) ── */
-  .m-edit-map-row { display: flex; gap: 8px; }
+  .m-edit-map-row { display: flex; gap: 8px; flex-wrap: wrap; }
   .m-edit-map-chip {
-    flex: 1; padding: 9px 8px; border-radius: 8px; cursor: pointer; text-align: center;
-    background: rgba(0,0,0,0.5); border: 1px solid rgba(139,92,246,0.1);
-    font-family: 'Orbitron', monospace; font-size: 10px; font-weight: 700;
-    color: #4b5563; letter-spacing: 0.3px; user-select: none;
+    flex: 1 1 70px; padding: 9px 8px; cursor: pointer; text-align: center;
+    background: var(--bg); border: 1px solid var(--line);
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700;
+    color: var(--text-dim); letter-spacing: 0.03em; user-select: none; text-transform: uppercase;
   }
-  .m-edit-map-chip:hover { border-color: rgba(139,92,246,0.3); color: #9ca3af; }
-  .m-edit-map-chip.emc-sel { border-color: var(--mc); color: var(--mc); background: rgba(0,0,0,0.7); box-shadow: 0 0 0 1px var(--mc); }
+  .m-edit-map-chip:hover { border-color: var(--text-dim); color: var(--text-muted); }
+  .m-edit-map-chip.emc-sel { border-color: var(--mc); color: var(--mc); box-shadow: inset 0 0 0 1px var(--mc); }
 
   .m-edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
-  /* ── Loading ── */
-  .m-loading {
-    min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(135deg, #120038 0%, #000 50%, #120038 100%);
-    flex-direction: column; gap: 16px;
-  }
-  .m-spinner { width: 48px; height: 48px; border: 3px solid rgba(139,92,246,0.12); border-top-color: #8b5cf6; border-radius: 50%; animation: mspin 1s linear infinite; }
-  @keyframes mspin { to { transform: rotate(360deg); } }
-  .m-loading-txt { font-family: 'Orbitron', monospace; font-size: 12px; color: #8b5cf6; letter-spacing: 2px; }
+  /* ── Loading / error ── */
+  .m-loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--bg); flex-direction: column; gap: 18px; }
+  .m-spinner { width: 40px; height: 40px; border: 3px solid var(--line); border-top-color: var(--tally); border-radius: 50%; animation: m-spin 0.9s linear infinite; }
+  @keyframes m-spin { to { transform: rotate(360deg); } }
+  .m-loading-txt { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-muted); letter-spacing: 0.2em; text-transform: uppercase; }
+  .m-error-txt { font-family: 'JetBrains Mono', monospace; color: var(--tally); font-size: 13px; letter-spacing: 0.04em; }
 
-  /* ── Empty ── */
-  .m-empty { text-align: center; padding: 64px 24px; }
+  /* ── Empty state ── */
+  .m-empty { text-align: center; padding: 72px 24px; border: 1px dashed var(--line); }
   .m-empty-icon {
-    width: 68px; height: 68px; border-radius: 50%; margin: 0 auto 20px;
-    background: rgba(139,92,246,0.07); border: 1px solid rgba(139,92,246,0.25);
-    display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 0 20px rgba(139,92,246,0.1);
+    width: 60px; height: 60px; margin: 0 auto 20px; background: var(--panel);
+    border: 1px solid var(--line); display: flex; align-items: center; justify-content: center;
   }
-  .m-empty-title { font-family: 'Orbitron', monospace; font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 8px; }
-  .m-empty-sub { color: #9ca3af; font-size: 14px; margin-bottom: 24px; }
+  .m-empty-title { font-family: 'Space Grotesk', sans-serif; font-size: 17px; font-weight: 700; color: var(--text); margin: 0 0 8px; text-transform: uppercase; }
+  .m-empty-sub { color: var(--text-muted); font-size: 14px; margin-bottom: 26px; }
+
+  /* ══════════════════════════════════════════
+     RESPONSIVE — tablet & mobile
+  ══════════════════════════════════════════ */
+  @media (max-width: 860px) {
+    .m-form-body { grid-template-columns: 1fr; }
+    .m-form-left { border-right: none; border-bottom: 1px solid var(--line); }
+    .m-groups-list { max-height: 220px; }
+  }
+
+  @media (max-width: 640px) {
+    .m-page { padding: 24px 16px 48px; }
+    .m-page-hdr { flex-direction: column; align-items: stretch; gap: 16px; }
+    .m-page-hdr .m-btn-primary, .m-page-hdr .m-btn-ghost { width: 100%; justify-content: center; }
+    .m-page-title { font-size: 24px; }
+
+    .m-statsbar { flex-wrap: nowrap; overflow-x: auto; }
+    .m-stat { min-width: 108px; padding: 13px 16px; }
+    .m-stat-val { font-size: 20px; }
+
+    .m-form-left, .m-form-right { padding: 18px; }
+    .m-fields-row { grid-template-columns: 1fr; gap: 12px; margin-bottom: 18px; }
+    .m-form-footer { flex-direction: column; align-items: stretch; }
+    .m-form-footer-actions { justify-content: stretch; }
+    .m-form-footer-actions button { flex: 1; }
+
+    .m-row-body { padding: 14px; gap: 12px; flex-wrap: wrap; }
+    .m-map-block { flex-basis: 100%; order: 3; }
+    /* Actions live on touch devices — no hover, so keep them visible */
+    .m-row-actions { opacity: 1; }
+    .m-nav-arrow { display: none; }
+
+    .m-edit-grid { grid-template-columns: 1fr 1fr; }
+    .m-edit-grid > div:nth-child(3) { grid-column: 1 / -1; }
+
+    .m-map-grid { gap: 7px; }
+  }
+
+  @media (max-width: 420px) {
+    .m-edit-grid { grid-template-columns: 1fr; }
+  }
+
+  @media (hover: none) {
+    .m-row-actions { opacity: 1; }
+  }
 `;
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -478,7 +469,7 @@ const Match: React.FC = () => {
       <style>{STYLES}</style>
       <div className="m-root m-loading">
         <div className="m-spinner" />
-        <p className="m-loading-txt">LOADING MATCHES</p>
+        <p className="m-loading-txt">Loading matches</p>
       </div>
     </>
   );
@@ -487,7 +478,7 @@ const Match: React.FC = () => {
     <>
       <style>{STYLES}</style>
       <div className="m-root m-loading">
-        <p style={{ fontFamily: 'Orbitron,monospace', color: '#f87171', fontSize: 14 }}>ERROR: {error}</p>
+        <p className="m-error-txt">ERROR: {error}</p>
       </div>
     </>
   );
@@ -498,55 +489,49 @@ const Match: React.FC = () => {
     <>
       <style>{STYLES}</style>
       <div className="m-root m-page">
-        <div className="m-hex" />
-        <div className="m-scan" />
-        <div className="m-glow" />
-
         <div className="m-inner">
 
           {/* ── Page Header ── */}
           <div className="m-page-hdr">
             <div>
-              <div className="m-tag">MATCH SCHEDULE</div>
-              <h1 className="m-orb m-page-title">{t('matches.title')}</h1>
+              <div className="m-eyebrow">
+                <span className="m-eyebrow-dot" />
+                <span className="m-eyebrow-txt">Match Schedule</span>
+              </div>
+              <h1 className="m-display m-page-title">{t('matches.title')}</h1>
               <p className="m-page-sub">{t('matches.subtitle')}</p>
             </div>
             <button
               className={showAddForm ? 'm-btn-ghost' : 'm-btn-primary'}
               onClick={() => setShowAddForm(p => !p)}
             >
-              {showAddForm ? t('matches.cancel') : `+ ${t('matches.addMatch')}`}
+              {showAddForm ? t('matches.cancel') : <><FaPlus size={11} />{t('matches.addMatch')}</>}
             </button>
           </div>
 
           {/* ── Stats Bar ── */}
           <div className="m-statsbar">
             <div className="m-stat">
-              <span className="m-orb m-stat-val">{matches.length}</span>
+              <span className="m-display m-stat-val">{matches.length}</span>
               <span className="m-stat-lbl">Total Matches</span>
             </div>
             <div className="m-stat">
-              <span className="m-orb m-stat-val">{uniqueMaps.length}</span>
+              <span className="m-display m-stat-val">{uniqueMaps.length}</span>
               <span className="m-stat-lbl">Maps Used</span>
             </div>
             <div className="m-stat">
-              <span className="m-orb m-stat-val">{groups.length}</span>
+              <span className="m-display m-stat-val">{groups.length}</span>
               <span className="m-stat-lbl">Groups</span>
             </div>
           </div>
 
-          {/* ══════════════════════════════════════════
-              REMODELED ADD FORM
-          ══════════════════════════════════════════ */}
+          {/* ── Add Form ── */}
           {showAddForm && (
             <div className="m-form-panel">
 
-              {/* Top bar */}
               <div className="m-form-topbar">
-                <div className="m-form-topbar-l">
-                  <span className="m-tag" style={{ margin: 0 }}>NEW</span>
-                  <span className="m-orb m-form-title">{t('matches.addNewMatch')}</span>
-                </div>
+                <span className="m-form-tag">New</span>
+                <span className="m-display m-form-title">{t('matches.addNewMatch')}</span>
               </div>
 
               <form onSubmit={handleAddMatch}>
@@ -555,7 +540,6 @@ const Match: React.FC = () => {
                   {/* ── LEFT: fields + map picker ── */}
                   <div className="m-form-left">
 
-                    {/* Match No + Time */}
                     <div className="m-fields-row">
                       <div>
                         <p className="m-field-lbl">{t('matches.matchNumber')}</p>
@@ -575,7 +559,6 @@ const Match: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Map picker */}
                     <p className="m-field-lbl m-map-picker-lbl">{t('matches.mapName')}</p>
                     <div className="m-map-grid">
                       {MAPS.map(map => {
@@ -602,7 +585,7 @@ const Match: React.FC = () => {
                   <div className="m-form-right">
                     <p className="m-field-lbl m-groups-lbl">{t('matches.selectGroups')}</p>
                     {groups.length === 0 ? (
-                      <div className="m-no-groups">NO GROUPS AVAILABLE</div>
+                      <div className="m-no-groups">No groups available</div>
                     ) : (
                       <div className="m-groups-list">
                         {groups.map(group => {
@@ -624,12 +607,9 @@ const Match: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Form footer */}
                 <div className="m-form-footer">
                   <span className="m-form-footer-info">
-                    MAP: <span>{newMap || '—'}</span>
-                    &nbsp;&nbsp;|&nbsp;&nbsp;
-                    GROUPS: <span>{selectedGroupIds.length}</span>
+                    MAP: <b>{newMap || '—'}</b> &nbsp;·&nbsp; GROUPS: <b>{selectedGroupIds.length}</b>
                   </span>
                   <div className="m-form-footer-actions">
                     <button type="button" className="m-btn-cancel" onClick={() => setShowAddForm(false)}>
@@ -651,20 +631,23 @@ const Match: React.FC = () => {
           {matches.length === 0 ? (
             <div className="m-empty">
               <div className="m-empty-icon">
-                <FaMap size={26} style={{ color: '#4ade80', opacity: 0.6 }} />
+                <FaMap size={22} color="#E11D2E" />
               </div>
-              <h3 className="m-orb m-empty-title">{t('matches.noMatches')}</h3>
+              <h3 className="m-display m-empty-title">{t('matches.noMatches')}</h3>
               <p className="m-empty-sub">{t('matches.clickAddMatch')}</p>
-              <button className="m-btn-primary" style={{ padding: '12px 32px', margin: '0 auto' }} onClick={() => setShowAddForm(true)}>
-                + {t('matches.addMatch')}
+              <button className="m-btn-primary" style={{ margin: '0 auto' }} onClick={() => setShowAddForm(true)}>
+                <FaPlus size={11} />{t('matches.addMatch')}
               </button>
             </div>
           ) : (
             <>
-              <div className="m-divider"><span>SCHEDULED MATCHES</span></div>
+              <div className="m-divider">
+                <span className="m-divider-txt">Scheduled Matches</span>
+                <span className="m-divider-line" />
+              </div>
               <div className="m-list">
                 {matches.map(match => {
-                  const mapColor  = MAP_COLORS[match.map as MapName] || '#4ade80';
+                  const mapColor  = MAP_COLORS[match.map as MapName] || '#E11D2E';
                   const isEditing = editMatchId === match._id;
 
                   return (
@@ -673,15 +656,15 @@ const Match: React.FC = () => {
                       className="m-row"
                       onClick={() => { if (!isEditing) navigate(`/tournaments/${tournamentId}/rounds/${roundId}/matches/${match._id}`); }}
                     >
-                      <div className="m-row-bar" style={{ background: `linear-gradient(180deg, ${mapColor}, ${mapColor}88)` }} />
+                      <div className="m-row-bar" style={{ background: mapColor }} />
 
                       {!isEditing ? (
                         <div className="m-row-body">
-                          <div className="m-match-num" style={{ background: mapColor, boxShadow: `0 0 8px ${mapColor}55` }}>
+                          <div className="m-match-num" style={{ background: mapColor }}>
                             M{match.matchNo}
                           </div>
                           <div className="m-map-block">
-                            <div className="m-orb m-map-name" style={{ color: mapColor }}>{match.map}</div>
+                            <div className="m-display m-map-name" style={{ color: mapColor }}>{match.map}</div>
                             <div className="m-meta">
                               <span className="m-time-chip">
                                 <FaClock size={10} />{match.time}
@@ -693,10 +676,10 @@ const Match: React.FC = () => {
                           </div>
                           <div className="m-row-actions" onClick={e => e.stopPropagation()}>
                             <button className="m-ic-btn m-ic-edit" onClick={() => startEdit(match)} title="Edit">
-                              <FaEdit color="#fff" size={13} />
+                              <FaEdit color="#F4F2EE" size={13} />
                             </button>
                             <button className="m-ic-btn m-ic-del" onClick={() => handleDeleteMatch(match._id)} title="Delete">
-                              <FaTrash color="#fff" size={13} />
+                              <FaTrash color="#F4F2EE" size={13} />
                             </button>
                           </div>
                           <FaChevronRight className="m-nav-arrow" size={14} />
@@ -704,9 +687,9 @@ const Match: React.FC = () => {
                       ) : (
                         /* ── Inline edit mode ── */
                         <div onClick={e => e.stopPropagation()}>
-                          <div className="m-row-body" style={{ paddingBottom: 10 }}>
+                          <div className="m-edit-header">
                             <div className="m-match-num" style={{ background: mapColor }}>M{match.matchNo}</div>
-                            <span className="m-orb" style={{ fontSize: 11, color: '#4ade80', letterSpacing: 1 }}>EDITING</span>
+                            <span className="m-edit-flag">Editing</span>
                           </div>
                           <div className="m-edit-form">
                             <div className="m-edit-grid">

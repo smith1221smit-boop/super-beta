@@ -1,10 +1,16 @@
-import React, { useState, ChangeEvent, FormEvent, useEffect } from "react";
+import React, {
+  useState, useEffect, useRef, useCallback, useMemo, useTransition,
+  ChangeEvent, FormEvent, memo,
+} from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { FaEdit, FaTrash, FaDiscord, FaUpload, FaTrophy, FaUsers, FaEye } from "react-icons/fa";
+import {
+  FaEdit, FaTrash, FaDiscord, FaUpload, FaTrophy, FaUsers, FaEye,
+  FaSignOutAlt, FaSearch, FaTimes, FaBars, FaPlus,
+} from "react-icons/fa";
 import { useTranslation } from 'react-i18next';
 import api from "../login/api"; // Axios instance with withCredentials
 import { socket } from "./socket"; // socket instance
-import { setCache, getCache, removeCache } from "./cache"; // ✅ caching utils
+import { setCache, getCache, removeCache } from "./cache"; // caching utils
 import { uploadToCloudinary } from '../utils/cloudinaryUpload.tsx';
 
 interface TournamentFormState {
@@ -15,58 +21,387 @@ interface TournamentFormState {
   overlayBg: string;
 }
 
-interface Tournament {
+interface Tournament extends TournamentFormState {
   _id: string;
-  tournamentName: string;
-  torLogo: string;
-  primaryColor: string;
-  secondaryColor: string;
-  overlayBg: string;
 }
+
+const EMPTY_FORM: TournamentFormState = {
+  tournamentName: "", torLogo: "", primaryColor: "", secondaryColor: "", overlayBg: "",
+};
+
+const COLOR_FIELDS: { name: keyof TournamentFormState; labelKey: string }[] = [
+  { name: "primaryColor", labelKey: "primaryColor" },
+  { name: "secondaryColor", labelKey: "secondaryColor" },
+  { name: "overlayBg", labelKey: "overlayBg" },
+];
 
 const GLOBAL_CACHE_KEY = "auth_user";
 const CACHE_KEY_BASE = "tournaments";
 
-const Dashboard: React.FC = () => {
-  const { t } = useTranslation();
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState<TournamentFormState>({
-    tournamentName: "",
-    torLogo: "",
-    primaryColor: "",
-    secondaryColor: "",
-    overlayBg: "",
-  });
+// ── Design system ────────────────────────────────────────────────────────────
+// Same identity as Team Ops / Overlay Control: dark void, one red tally
+// accent, Space Grotesk / Inter / JetBrains Mono. No transitions, no
+// keyframes, no backdrop-filter on anything but the sticky nav — hover and
+// selection states just snap, which is what makes the page feel instant.
+const STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
-  const [tournaments, setTournaments] = useState<Tournament[]>([]);
-  const [editingTournament, setEditingTournament] = useState<Tournament | null>(null);
-  const [editForm, setEditForm] = useState<Partial<Tournament>>({});
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [user, setUser] = useState<any>(null);
-  const navigate = useNavigate();
+.db-root * { box-sizing: border-box; }
+.db-root { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+.db-orb { font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif !important; }
+.db-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 
-  const handleTorLogoUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+.db-glow {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background: radial-gradient(ellipse 80% 40% at 50% 0%, rgba(225,29,46,0.07), transparent);
+}
+
+/* ── Top navbar ── */
+.db-nav { position: sticky; top: 0; z-index: 60; background: rgba(11,12,14,0.96); border-bottom: 1px solid #24262B; }
+.db-nav-inner { max-width: 1280px; margin: 0 auto; padding: 0 20px; display: flex; align-items: center; height: 64px; gap: 18px; }
+.db-nav-brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.db-nav-links { display: flex; align-items: center; gap: 4px; }
+.db-nav-link { display: flex; align-items: center; gap: 8px; padding: 8px 14px; color: #93959C; text-decoration: none; cursor: pointer; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; border: 1px solid transparent; background: none; white-space: nowrap; }
+.db-nav-link:hover { color: #F4F2EE; }
+.db-nav-link.active { color: #E11D2E; border-bottom: 2px solid #E11D2E; padding-bottom: 6px; }
+.db-nav-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.db-nav-user { display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 6px; border: 1px solid #24262B; }
+.db-nav-avatar { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; background: rgba(225,29,46,0.15); border: 1px solid rgba(225,29,46,0.4); display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; color: #E11D2E; }
+.db-nav-logout { display: flex; align-items: center; gap: 7px; padding: 8px 13px; background: transparent; border: 1px solid #24262B; color: #93959C; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; }
+.db-nav-logout:hover { border-color: #E11D2E; color: #E11D2E; }
+.db-nav-burger { display: none; background: none; border: 1px solid #24262B; color: #F4F2EE; width: 38px; height: 38px; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.db-nav-mobile-panel { display: none; flex-direction: column; padding: 10px 20px 16px; gap: 2px; border-bottom: 1px solid #24262B; background: #0B0C0E; }
+.db-nav-mobile-panel.open { display: flex; }
+@media (max-width: 860px) {
+  .db-nav-links { display: none; }
+  .db-nav-burger { display: flex; }
+  .db-nav-user span { display: none; }
+}
+
+.db-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #93959C; letter-spacing: 0.22em; text-transform: uppercase; }
+.db-eyebrow-dot { width: 6px; height: 6px; background: #E11D2E; flex-shrink: 0; }
+.db-pill { display: inline-flex; align-items: center; background: rgba(225,29,46,0.08); border: 1px solid rgba(225,29,46,0.3); color: #E11D2E; font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 3px 9px; letter-spacing: 0.05em; font-weight: 700; }
+
+/* ── Buttons / inputs ── */
+.db-btn-primary { display: inline-flex; align-items: center; gap: 8px; background: #E11D2E; color: #fff; border: 1px solid #E11D2E; font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 0.02em; padding: 12px 22px; cursor: pointer; }
+.db-btn-primary:hover { background: #F4F2EE; color: #0B0C0E; border-color: #F4F2EE; }
+.db-btn-ghost { background: transparent; color: #93959C; border: 1px solid #24262B; font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 600; padding: 10px 18px; cursor: pointer; }
+.db-btn-ghost:hover { border-color: #E11D2E; color: #F4F2EE; }
+.db-icon-btn { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: rgba(11,12,14,0.7); border: 1px solid #24262B; color: #93959C; cursor: pointer; flex-shrink: 0; }
+.db-icon-btn:hover { border-color: #F4F2EE; color: #F4F2EE; }
+.db-icon-btn.danger:hover { border-color: #E11D2E; color: #E11D2E; }
+.db-input { width: 100%; padding: 11px 13px; background: #0B0C0E; border: 1px solid #24262B; color: #F4F2EE; font-family: 'Inter', sans-serif; font-size: 14px; outline: none; }
+.db-input::placeholder { color: #55565C; }
+.db-input:focus { border-color: #E11D2E; }
+
+/* ── Page layout ── */
+.db-page { max-width: 1280px; margin: 0 auto; padding: 36px 20px 64px; position: relative; z-index: 1; }
+.db-header-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; }
+.db-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
+.db-search-wrap { position: relative; flex: 1; min-width: 220px; max-width: 380px; }
+.db-search-ic { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #55565C; font-size: 12px; pointer-events: none; }
+.db-stats { display: flex; gap: 10px; margin-left: auto; flex-wrap: wrap; }
+.db-stat { background: #131418; border: 1px solid #24262B; padding: 8px 14px; display: flex; align-items: baseline; gap: 7px; }
+
+/* ── Tournament card grid ── */
+.db-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 14px; }
+.db-card { position: relative; background: #131418; border: 1px solid #24262B; }
+.db-card:hover { border-color: rgba(225,29,46,0.4); }
+.db-card-accent { height: 3px; background: #E11D2E; }
+.db-card-inner { padding: 18px; }
+.db-card-link { text-decoration: none; display: block; }
+.db-card-top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; padding-right: 60px; }
+.db-card-logo { width: 48px; height: 48px; object-fit: cover; border: 1px solid #24262B; flex-shrink: 0; }
+.db-card-logo-ph { width: 48px; height: 48px; flex-shrink: 0; background: #0B0C0E; border: 1px solid #24262B; display: flex; align-items: center; justify-content: center; }
+.db-card-actions { position: absolute; top: 14px; right: 14px; display: flex; gap: 6px; }
+.db-card-name { font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700; color: #F4F2EE; text-transform: uppercase; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.db-card-foot { display: flex; align-items: center; gap: 8px; padding-top: 14px; border-top: 1px solid #24262B; }
+.db-card-foot-lbl { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #55565C; letter-spacing: 0.05em; margin-right: 2px; }
+.db-swatch { width: 20px; height: 20px; border: 1px solid rgba(255,255,255,0.15); flex-shrink: 0; }
+.db-card-view { margin-left: auto; font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600; color: #55565C; }
+.db-card:hover .db-card-view { color: #E11D2E; }
+
+/* ── Modals ── */
+.db-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 16px; }
+.db-modal-box { width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; background: #0B0C0E; border: 1px solid rgba(225,29,46,0.35); }
+.db-modal-hdr { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 14px; border-bottom: 1px solid #24262B; position: sticky; top: 0; background: #0B0C0E; z-index: 2; }
+.db-modal-body { padding: 20px 22px 22px; }
+.db-modal-close { width: 30px; height: 30px; background: transparent; border: 1px solid #24262B; color: #93959C; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.db-modal-close:hover { border-color: #E11D2E; color: #E11D2E; }
+
+/* ── Color field row (create/edit modal) ── */
+.db-color-row { display: flex; align-items: center; gap: 10px; }
+.db-color-preview { width: 44px; height: 44px; flex-shrink: 0; border: 1px solid #24262B; background: #0B0C0E; }
+
+/* ── Empty state ── */
+.db-empty { text-align: center; padding: 72px 24px; border: 1px dashed #24262B; }
+.db-empty-icon-wrap { width: 68px; height: 68px; border-radius: 50%; margin: 0 auto 20px; background: rgba(225,29,46,0.08); border: 1px solid rgba(225,29,46,0.3); display: flex; align-items: center; justify-content: center; }
+
+@media (max-width: 560px) {
+  .db-header-row { align-items: flex-start; }
+  .db-header-row .db-btn-primary { width: 100%; justify-content: center; }
+  .db-stats { width: 100%; margin-left: 0; }
+  .db-stat { flex: 1; justify-content: center; }
+  .db-grid { grid-template-columns: 1fr; }
+}
+`;
+
+// ── Top navigation ───────────────────────────────────────────────────────────
+// Memoized: only `user` should ever change it, so it won't re-render for
+// search typing, form edits, or card actions happening below.
+const TopNav = memo(({ user, onLogout }: { user: any; onLogout: () => void }) => {
+  const [open, setOpen] = useState(false);
+
+  const links = [
+    { label: 'TOURNAMENTS', icon: <FaTrophy size={13} />, active: true },
+    { label: 'TEAMS', icon: <FaUsers size={13} />, onClick: () => window.open('/teams', '_blank', 'noopener,noreferrer') },
+    { label: 'HUD', icon: <FaEye size={13} />, onClick: () => window.open('/displayhud', '_blank', 'noopener,noreferrer') },
+    { label: 'HELP', icon: <FaDiscord size={13} />, onClick: () => window.open('https://discord.com/channels/623776491682922526/1426117227257663558', '_blank') },
+  ];
+
+  return (
+    <nav className="db-nav">
+      <div className="db-nav-inner">
+        <div className="db-nav-brand">
+          <img src="./logo.avif" alt="logo" style={{ width: 30, height: 30, objectFit: 'contain' }} />
+          <span className="db-orb" style={{ fontSize: 14, fontWeight: 700, color: '#F4F2EE', letterSpacing: '0.02em' }}>TOURNAMENT OPS</span>
+        </div>
+
+        <div className="db-nav-links">
+          {links.map(link => (
+            <button key={link.label} className={`db-nav-link ${link.active ? 'active' : ''}`} onClick={link.onClick}>
+              {link.icon} {link.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="db-nav-right">
+          {user && (
+            <div className="db-nav-user">
+              <div className="db-nav-avatar">{(user.username || '?').slice(0, 2).toUpperCase()}</div>
+              <span className="db-mono" style={{ fontSize: 11, color: '#F4F2EE' }}>{user.username}</span>
+            </div>
+          )}
+          <button className="db-nav-logout" onClick={onLogout}>
+            <FaSignOutAlt size={12} /> LOGOUT
+          </button>
+          <button className="db-nav-burger" onClick={() => setOpen(v => !v)} aria-label="Toggle menu">
+            {open ? <FaTimes size={15} /> : <FaBars size={15} />}
+          </button>
+        </div>
+      </div>
+
+      <div className={`db-nav-mobile-panel ${open ? 'open' : ''}`}>
+        {links.map(link => (
+          <button
+            key={link.label}
+            className={`db-nav-link ${link.active ? 'active' : ''}`}
+            style={{ justifyContent: 'flex-start', padding: '12px 8px', borderBottom: 'none' }}
+            onClick={() => { link.onClick?.(); setOpen(false); }}
+          >
+            {link.icon} {link.label}
+          </button>
+        ))}
+      </div>
+    </nav>
+  );
+});
+
+// ── Search box ───────────────────────────────────────────────────────────────
+// Local state + a short debounce (via useTransition) so typing stays instant
+// no matter how many tournaments exist — the filter only runs once typing
+// pauses, and it never blocks the input itself.
+const SearchInput = memo(({ onSearchChange }: { onSearchChange: (q: string) => void }) => {
+  const [localQuery, setLocalQuery] = useState('');
+  const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    const id = setTimeout(() => {
+      startTransition(() => onSearchChange(localQuery));
+    }, localQuery === '' ? 0 : 200);
+    return () => clearTimeout(id);
+  }, [localQuery, onSearchChange]);
+
+  return (
+    <div className="db-search-wrap">
+      <FaSearch className="db-search-ic" />
+      <input
+        type="text" value={localQuery}
+        onChange={e => setLocalQuery(e.target.value)}
+        placeholder="Search tournaments…"
+        className="db-input" style={{ paddingLeft: 34 }}
+      />
+    </div>
+  );
+});
+
+// ── Tournament card ──────────────────────────────────────────────────────────
+const TournamentCard = memo(({
+  tournament, onEdit, onDelete,
+}: {
+  tournament: Tournament;
+  onEdit: (t: Tournament) => void;
+  onDelete: (id: string) => void;
+}) => (
+  <div className="db-card">
+    <div className="db-card-accent" style={{
+      background: `linear-gradient(90deg, ${tournament.primaryColor || '#E11D2E'}, ${tournament.secondaryColor || '#7c0f18'})`,
+    }} />
+    <div className="db-card-inner">
+      <div className="db-card-actions">
+        <button className="db-icon-btn" onClick={() => onEdit(tournament)} aria-label="Edit tournament"><FaEdit size={12} /></button>
+        <button className="db-icon-btn danger" onClick={() => onDelete(tournament._id)} aria-label="Delete tournament"><FaTrash size={12} /></button>
+      </div>
+
+      <Link to={`/tournaments/${tournament._id}/rounds`} className="db-card-link">
+        <div className="db-card-top">
+          {tournament.torLogo
+            ? <img src={tournament.torLogo} alt={tournament.tournamentName} className="db-card-logo" loading="lazy" onError={e => e.currentTarget.src = './logo.png'} />
+            : <div className="db-card-logo-ph"><FaTrophy size={18} style={{ color: '#E11D2E', opacity: 0.5 }} /></div>}
+          <div className="db-card-name">{tournament.tournamentName}</div>
+        </div>
+
+        <div className="db-card-foot">
+          <span className="db-card-foot-lbl">COLORS</span>
+          {tournament.primaryColor && <div className="db-swatch" style={{ background: tournament.primaryColor }} title="Primary" />}
+          {tournament.secondaryColor && <div className="db-swatch" style={{ background: tournament.secondaryColor }} title="Secondary" />}
+          {tournament.overlayBg && <div className="db-swatch" style={{ background: tournament.overlayBg }} title="Overlay background" />}
+          <span className="db-card-view">View rounds →</span>
+        </div>
+      </Link>
+    </div>
+  </div>
+));
+
+// ── Shared create/edit form ─────────────────────────────────────────────────
+const TournamentFormFields = memo(({
+  form, idPrefix, t, onChange, onLogoUpload, onSubmit, onCancel, submitLabel,
+}: {
+  form: TournamentFormState;
+  idPrefix: string;
+  t: (k: string) => string;
+  onChange: (e: ChangeEvent<HTMLInputElement>) => void;
+  onLogoUpload: (e: ChangeEvent<HTMLInputElement>) => void;
+  onSubmit: (e: FormEvent) => void;
+  onCancel: () => void;
+  submitLabel: string;
+}) => (
+  <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <input type="text" name="tournamentName" placeholder={t('dashboard.page.create.name')}
+      value={form.tournamentName} onChange={onChange} required autoFocus className="db-input" />
+
+    <div>
+      <label htmlFor={`${idPrefix}-logo`} className="db-input" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+        <FaUpload size={13} style={{ color: '#E11D2E', flexShrink: 0 }} />
+        <span style={{ color: '#93959C' }}>{t('dashboard.page.create.logo')}</span>
+      </label>
+      <input id={`${idPrefix}-logo`} type="file" accept="image/*" onChange={onLogoUpload} style={{ display: 'none' }} />
+      {form.torLogo && (
+        <img src={form.torLogo} alt="Preview" style={{ width: 64, height: 64, objectFit: 'contain', border: '1px solid #24262B', marginTop: 8 }}
+          loading="lazy" onError={e => e.currentTarget.src = './logo.png'} />
+      )}
+    </div>
+
+    <div className="db-mono" style={{ fontSize: 9, color: '#E11D2E', letterSpacing: '2px', paddingTop: 2 }}>BRAND COLORS</div>
+    {COLOR_FIELDS.map(field => (
+      <div key={field.name} className="db-color-row">
+        <div className="db-color-preview" style={{ background: form[field.name] || 'transparent' }} />
+        <input type="text" name={field.name} placeholder={t(`dashboard.page.create.${field.labelKey}`)}
+          value={form[field.name]} onChange={onChange} className="db-input" />
+      </div>
+    ))}
+
+    <div style={{ display: 'flex', gap: 10, paddingTop: 6, borderTop: '1px solid #24262B', marginTop: 2 }}>
+      <button type="button" onClick={onCancel} className="db-btn-ghost">{t('dashboard.page.create.cancel')}</button>
+      <button type="submit" className="db-btn-primary">{submitLabel}</button>
+    </div>
+  </form>
+));
+
+// ── Create/Edit modal ────────────────────────────────────────────────────────
+const FormModal: React.FC<{
+  mode: 'create' | 'edit';
+  initial: TournamentFormState;
+  t: (k: string) => string;
+  onClose: () => void;
+  onSubmit: (form: TournamentFormState) => Promise<void>;
+}> = ({ mode, initial, t, onClose, onSubmit }) => {
+  const [form, setForm] = useState<TournamentFormState>(initial);
+
+  const handleChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setForm(prev => ({ ...prev, [name]: value }));
+  }, []);
+
+  const handleLogoUpload = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
       const url = await uploadToCloudinary(file, "tournaments/logos", "team_logo");
-      setForm((prev) => ({ ...prev, torLogo: url }));
-    } catch (err) {
-      alert("Upload failed");
-    }
-  };
+      setForm(prev => ({ ...prev, torLogo: url }));
+    } catch { alert("Upload failed"); }
+  }, []);
 
-  // --- Auth check (cached) ---
-  const checkAuth = async () => {
-    console.log("checkAuth called");
-    const cachedUser = getCache(GLOBAL_CACHE_KEY, 1000 * 60 * 5);
-    console.log("Cached user:", cachedUser);
-    if (cachedUser) return cachedUser;
+  const handleSubmit = useCallback(async (e: FormEvent) => {
+    e.preventDefault();
+    await onSubmit(form);
+  }, [form, onSubmit]);
 
+  return (
+    <div className="db-modal-overlay" onClick={onClose}>
+      <div className="db-modal-box" onClick={e => e.stopPropagation()}>
+        <div className="db-modal-hdr">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="db-pill">{mode === 'create' ? 'NEW' : 'EDIT'}</span>
+            <span className="db-orb" style={{ color: '#F4F2EE', fontSize: 15, fontWeight: 700, textTransform: 'uppercase' }}>
+              {mode === 'create' ? t('dashboard.page.create.title') : t('dashboard.page.edit.title')}
+            </span>
+          </div>
+          <button className="db-modal-close" onClick={onClose} aria-label="Close"><FaTimes size={13} /></button>
+        </div>
+        <div className="db-modal-body">
+          <TournamentFormFields
+            form={form} idPrefix={mode} t={t}
+            onChange={handleChange} onLogoUpload={handleLogoUpload}
+            onSubmit={handleSubmit} onCancel={onClose}
+            submitLabel={mode === 'create' ? t('dashboard.page.create.button') : 'Save Changes'}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const Dashboard: React.FC = () => {
+  const { t } = useTranslation();
+  const [showForm, setShowForm] = useState(false);
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [editingTournament, setEditingTournament] = useState<Tournament | null>(null);
+  const [user, setUser] = useState<any>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const navigate = useNavigate();
+
+  // Holds the CURRENT user id for use inside stable closures (e.g. the
+  // socket listener registered once in useEffect with []). React state
+  // (`user`) would be stale inside that closure; a ref never is.
+  const userIdRef = useRef<string | null>(null);
+
+  const tournamentsKey = (userId: string) => `${CACHE_KEY_BASE}_${userId}`;
+
+  // --- Auth check ---
+  // Always verifies identity against the server. If a stale cached user
+  // (from a previous person on this browser) doesn't match the real
+  // session, wipe their leftover data before trusting the new identity.
+  const checkAuth = useCallback(async () => {
     try {
-      console.log("Making API call to /users/me");
       const { data } = await api.get("/users/me");
-      console.log("API response:", data);
+
+      const cachedUser = getCache(GLOBAL_CACHE_KEY, 1000 * 60 * 5);
+      if (cachedUser && cachedUser._id !== data._id) {
+        removeCache(GLOBAL_CACHE_KEY);
+        removeCache(tournamentsKey(cachedUser._id));
+      }
+
       setCache(GLOBAL_CACHE_KEY, data);
       return data;
     } catch (err) {
@@ -74,26 +409,23 @@ const Dashboard: React.FC = () => {
       removeCache(GLOBAL_CACHE_KEY);
       return null;
     }
-  };
+  }, []);
 
   // --- Fetch tournaments with caching (per user) ---
-  const fetchTournaments = async () => {
-    console.log("fetchTournaments called");
+  const fetchTournaments = useCallback(async () => {
     const userData = await checkAuth();
-    console.log("checkAuth returned:", userData);
     if (!userData) {
-      console.log("No user data, redirecting to login");
       navigate("/login");
       return;
     }
     setUser(userData);
+    userIdRef.current = userData._id;
 
     socket.emit('join', userData._id);
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const key = `${CACHE_KEY_BASE}_${userData._id}`;
+    const key = tournamentsKey(userData._id);
 
-    const cached = getCache(CACHE_KEY_BASE, 1000 * 60 * 10);
+    const cached = getCache(key, 1000 * 60 * 10);
     if (cached) {
       setTournaments(cached);
       return;
@@ -102,21 +434,22 @@ const Dashboard: React.FC = () => {
     try {
       const { data } = await api.get<Tournament[]>("/tournaments");
       setTournaments(data);
-      setCache(CACHE_KEY_BASE, data);
+      setCache(key, data);
     } catch (err: any) {
       console.error("Error fetching tournaments:", err.response?.data?.message || err.message);
     }
-  };
+  }, [checkAuth, navigate]);
 
   useEffect(() => {
-    console.log("Dashboard useEffect triggered");
     fetchTournaments();
 
     const handleNewTournament = (tournament: Tournament) => {
       setTournaments((prev) => {
-        if (prev.find((t) => t._id === tournament._id)) return prev;
+        if (prev.find((tr) => tr._id === tournament._id)) return prev;
         const updated = [...prev, tournament];
-        setCache(CACHE_KEY_BASE, updated);
+        if (userIdRef.current) {
+          setCache(tournamentsKey(userIdRef.current), updated);
+        }
         return updated;
       });
     };
@@ -126,26 +459,23 @@ const Dashboard: React.FC = () => {
     return () => {
       socket.off("newTournament", handleNewTournament);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --- Create handlers ---
-  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
-  };
+  const visibleTournaments = useMemo(() => {
+    if (!searchQuery) return tournaments;
+    const q = searchQuery.toLowerCase();
+    return tournaments.filter(tr => tr.tournamentName.toLowerCase().includes(q));
+  }, [tournaments, searchQuery]);
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  // --- Create ---
+  const handleCreate = useCallback(async (form: TournamentFormState) => {
     try {
       const { data } = await api.post("/tournaments", form);
-      const updated = [...tournaments, data];
-      setTournaments(updated);
-      setCache(CACHE_KEY_BASE, updated);
-      setForm({
-        tournamentName: "",
-        torLogo: "",
-        primaryColor: "",
-        secondaryColor: "",
-        overlayBg: "",
+      setTournaments(prev => {
+        const updated = [...prev, data];
+        if (userIdRef.current) setCache(tournamentsKey(userIdRef.current), updated);
+        return updated;
       });
       setShowForm(false);
       alert(t('dashboard.page.messages.created'));
@@ -153,522 +483,146 @@ const Dashboard: React.FC = () => {
       console.error("Error creating tournament:", err.response?.data?.message || err.message);
       alert(t('dashboard.page.messages.updateFailed'));
     }
-  };
+  }, [t]);
 
-  // --- Edit handlers ---
-  const handleEdit = (id: string) => {
-    const tournament = tournaments.find((t) => t._id === id);
-    if (tournament) {
-      setEditingTournament(tournament);
-      setEditForm(tournament);
-      setShowEditModal(true);
-    }
-  };
-
-  const handleEditChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setEditForm((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const handleEditSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  // --- Edit ---
+  const handleEditSave = useCallback(async (form: TournamentFormState) => {
     if (!editingTournament) return;
-
     try {
       const { data: updatedTournament } = await api.put<Tournament>(
-        `/tournaments/${editingTournament._id}`,
-        editForm
+        `/tournaments/${editingTournament._id}`, form
       );
-
-      const updated = tournaments.map((t) =>
-        t._id === updatedTournament._id ? updatedTournament : t
-      );
-      setTournaments(updated);
-      setCache(CACHE_KEY_BASE, updated);
+      setTournaments(prev => {
+        const updated = prev.map(tr => tr._id === updatedTournament._id ? updatedTournament : tr);
+        if (userIdRef.current) setCache(tournamentsKey(userIdRef.current), updated);
+        return updated;
+      });
       setEditingTournament(null);
-      setShowEditModal(false);
       alert(t('dashboard.page.messages.updated'));
     } catch (err: any) {
       console.error("Edit error:", err.response?.data?.message || err.message);
       alert(t('dashboard.page.messages.updateFailed'));
     }
-  };
+  }, [editingTournament, t]);
 
-  // --- Delete handler ---
-  const handleDelete = async (id: string) => {
+  // --- Delete ---
+  const handleDelete = useCallback(async (id: string) => {
     if (!window.confirm("Are you sure you want to delete this tournament?")) return;
-
     try {
       await api.delete(`/tournaments/${id}`);
-      const updated = tournaments.filter((t) => t._id !== id);
-      setTournaments(updated);
-      setCache(CACHE_KEY_BASE, updated);
+      setTournaments(prev => {
+        const updated = prev.filter(tr => tr._id !== id);
+        if (userIdRef.current) setCache(tournamentsKey(userIdRef.current), updated);
+        return updated;
+      });
       alert(t('dashboard.page.messages.deleted'));
     } catch (err: any) {
       console.error("Delete error:", err.response?.data?.message || err.message);
       alert(t('dashboard.page.messages.deleteFailed'));
     }
-  };
+  }, [t]);
 
- return (
-  <div className="min-h-screen bg-gradient-to-br from-[#120038] via-black to-[#120038] font-mono">
-   <style>{`
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&display=swap');
+  const handleLogout = useCallback(async () => {
+    try {
+      await api.post("/users/logout");
+    } catch (err) {
+      console.error("Logout error:", err);
+      // proceed with client-side cleanup even if the server call fails
+    }
 
-* { font-family: 'Rajdhani', sans-serif; }
-.orbitron { font-family: 'Orbitron', monospace; }
+    removeCache(GLOBAL_CACHE_KEY);
+    if (userIdRef.current) {
+      removeCache(tournamentsKey(userIdRef.current));
+    }
+    localStorage.removeItem("user");
+    localStorage.removeItem("sessionId");
 
-.sidebar-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  color: #6b7280;
-  cursor: pointer;
-  padding: 10px;
-  border-radius: 12px;
-  width: 64px;
-  border: 1px solid transparent;
-  background: transparent;
-  text-decoration: none;
-}
+    setUser(null);
+    setTournaments([]);
+    userIdRef.current = null;
 
-.sidebar-btn:hover {
-  color: #a855f7;
-  background: rgba(168,85,247,0.08);
-  border-color: rgba(168,85,247,0.3);
-  box-shadow: 0 0 16px rgba(168,85,247,0.25), inset 0 0 8px rgba(168,85,247,0.05);
-}
+    navigate("/login");
+  }, [navigate]);
 
-.sidebar-btn.active {
-  color: #a855f7;
-  background: rgba(168,85,247,0.12);
-  border-color: rgba(168,85,247,0.5);
-  box-shadow: 0 0 20px rgba(168,85,247,0.3);
-}
+  return (
+    <div className="db-root" style={{ minHeight: '100vh', background: '#0B0C0E' }}>
+      <style>{STYLES}</style>
+      <div className="db-glow" />
 
-.card-hover { cursor: pointer; }
+      <TopNav user={user} onLogout={handleLogout} />
 
-.card-hover:hover {
-  box-shadow:
-    0 0 30px rgba(168,85,247,0.3),
-    0 0 60px rgba(168,85,247,0.12),
-    0 20px 40px rgba(0,0,0,0.5);
-}
-
-.glass {
-  background: rgba(255,255,255,0.04);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(168,85,247,0.2);
-}
-
-.glass-dark {
-  background: rgba(0,0,0,0.5);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(168,85,247,0.3);
-}
-
-.neon-border {
-  border: 1px solid rgba(168,85,247,0.4);
-  box-shadow: 0 0 10px rgba(168,85,247,0.15), inset 0 0 10px rgba(168,85,247,0.05);
-}
-
-.card-actions { opacity: 0; }
-.card-hover:hover .card-actions { opacity: 1; }
-
-.input-cyber {
-  width: 100%;
-  padding: 12px 16px;
-  background: rgba(0,0,0,0.6);
-  border: 1px solid rgba(168,85,247,0.3);
-  border-radius: 8px;
-  color: #fff;
-  font-family: 'Rajdhani', sans-serif;
-  font-size: 15px;
-  letter-spacing: 0.5px;
-  outline: none;
-}
-
-.input-cyber::placeholder {
-  color: rgba(156,163,175,0.6);
-}
-
-.input-cyber:focus {
-  border-color: rgba(168,85,247,0.8);
-  box-shadow: 0 0 0 3px rgba(168,85,247,0.15),
-              0 0 15px rgba(168,85,247,0.2);
-}
-
-.btn-primary {
-  background: linear-gradient(135deg, #9333ea, #7e22ce);
-  color: #fff;
-  border: 1px solid rgba(168,85,247,0.5);
-  font-family: 'Orbitron', monospace;
-  font-size: 12px;
-  letter-spacing: 1px;
-  padding: 10px 20px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.btn-primary:hover {
-  background: linear-gradient(135deg, #7e22ce, #6b21a8);
-  box-shadow: 0 0 20px rgba(168,85,247,0.4);
-}
-
-.btn-ghost {
-  background: rgba(0,0,0,0.5);
-  color: #9ca3af;
-  border: 1px solid rgba(168,85,247,0.2);
-  font-family: 'Rajdhani', sans-serif;
-  font-size: 14px;
-  padding: 10px 20px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.btn-ghost:hover {
-  background: rgba(168,85,247,0.08);
-  color: #a855f7;
-  border-color: rgba(168,85,247,0.4);
-}
-
-.scan-line {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  pointer-events: none;
-  z-index: 999;
-  opacity: 0.025;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 2px,
-    rgba(168,85,247,0.4) 2px,
-    rgba(168,85,247,0.4) 4px
-  );
-}
-
-.hex-bg {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background-image: radial-gradient(circle, rgba(168,85,247,0.06) 1px, transparent 1px);
-  background-size: 40px 40px;
-  z-index: 0;
-}
-
-.color-swatch {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  border: 1px solid rgba(255,255,255,0.15);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-}
-
-.logo-mark {
-  box-shadow: 0 0 5px rgba(168,85,247,0.2);
-}
-
-.tag {
-  display: inline-block;
-  background: rgba(168,85,247,0.1);
-  border: 1px solid rgba(168,85,247,0.25);
-  color: #a855f7;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-family: 'Orbitron', monospace;
-  letter-spacing: 0.5px;
-}
-`}</style>
-
-    {/* Ambient effects */}
-    <div className="scan-line" />
-    <div className="hex-bg" />
-    <div className="fixed inset-0 pointer-events-none z-0"
-      style={{ background: 'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(74,222,128,0.12), transparent)' }} />
-
-    {/* ── LEFT SIDEBAR ── */}
-    <div className="fixed left-0 top-0 h-full w-[78px] z-50 flex flex-col items-center py-6 gap-2"
-      style={{
-        background: 'rgba(0,0,0,0.85)',
-   borderRight: '1px solid #120038', // match your dark bg
-        backdropFilter: 'blur(24px)',
-        boxShadow: '4px 0 24px rgba(0,0,0,0.6), inset -1px 0 0 rgba(74,222,128,0.1)'
-      }}>
-      {/* Logo mark */}
-      <div className="w-10 h-10 rounded-xl logo-mark mb-2 flex items-center justify-center"
-       style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.25)' }}>
-        <img src="./logo.avif" alt="logo" className="w-9 h-9 object-contain rounded" />
-      </div>
-
-      {/* User badge */}
-      {user && (
-        <div style={{
-          width: 48, padding: '4px 0', borderRadius: 8,
-          background: 'rgba(168,85,247,0.1', border: '1px solid rgba(168,85,247,0.25)',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, marginBottom: 4
-        }}>
-          <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'yellow', boxShadow: '0 0 6px yellow' }} />
-          <span style={{ fontSize: 9, color: 'yellow', letterSpacing: '0.5px', fontWeight: 700,
-            maxWidth: 44, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            textAlign: 'center', padding: '0 4px' }}>
-            {user.username}
-          </span>
-        </div>
-      )}
-
-      <div style={{ width: '40px', height: '1px', background: 'rgba(74,222,128,0.2)', margin: '4px 0 8px' }} />
-
-      <button className="sidebar-btn active" onClick={() => (window.location.href = '/dashboard')}>
-        <FaTrophy size={20} />
-        <span style={{ fontSize: '10px', marginTop: '4px', letterSpacing: '0.5px', fontWeight: 600 }}>TOUR</span>
-      </button>
-      <button className="sidebar-btn" onClick={() => window.open('/teams', '_blank', 'noopener,noreferrer')}>
-        <FaUsers size={20} />
-        <span style={{ fontSize: '10px', marginTop: '4px', letterSpacing: '0.5px', fontWeight: 600 }}>TEAMS</span>
-      </button>
-      <button className="sidebar-btn" onClick={() => window.open('/displayhud', '_blank', 'noopener,noreferrer')}>
-        <FaEye size={20} />
-        <span style={{ fontSize: '10px', marginTop: '4px', letterSpacing: '0.5px', fontWeight: 600 }}>HUD</span>
-      </button>
-
-      <div style={{ flex: 1 }} />
-
-      <button className="sidebar-btn" onClick={() => window.open('https://discord.com/channels/623776491682922526/1426117227257663558', '_blank')}>
-        <FaDiscord size={20} />
-        <span style={{ fontSize: '10px', marginTop: '4px', letterSpacing: '0.5px', fontWeight: 600 }}>HELP</span>
-      </button>
-    </div>
-
-    {/* ── MAIN ── */}
-    <main style={{
-      marginLeft: '78px',
-      padding: '32px 32px 32px 32px',
-      position: 'relative',
-      zIndex: 1,
-      maxWidth: '1360px'
-    }}>
-      {/* Page header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <span className="tag">DASHBOARD</span>
-        </div>
-        <h2 className="orbitron font-black text-white mb-1" style={{ fontSize: '28px', letterSpacing: '1px' }}>
-          {t('dashboard.page.title')}
-        </h2>
-        <p style={{ color: '#6b7280', fontSize: '14px', letterSpacing: '0.3px' }}>{t('dashboard.page.subtitle')}</p>
-      </div>
-
-      {/* Add button */}
-      <button className="btn-primary mb-8" style={{ padding: '12px 28px', fontSize: '13px' }}
-        onClick={() => setShowForm(!showForm)}>
-        + {t('dashboard.page.addTournament')}
-      </button>
-
-      {/* ── CREATE FORM ── */}
-      {showForm && (
-        <div className="glass-dark neon-border rounded-2xl p-6 mb-8" style={{ maxWidth: '560px' }}>
-          <div className="flex items-center gap-2 mb-5">
-            <span className="tag">NEW</span>
-            <h3 className="orbitron text-white font-bold" style={{ fontSize: '16px' }}>
-              {t('dashboard.page.create.title')}
-            </h3>
+      <div className="db-page">
+        <div className="db-header-row">
+          <div>
+            <div className="db-eyebrow" style={{ marginBottom: 8 }}>
+              <span className="db-eyebrow-dot" /> TOURNAMENT MANAGEMENT
+            </div>
+            <h1 className="db-orb" style={{ fontSize: 28, fontWeight: 800, color: '#F4F2EE', letterSpacing: '-0.01em', marginBottom: 6, textTransform: 'uppercase' }}>
+              {t('dashboard.page.title')}
+            </h1>
+            <p style={{ color: '#93959C', fontSize: 14, maxWidth: 480 }}>{t('dashboard.page.subtitle')}</p>
           </div>
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <input type="text" name="tournamentName" placeholder={t('dashboard.page.create.name')}
-              value={form.tournamentName} onChange={handleChange} className="input-cyber" />
-            <div>
-              <label htmlFor="tournament-logo-upload" className="input-cyber flex items-center gap-2"
-                style={{ cursor: 'pointer', display: 'flex' }}>
-                <FaUpload size={14} style={{ color: 'yellow' }} />
-                <span>{t('dashboard.page.create.logo')}</span>
-              </label>
-              <input id="tournament-logo-upload" type="file" accept="image/*"
-                onChange={handleTorLogoUpload} style={{ display: 'none' }} />
-              {form.torLogo && (
-                <img src={form.torLogo} alt="Preview"
-                  className="w-20 h-20 object-contain mt-2 rounded-lg"
-                  style={{ border: '1px solid rgba(74,222,128,0.4)' }}
-                  loading="lazy" onError={(e) => e.currentTarget.src = './logo.png'} />
-              )}
-            </div>
-            {[
-              { name: "primaryColor", placeholder: t('dashboard.page.create.primaryColor') },
-              { name: "secondaryColor", placeholder: t('dashboard.page.create.secondaryColor') },
-              { name: "overlayBg", placeholder: t('dashboard.page.create.overlayBg') },
-            ].map((field) => (
-              <input key={field.name} type="text" name={field.name}
-                placeholder={field.placeholder} value={(form as any)[field.name]}
-                onChange={handleChange} className="input-cyber" />
-            ))}
-            <div className="flex gap-3 pt-1">
-              <button type="submit" className="btn-primary">{t('dashboard.page.create.button')}</button>
-              <button type="button" className="btn-ghost" onClick={() => setShowForm(false)}>
-                {t('dashboard.page.create.cancel')}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* ── TOURNAMENT CARDS ── */}
-      {tournaments.length > 0 ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
-          {tournaments.map((t) => (
-            <div key={t._id} className="card-hover glass rounded-2xl relative overflow-hidden"
-              style={{ padding: '0' }}>
-              {/* Card top accent bar */}
-              <div style={{
-                height: '3px',
-                background: `linear-gradient(90deg, ${t.primaryColor || '#4ade80'}, ${t.secondaryColor || '#166534'}, transparent)`
-              }} />
-
-              <div style={{ padding: '20px' }}>
-                {/* Action buttons */}
-                <div className="card-actions absolute top-8 right-4 flex gap-2">
-                  <button onClick={() => handleEdit(t._id)}
-                    style={{ padding: '7px', background: 'rgba(37,99,235,0.85)', borderRadius: '8px', border: 'none', cursor: 'pointer', backdropFilter: 'blur(8px)' }}
-                    onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 0 12px rgba(59,130,246,0.6)')}
-                    onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}>
-                    <FaEdit style={{ color: '#fff' }} size={15} />
-                  </button>
-                  <button onClick={() => handleDelete(t._id)}
-                    style={{ padding: '7px', background: 'rgba(220,38,38,0.85)', borderRadius: '8px', border: 'none', cursor: 'pointer', backdropFilter: 'blur(8px)' }}
-                    onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 0 12px rgba(239,68,68,0.6)')}
-                    onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}>
-                    <FaTrash style={{ color: '#fff' }} size={15} />
-                  </button>
-                </div>
-
-                <Link to={`/tournaments/${t._id}/rounds`} style={{ textDecoration: 'none', display: 'block' }}>
-                  <div className="flex items-center gap-3 mb-4">
-                    {t.torLogo ? (
-                      <img src={t.torLogo} alt={t.tournamentName}
-                        style={{ width: 52, height: 52, borderRadius: 10, objectFit: 'cover', border: `1px solid ${t.primaryColor || 'rgba(74,222,128,0.3)'}`, flexShrink: 0 }} />
-                    ) : (
-                      <div style={{ width: 52, height: 52, borderRadius: 10, background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        <FaTrophy size={22} style={{ color: '#4ade80', opacity: 0.6 }} />
-                      </div>
-                    )}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <h3 className="orbitron font-bold truncate"
-                        style={{ color: t.primaryColor || '#ffffff', fontSize: '15px', letterSpacing: '0.5px' }}>
-                        {t.tournamentName}
-                      </h3>
-                    </div>
-                  </div>
-
-                  {/* Color swatches */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                    <span style={{ fontSize: 11, color: '#6b7280', marginRight: 4, letterSpacing: '0.5px' }}>COLORS</span>
-                    {t.primaryColor && (
-                      <div className="color-swatch" style={{ background: t.primaryColor }} title="Primary" />
-                    )}
-                    {t.secondaryColor && (
-                      <div className="color-swatch" style={{ background: t.secondaryColor }} title="Secondary" />
-                    )}
-                    {t.overlayBg && (
-                      <div className="color-swatch" style={{ background: t.overlayBg }} title="Overlay BG" />
-                    )}
-                    <div style={{ flex: 1 }} />
-                    <span style={{ fontSize: 11, color: 'white', opacity: 0.6 }}>Click to view rounds →</span>
-                  </div>
-                </Link>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        /* ── EMPTY STATE ── */
-        <div style={{ textAlign: 'center', padding: '64px 24px' }}>
-          <div style={{
-            width: 72, height: 72, borderRadius: '50%', margin: '0 auto 20px',
-            background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.3)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 0 24px rgba(74,222,128,0.15)'
-          }}>
-            <FaTrophy size={30} style={{ color: '#4ade80', opacity: 0.7 }} />
-          </div>
-          <h3 className="orbitron font-bold text-white mb-2" style={{ fontSize: '18px' }}>
-            {t('dashboard.page.empty.title')}
-          </h3>
-          <p style={{ color: '#6b7280', marginBottom: 24, fontSize: '14px' }}>{t('dashboard.page.empty.desc')}</p>
-          <button className="btn-primary" style={{ padding: '12px 32px' }} onClick={() => setShowForm(true)}>
-            + {t('dashboard.page.empty.button')}
+          <button className="db-btn-primary" onClick={() => setShowForm(true)}>
+            <FaPlus size={12} /> {t('dashboard.page.addTournament')}
           </button>
         </div>
-      )}
-    </main>
 
-    {/* ── EDIT MODAL ── */}
-    {showEditModal && editingTournament && (
-      <div style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
-        backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center',
-        justifyContent: 'center', zIndex: 100, padding: '16px'
-      }}>
-        <div className="glass-dark rounded-2xl"
-          style={{ width: '100%', maxWidth: '520px', maxHeight: '90vh', overflowY: 'auto', padding: '28px',
-            boxShadow: '0 0 60px rgba(74,222,128,0.15), 0 40px 80px rgba(0,0,0,0.6)' }}>
-          <div className="flex items-center gap-2 mb-5">
-            <span className="tag">EDIT</span>
-            <h3 className="orbitron text-white font-bold" style={{ fontSize: '16px' }}>
-              {t('dashboard.page.edit.title')}
-            </h3>
+        <div className="db-toolbar">
+          <SearchInput onSearchChange={setSearchQuery} />
+          <span className="db-mono" style={{ fontSize: 11, color: '#55565C' }}>{visibleTournaments.length} / {tournaments.length} shown</span>
+          <div className="db-stats">
+            <div className="db-stat">
+              <span className="db-orb" style={{ fontSize: 15, fontWeight: 800, color: '#E11D2E' }}>{tournaments.length}</span>
+              <span className="db-mono" style={{ fontSize: 9, color: '#55565C', letterSpacing: '1px' }}>TOURNAMENTS</span>
+            </div>
           </div>
-          <form onSubmit={handleEditSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <input type="text" name="tournamentName" value={editForm.tournamentName || ""}
-              onChange={handleEditChange} placeholder={t('dashboard.page.edit.name')} className="input-cyber" />
-            <div>
-              <label htmlFor="edit-tournament-logo-upload" className="input-cyber flex items-center gap-2"
-                style={{ cursor: 'pointer', display: 'flex' }}>
-                <FaUpload size={14} style={{ color: '#4ade80' }} />
-                <span>{t('dashboard.page.edit.logo')}</span>
-              </label>
-              <input id="edit-tournament-logo-upload" type="file" accept="image/*"
-                style={{ display: 'none' }}
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  try {
-                    const url = await uploadToCloudinary(file, "tournaments/logos", "team_logo");
-                    setEditForm((prev) => ({ ...prev, torLogo: url }));
-                  } catch { alert("Upload failed"); }
-                }} />
-              {editForm.torLogo && (
-                <img src={editForm.torLogo} alt="Preview"
-                  className="w-20 h-20 object-contain mt-2 rounded-lg"
-                  style={{ border: '1px solid rgba(74,222,128,0.4)' }}
-                  loading="lazy" onError={(e) => e.currentTarget.src = './logo.png'} />
-              )}
-            </div>
-            {["primaryColor", "secondaryColor", "overlayBg"].map((field) => (
-              <input key={field} type="text" name={field}
-                value={(editForm as any)[field] || ""}
-                onChange={handleEditChange}
-                placeholder={t(`dashboard.page.edit.${field}`)}
-                className="input-cyber" />
-            ))}
-            <div className="flex gap-3 pt-1">
-              <button type="submit" className="btn-primary">Save Changes</button>
-              <button type="button" className="btn-ghost"
-                onClick={() => { setEditingTournament(null); setShowEditModal(false); }}>
-                Cancel
-              </button>
-            </div>
-          </form>
         </div>
+
+        {visibleTournaments.length === 0 ? (
+          <div className="db-empty">
+            <div className="db-empty-icon-wrap"><FaTrophy size={26} style={{ color: '#E11D2E', opacity: 0.7 }} /></div>
+            <h3 className="db-orb" style={{ fontSize: 16, color: '#F4F2EE', marginBottom: 8, textTransform: 'uppercase' }}>
+              {tournaments.length === 0 ? t('dashboard.page.empty.title') : 'No tournaments match your search'}
+            </h3>
+            <p style={{ color: '#93959C', marginBottom: 24, fontSize: 14 }}>
+              {tournaments.length === 0 ? t('dashboard.page.empty.desc') : 'Try a different name.'}
+            </p>
+            {tournaments.length === 0 && (
+              <button className="db-btn-primary" style={{ margin: '0 auto' }} onClick={() => setShowForm(true)}>
+                <FaPlus size={12} /> {t('dashboard.page.empty.button')}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="db-grid">
+            {visibleTournaments.map(tr => (
+              <TournamentCard key={tr._id} tournament={tr} onEdit={setEditingTournament} onDelete={handleDelete} />
+            ))}
+          </div>
+        )}
       </div>
-    )}
-  </div>
-);
+
+      {showForm && (
+        <FormModal mode="create" initial={EMPTY_FORM} t={t} onClose={() => setShowForm(false)} onSubmit={handleCreate} />
+      )}
+
+      {editingTournament && (
+        <FormModal
+          mode="edit"
+          initial={{
+            tournamentName: editingTournament.tournamentName,
+            torLogo: editingTournament.torLogo || '',
+            primaryColor: editingTournament.primaryColor || '',
+            secondaryColor: editingTournament.secondaryColor || '',
+            overlayBg: editingTournament.overlayBg || '',
+          }}
+          t={t}
+          onClose={() => setEditingTournament(null)}
+          onSubmit={handleEditSave}
+        />
+      )}
+    </div>
+  );
 };
 
 export default Dashboard;

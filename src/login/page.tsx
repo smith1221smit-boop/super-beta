@@ -2,10 +2,9 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from 'react-i18next';
 import api from "./api";
-
+import { removeCache, setCache } from "../dashboard/cache";
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-// Interface for user data from the API
 interface UserData {
   _id: string;
   username: string;
@@ -18,7 +17,12 @@ interface UserData {
   sessionCookie?: string | null;
 }
 
-
+// ------------------------------------------------------------------
+// Same design language as Home.tsx / Teams.tsx: control-room dark,
+// one red tally accent, Space Grotesk / Inter / JetBrains Mono.
+// No continuous/keyframe animation — corner brackets, glow, and the
+// status dot are all static, matching the rest of the app.
+// ------------------------------------------------------------------
 const Login: React.FC = () => {
   const { t } = useTranslation();
   const [email, setEmail] = useState("");
@@ -28,17 +32,12 @@ const Login: React.FC = () => {
   const [debugInfo, setDebugInfo] = useState("");
   const navigate = useNavigate();
 
-
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-
-
     setLoading(true);
     setError("");
     setDebugInfo("");
 
-    // Basic validation
     if (!email || !password) {
       setError(t('login.validation.emailRequired'));
       setLoading(false);
@@ -46,56 +45,61 @@ const Login: React.FC = () => {
     }
 
     try {
-      console.log("Attempting login with:", { email });
+      // 🔑 Read whatever user was cached BEFORE this login, so we can
+      // clear their data specifically (not just the generic keys).
+      const prevUserRaw = localStorage.getItem("user");
+      let prevUserId: string | null = null;
+      try {
+        prevUserId = prevUserRaw ? JSON.parse(prevUserRaw)._id : null;
+      } catch {
+        prevUserId = null;
+      }
+
+      // 🔑 Nuke any cached data from a previous user BEFORE the new login lands
+      removeCache("auth_user");
+      removeCache("tournaments"); // legacy/unscoped key, in case it still exists
+      if (prevUserId) {
+        removeCache(`tournaments_${prevUserId}`);
+      }
+      localStorage.removeItem("user");
+      localStorage.removeItem("sessionId");
 
       const response = await api.post("/users/login", { email, password });
       const responseData = response.data;
 
-      console.log("Login successful:", responseData);
-
-      // Store user data and session ID in localStorage
       if (responseData.user && responseData.user._id) {
-        const { _id, username, email, isAdmin } = responseData.user;
+        const { _id, username, email: userEmail, isAdmin } = responseData.user;
 
-        localStorage.setItem("user", JSON.stringify({
-          _id,
-          username,
-          email,
-          isAdmin
-        }));
-
+        localStorage.setItem("user", JSON.stringify({ _id, username, email: userEmail, isAdmin }));
         if (responseData.sessionId) {
           localStorage.setItem("sessionId", responseData.sessionId);
         }
 
-        // Navigate to dashboard on success
+        // 🔑 Warm the auth_user cache immediately with the CORRECT user,
+        // so Dashboard's checkAuth() has a valid cache from the start.
+        setCache("auth_user", responseData.user);
+
         navigate("/dashboard");
       } else {
         throw new Error("Invalid response format from server");
       }
-
     } catch (err: any) {
       console.error("Login error:", err);
 
-      // Enhanced error handling
       let errorMessage = "Login failed. Please try again.";
 
       if (err.response) {
-        // Server responded with an error status
         errorMessage = err.response.data?.message ||
           err.response.statusText ||
           `Error: ${err.response.status}`;
       } else if (err.request) {
-        // Request was made but no response received
         errorMessage = "No response from server. Please check your connection.";
       } else {
-        // Something else happened
         errorMessage = err.message || "An unexpected error occurred.";
       }
 
       setError(errorMessage);
 
-      // Debug info for development
       if (process.env.NODE_ENV !== 'production') {
         setDebugInfo(JSON.stringify({
           error: err.message,
@@ -109,115 +113,171 @@ const Login: React.FC = () => {
     }
   };
 
+  return (
+    <div className="min-h-screen bg-[#0B0C0E] flex items-center justify-center relative overflow-hidden px-4 py-10">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+        .lg-orb { font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; }
+        .lg-sans { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+        .lg-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+        .lg-scan {
+          background-image: repeating-linear-gradient(
+            to bottom,
+            rgba(255,255,255,0.025) 0px,
+            rgba(255,255,255,0.025) 1px,
+            transparent 1px,
+            transparent 3px
+          );
+        }
+        .lg-input {
+          width: 100%; padding: 13px 14px; background: #0B0C0E;
+          border: 1px solid #24262B; color: #F4F2EE; font-family: 'Inter', sans-serif;
+          font-size: 14px; outline: none;
+        }
+        .lg-input::placeholder { color: #55565C; }
+        .lg-input:focus { border-color: #E11D2E; }
+        .lg-corner { pointer-events: none; position: absolute; width: 20px; height: 20px; border-color: #E11D2E; }
+        input:-webkit-autofill {
+          -webkit-text-fill-color: #F4F2EE;
+          -webkit-box-shadow: 0 0 0px 1000px #0B0C0E inset;
+          transition: background-color 9999s ease-in-out 0s;
+        }
+      `}</style>
 
+      {/* Static red radial wash — no animation, just atmosphere */}
+      <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse 70% 45% at 50% 0%, rgba(225,29,46,0.10), transparent)' }} />
+      <div className="absolute inset-0 pointer-events-none lg-scan opacity-40" />
 
-return (
-  <div className="min-h-screen bg-gradient-to-br from-[#0b0014] via-[#140024] to-[#1f0033] flex items-center justify-center relative overflow-hidden">
+      <div className="w-full max-w-5xl grid md:grid-cols-2 bg-[#131418] border border-[#24262B] relative z-10 shadow-2xl">
 
-    {/* Background glow */}
-    <div className="absolute w-[600px] h-[600px] bg-purple-500/20 blur-[140px] top-[-150px] left-[-150px] animate-pulse"></div>
-    <div className="absolute w-[500px] h-[500px] bg-pink-500/20 blur-[140px] bottom-[-150px] right-[-150px] animate-pulse"></div>
+        {/* Red tally rule across the top */}
+        <div className="absolute top-0 left-0 right-0 h-[2px] bg-[#E11D2E]" />
 
-    {/* Main Card */}
-    <div className="w-full max-w-6xl grid md:grid-cols-2 bg-black/40 backdrop-blur-2xl border border-purple-500/20 rounded-3xl shadow-2xl overflow-hidden">
+        {/* ============ LEFT — BRAND PANEL ============ */}
+        <div className="hidden md:flex flex-col justify-between bg-[#0E0F12] p-12 relative border-r border-[#24262B] overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(circle at 30% 20%, rgba(225,29,46,0.14), transparent 60%)' }} />
 
-      {/* Left Branding Panel */}
-      <div className="hidden md:flex flex-col justify-center items-center bg-gradient-to-br from-purple-900/40 via-purple-800/20 to-black p-12 relative">
+          <div className="relative z-10">
+            <div className="inline-flex items-center gap-2 mb-10">
+              <span className="w-1.5 h-1.5 bg-[#E11D2E]" />
+              <span className="lg-mono text-[11px] tracking-[0.24em] text-[#93959C] uppercase">Control Access</span>
+            </div>
 
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(168,85,247,0.25),transparent_70%)]"></div>
+            {/* Logo, framed like the broadcast monitor tiles elsewhere in the app */}
+            <div className="relative inline-block mb-8">
+              <div className="w-24 h-24 bg-[#0B0C0E] border border-[#24262B] flex items-center justify-center">
+                <img src="./logo.avif" alt="ScoreSync logo" width={64} height={64} className="w-16 h-16 object-contain" />
+              </div>
+              <span className="lg-corner absolute -top-[1px] -left-[1px] border-t-2 border-l-2" />
+              <span className="lg-corner absolute -top-[1px] -right-[1px] border-t-2 border-r-2" />
+              <span className="lg-corner absolute -bottom-[1px] -left-[1px] border-b-2 border-l-2" />
+              <span className="lg-corner absolute -bottom-[1px] -right-[1px] border-b-2 border-r-2" />
+            </div>
 
-        <img
-          src="./logo.avif"
-          alt="logo"
-          className="w-28 h-28 mb-6 z-10 drop-shadow-[0_0_25px_rgba(168,85,247,0.8)]"
-        />
+            <h2 className="lg-orb text-3xl font-extrabold text-[#F4F2EE] uppercase tracking-tight mb-4">
+              Score<span className="text-[#E11D2E]">Sync</span>
+            </h2>
 
-        <h2 className="text-3xl font-bold text-purple-400 z-10">
-          SCORE SYNC
-        </h2>
+            <p className="lg-sans text-[#93959C] text-[15px] leading-relaxed max-w-xs">
+              Real-time esports tournament control system with live analytics,
+              automation and smart match tracking.
+            </p>
+          </div>
 
-        <p className="text-gray-400 text-center mt-4 text-sm z-10 max-w-xs">
-          Real-time esports tournament control system with live analytics,
-          automation and smart match tracking.
-        </p>
-
-        <div className="mt-10 text-purple-300 text-xs z-10">
-          Powered by Advanced Tournament Engine
+          <div className="relative z-10 flex items-center gap-2 pt-10 border-t border-[#24262B] mt-10">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#E11D2E]" />
+            <span className="lg-mono text-[10px] tracking-[0.18em] text-[#55565C] uppercase">System online — tournament engine active</span>
+          </div>
         </div>
-      </div>
 
-      {/* Right Login Panel */}
-      <div className="p-10 md:p-12 flex flex-col justify-center">
+        {/* ============ RIGHT — LOGIN FORM ============ */}
+        <div className="p-8 sm:p-12 flex flex-col justify-center relative">
 
-        {/* Title */}
-        <div className="mb-10">
-          <h1 className="text-3xl font-bold text-purple-400 mb-2">
-            Welcome Back 👋
-          </h1>
-          <p className="text-gray-400 text-sm">
-            Login to continue to your dashboard
-          </p>
-        </div>
-
-        {error && (
-          <div className="mb-5 p-3 bg-red-500/10 border border-red-500/40 rounded-lg text-red-200 text-sm">
-            {error}
+          {/* Mobile-only brand mark, since the left panel is hidden below md */}
+          <div className="flex md:hidden items-center gap-3 mb-8">
+            <img src="./logo.avif" alt="ScoreSync logo" width={34} height={34} className="w-9 h-9 object-contain" />
+            <span className="lg-orb text-lg font-bold text-[#F4F2EE] uppercase tracking-tight">ScoreSync</span>
           </div>
-        )}
 
-        <form onSubmit={handleLogin} className="space-y-6">
+          <div className="mb-9">
+            <div className="inline-flex items-center gap-2 mb-4">
+              <span className="w-1.5 h-1.5 bg-[#E11D2E]" />
+              <span className="lg-mono text-[11px] tracking-[0.24em] text-[#93959C] uppercase">Operator Sign-In</span>
+            </div>
+            <h1 className="lg-orb text-3xl font-extrabold text-[#F4F2EE] uppercase tracking-tight mb-2">
+              Welcome back
+            </h1>
+            <p className="lg-sans text-[#93959C] text-sm">
+              Login to continue to your dashboard
+            </p>
+          </div>
 
-          {/* Email */}
-          <div>
-            <label className="text-sm text-gray-400">Email</label>
-            <input
-              type="email"
-              placeholder={t('login.emailPlaceholder')}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+          {error && (
+            <div className="mb-6 px-4 py-3 bg-[#E11D2E]/10 border border-[#E11D2E]/40 text-[#F4A8AE] text-sm lg-sans flex items-start gap-2">
+              <span className="lg-mono text-[10px] tracking-[0.1em] text-[#E11D2E] uppercase pt-0.5 shrink-0">Error</span>
+              <span>{error}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} className="space-y-5">
+
+            {/* Email */}
+            <div>
+              <label className="lg-mono text-[10px] tracking-[0.15em] text-[#93959C] uppercase">Email</label>
+              <input
+                type="email"
+                placeholder={t('login.emailPlaceholder')}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={loading}
+                required
+                className="lg-input mt-2"
+              />
+            </div>
+
+            {/* Password */}
+            <div>
+              <label className="lg-mono text-[10px] tracking-[0.15em] text-[#93959C] uppercase">Password</label>
+              <input
+                type="password"
+                placeholder={t('login.passwordPlaceholder')}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
+                required
+                className="lg-input mt-2"
+              />
+            </div>
+
+            {/* Button */}
+            <button
+              type="submit"
               disabled={loading}
-              required
-              className="mt-2 w-full px-4 py-3 bg-black/50 border border-purple-500/30 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
-            />
+              className={`w-full py-3.5 lg-orb font-bold text-sm tracking-wide uppercase ${
+                loading
+                  ? "bg-[#24262B] text-[#55565C] cursor-not-allowed"
+                  : "bg-[#E11D2E] text-white hover:bg-[#F4F2EE] hover:text-[#0B0C0E]"
+              }`}
+            >
+              {loading ? t('login.signingIn') : t('login.signIn')}
+            </button>
+          </form>
+
+          {debugInfo && process.env.NODE_ENV !== 'production' && (
+            <pre className="mt-6 p-3 bg-[#0B0C0E] border border-[#24262B] text-[#55565C] text-[10px] lg-mono overflow-x-auto max-h-40 overflow-y-auto">
+              {debugInfo}
+            </pre>
+          )}
+
+          {/* Footer */}
+          <div className="mt-10 pt-6 border-t border-[#24262B] flex items-center justify-between">
+            <span className="lg-mono text-[10px] tracking-[0.1em] text-[#55565C]">© 2026 SCORESYNC</span>
+            <span className="lg-mono text-[10px] tracking-[0.1em] text-[#55565C]">ALL RIGHTS RESERVED</span>
           </div>
-
-          {/* Password */}
-          <div>
-            <label className="text-sm text-gray-400">Password</label>
-            <input
-              type="password"
-              placeholder={t('login.passwordPlaceholder')}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={loading}
-              required
-              className="mt-2 w-full px-4 py-3 bg-black/50 border border-purple-500/30 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
-            />
-          </div>
-
-
-          {/* Button */}
-          <button
-            type="submit"
-            disabled={loading}
-            className={`w-full py-3 rounded-xl font-semibold text-white tracking-wide transition-all duration-300 ${
-              loading
-                ? "bg-purple-900 opacity-50 cursor-not-allowed"
-                : "bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 hover:shadow-[0_0_25px_rgba(168,85,247,0.7)]"
-            }`}
-          >
-            {loading ? t('login.signingIn') : t('login.signIn')}
-          </button>
-        </form>
-
-        {/* Footer */}
-        <div className="mt-10 text-center text-gray-500 text-xs">
-          © 2026 ScoreSync. All rights reserved.
         </div>
       </div>
     </div>
-  </div>
-);
+  );
 };
 
 export default Login;

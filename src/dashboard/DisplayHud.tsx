@@ -1,10 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useTransition, memo } from 'react';
 import api from '../login/api.tsx';
 import PollingManager from './isPolling.tsx';
 import {
-  FaDiscord, FaTrophy, FaUsers, FaEye,
-  FaBroadcastTower, FaCalendarAlt, FaSatelliteDish,
-  FaChevronDown, FaChevronRight, FaExternalLinkAlt,
+  FaDiscord, FaTrophy, FaUsers, FaEye, FaBars, FaTimes, FaSearch,
+  FaBroadcastTower, FaCalendarAlt, FaExternalLinkAlt, FaCheckCircle,
 } from 'react-icons/fa';
 
 interface Tournament { _id: string; tournamentName: string; }
@@ -15,278 +14,312 @@ const THEMES = ['Theme1', 'Theme2', 'Theme3', 'Theme4', 'Theme5', 'Theme6'];
 
 const VIEW_GROUPS = [
   {
-    id: 'match', label: 'ON-AIR', color: '#facc15',
+    id: 'match', label: 'On-air', hint: 'Live match overlays', requires: 'live',
     views: [
       { key: 'Alerts', label: 'Alerts' },
-     
-      { key: 'Lower', label: 'Lower' },
-      { key: 'Upper', label: 'Upper' },
-      { key: 'Dom', label: 'Dom' },
+      { key: 'Lower', label: 'Lower Third' },
+      { key: 'Upper', label: 'Upper Third' },
+      { key: 'Dom', label: 'Dominator' },
       { key: 'intro', label: 'Intro' },
       { key: 'LiveStats', label: 'Live Stats' },
       { key: 'LiveFrags', label: 'Live Frags' },
-       { key: 'Battlebar', label: 'Battlebar' },    
+      { key: 'Battlebar', label: 'Battle Bar' },
     ]
   },
   {
-    id: 'overall', label: 'POST MATCH ( OVERALL )', color: '#facc15',
+    id: 'overall', label: 'Post match — overall', hint: 'Tournament-wide standings', requires: 'live',
     views: [
       { key: 'OverAllData', label: 'Overall Data' },
       { key: 'OverallFrags', label: 'Overall Frags' },
-   
     ]
   },
   {
-    id: 'h2h', label: 'POST MATCH ( MATCH )', color: '#facc15',
+    id: 'h2h', label: 'Post match — this match', hint: 'Results for the selected match', requires: 'live',
     views: [
-       { key: 'mvp', label: 'MVP' },
-       { key: 'Achive', label: 'Player Summary' },
-         { key: 'WwcdStats', label: 'WWCD STATS' },
-      { key: 'WwcdSummary', label: 'WWCD SUMMARY' },
-       { key: 'MatchSummary', label: 'MATCH SUMMARY' },
-      { key: 'MatchData', label: 'MATCH DATA' },
-      { key: 'MatchFragrs', label: 'MATCH FRAGGERS' },
+      { key: 'mvp', label: 'MVP' },
+      { key: 'Achive', label: 'Player Summary' },
+      { key: 'WwcdStats', label: 'WWCD Stats' },
+      { key: 'WwcdSummary', label: 'WWCD Summary' },
+      { key: 'MatchSummary', label: 'Match Summary' },
+      { key: 'MatchData', label: 'Match Data' },
+      { key: 'MatchFragrs', label: 'Match Fraggers' },
       { key: 'playerH2H', label: 'Player H2H' },
-      { key: 'TeamH2H', label: 'TEAM H2H' },
+      { key: 'TeamH2H', label: 'Team H2H' },
     ]
   },
   {
-    id: 'awards', label: 'AWARDS', color: '#facc15',
+    id: 'awards', label: 'Awards', hint: 'Podium & trophy screens', requires: 'live',
     views: [
       { key: 'Champions', label: 'Champions' },
       { key: '1stRunnerUp', label: '1st Runner Up' },
       { key: '2ndRunnerUp', label: '2nd Runner Up' },
       { key: 'EventMvp', label: 'Event MVP' },
-
-     
     ]
   },
   {
-    id: 'broadcast', label: 'PRE-MATCH', color: '#facc15',
+    id: 'broadcast', label: 'Pre-match', hint: 'Before the match goes live', requires: 'live',
     views: [
-      
       { key: 'CommingUpNext', label: 'Up Next' },
-    
-      { key: 'highlightPoints', label: 'Hi-Points' },
-     
+      { key: 'highlightPoints', label: 'Highlight Points' },
       { key: 'slots', label: 'Slots' },
-      { key: 'RosterShowCase', label: 'Roster' },
+      { key: 'RosterShowCase', label: 'Roster Showcase' },
       { key: 'PlayerSwitch', label: 'Player Switch' },
     ]
   },
   {
-    id: 'schedule', label: 'SCHEDULE', color: '#facc15',
+    id: 'schedule', label: 'Schedule', hint: 'Uses the matches checked below', requires: 'schedule',
     views: [
       { key: '__schedule', label: 'Schedule' },
-      { key: '__highlight', label: 'Highlight' },
+      { key: '__highlight', label: 'Highlight Schedule' },
     ]
   },
 ];
 
-const S = `
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Orbitron:wght@700;900&display=swap');
+// ── Design system ────────────────────────────────────────────────────────────
+// Same visual identity as the Team Ops screen: dark control-room void, one red
+// tally accent, Space Grotesk / Inter / JetBrains Mono. The old page packed a
+// tournament tree, a match bar, and six overlay groups onto one screen at
+// once — this version turns that into four numbered steps so a new operator
+// always knows exactly what to click next, and later steps simply stay dim
+// and unclickable until the step above them is done.
+const STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+.hd-root * { box-sizing: border-box; }
+.hd-root { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+.hd-orb { font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif !important; }
+.hd-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 
-:root {
-  --yellow: #facc15;
-  --purple: #7c3aed;
-  --purple-light: #a78bfa;
-  --purple-dim: rgba(124,58,237,0.14);
-  --purple-border: rgba(124,58,237,0.28);
-  --bg: #09060f;
-  --bg2: #0d0a18;
-  --bg3: #110e1c;
-  --border: rgba(124,58,237,0.18);
-  --text: #ddd6fe;
-  --text-dim: #64748b;
-  --text-muted: #2a2040;
+.hd-glow {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background: radial-gradient(ellipse 80% 40% at 50% 0%, rgba(225,29,46,0.07), transparent);
 }
 
-.r{font-family:'DM Sans',sans-serif;color:var(--text);display:flex;min-height:100vh;background:var(--bg);}
-.orb{font-family:'Orbitron',monospace !important;}
+@keyframes hd-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+.hd-dot { animation: hd-pulse 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .hd-dot { animation: none; } }
 
-.r::before{
-  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
-  background-image:linear-gradient(rgba(124,58,237,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(124,58,237,0.04) 1px,transparent 1px);
-  background-size:48px 48px;
+/* ── Top navbar (matches Team Ops) ── */
+.hd-nav { position: sticky; top: 0; z-index: 60; background: rgba(11,12,14,0.92); backdrop-filter: blur(16px); border-bottom: 1px solid #24262B; }
+.hd-nav-inner { max-width: 1280px; margin: 0 auto; padding: 0 20px; display: flex; align-items: center; height: 64px; gap: 18px; }
+.hd-nav-brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.hd-nav-links { display: flex; align-items: center; gap: 4px; }
+.hd-nav-link { display: flex; align-items: center; gap: 8px; padding: 8px 14px; color: #93959C; text-decoration: none; cursor: pointer; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; border: 1px solid transparent; background: none; white-space: nowrap; transition: color .15s ease, border-color .15s ease; }
+.hd-nav-link:hover { color: #F4F2EE; }
+.hd-nav-link.active { color: #E11D2E; border-bottom: 2px solid #E11D2E; padding-bottom: 6px; }
+.hd-nav-right { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.hd-nav-poll { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid #24262B; color: #55565C; }
+.hd-nav-user { display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 6px; border: 1px solid #24262B; }
+.hd-nav-avatar { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; background: rgba(225,29,46,0.15); border: 1px solid rgba(225,29,46,0.4); display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; color: #E11D2E; }
+.hd-nav-burger { display: none; background: none; border: 1px solid #24262B; color: #F4F2EE; width: 38px; height: 38px; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.hd-nav-mobile-panel { display: none; flex-direction: column; padding: 10px 20px 16px; gap: 2px; border-bottom: 1px solid #24262B; background: #0B0C0E; }
+.hd-nav-mobile-panel.open { display: flex; }
+@media (max-width: 860px) {
+  .hd-nav-links { display: none; }
+  .hd-nav-poll { display: none; }
+  .hd-nav-burger { display: flex; }
+  .hd-nav-user span { display: none; }
 }
 
-.top-stripe{
-  position:fixed;top:0;left:0;right:0;height:2px;z-index:300;
-  background:linear-gradient(90deg,transparent 0%,var(--yellow) 30%,var(--purple-light) 70%,transparent 100%);
-}
+.hd-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #93959C; letter-spacing: 0.22em; text-transform: uppercase; }
+.hd-eyebrow-dot { width: 6px; height: 6px; background: #E11D2E; flex-shrink: 0; }
+.hd-pill { display: inline-flex; align-items: center; background: rgba(225,29,46,0.08); border: 1px solid rgba(225,29,46,0.3); color: #E11D2E; font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 3px 9px; letter-spacing: 0.05em; font-weight: 700; }
 
-/* SIDEBAR */
-.sb{
-  position:fixed;left:0;top:0;bottom:0;width:72px;z-index:100;
-  display:flex;flex-direction:column;align-items:center;padding:20px 0;
-  background:var(--bg2);border-right:1px solid var(--border);
-}
-.sb-logo{width:38px;height:38px;border-radius:10px;margin-bottom:8px;overflow:hidden;border:1px solid rgba(250,204,21,0.3);box-shadow:0 0 16px rgba(250,204,21,0.1);}
-.sb-user{display:flex;flex-direction:column;align-items:center;gap:3px;margin-bottom:4px;padding:5px 4px;width:48px;border-radius:8px;background:var(--purple-dim);border:1px solid var(--purple-border);}
-.sb-user-dot{width:5px;height:5px;border-radius:50%;background:#facc15;box-shadow:0 0 6px #facc15;}
-.sb-user-txt{font-family:'Orbitron',monospace;font-size:8px;color:#facc15;font-weight:700;text-align:center;max-width:44px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px;}
-.sb-div{width:32px;height:1px;background:var(--border);margin:8px 0;}
-.sb-btn{
-  display:flex;flex-direction:column;align-items:center;gap:4px;
-  width:52px;padding:9px 0;border-radius:10px;cursor:pointer;
-  border:1px solid transparent;background:transparent;color:var(--text-dim);
-  font-family:'DM Sans',sans-serif;font-size:9px;font-weight:600;letter-spacing:0.5px;
-  transition:all 0.15s;
-}
-.sb-btn:hover{color:#a78bfa;background:var(--purple-dim);border-color:var(--purple-border);}
-.sb-btn.on{color:#facc15;background:rgba(250,204,21,0.08);border-color:rgba(250,204,21,0.35);box-shadow:0 0 18px rgba(250,204,21,0.1);}
-.sb-foot{margin-top:auto;}
+.hd-page { max-width: 1000px; margin: 0 auto; padding: 36px 20px 72px; position: relative; z-index: 1; }
+.hd-header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 30px; flex-wrap: wrap; }
+.hd-status-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.hd-status { display: flex; align-items: center; gap: 7px; background: #131418; border: 1px solid #24262B; padding: 8px 14px; }
+.hd-status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 
-/* LEFT NAV */
-.nav{position:fixed;left:72px;top:0;bottom:0;width:252px;z-index:90;display:flex;flex-direction:column;background:var(--bg2);border-right:1px solid var(--border);}
-.nav-head{padding:20px 16px 14px;border-bottom:1px solid var(--border);flex-shrink:0;}
-.nav-eyebrow{font-family:'Orbitron',monospace;font-size:7px;font-weight:700;letter-spacing:3px;color:var(--text-muted);margin-bottom:5px;}
-.nav-title{font-family:'Orbitron',monospace;font-size:16px;font-weight:900;color:#fff;letter-spacing:0.5px;}
-.nav-title span{color:var(--yellow);}
-.poll-row{display:flex;align-items:center;gap:6px;margin-top:10px;padding:7px 11px;border-radius:7px;background:rgba(250,204,21,0.06);border:1px solid rgba(250,204,21,0.18);}
-.poll-dot{width:5px;height:5px;border-radius:50%;background:#facc15;box-shadow:0 0 5px #facc15;animation:pulse 2s ease-in-out infinite;}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
-.poll-txt{font-family:'Orbitron',monospace;font-size:8px;color:#facc15;letter-spacing:0.8px;font-weight:700;}
-.nav-scroll{flex:1;overflow-y:auto;padding:8px 8px 20px;scrollbar-width:thin;scrollbar-color:var(--purple-dim) transparent;}
-.nav-scroll::-webkit-scrollbar{width:3px;}
-.nav-scroll::-webkit-scrollbar-thumb{background:var(--purple-dim);border-radius:4px;}
+/* ── Step cards ── */
+.hd-step { display: flex; gap: 16px; margin-bottom: 14px; }
+.hd-step-num-wrap { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; width: 34px; }
+.hd-step-num { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; border: 1px solid #24262B; background: #131418; color: #55565C; flex-shrink: 0; }
+.hd-step-num.done { border-color: #E11D2E; color: #E11D2E; background: rgba(225,29,46,0.08); }
+.hd-step-line { flex: 1; width: 1px; background: #24262B; margin: 6px 0; }
+.hd-step-body { flex: 1; min-width: 0; padding-bottom: 26px; }
+.hd-step-card { background: #131418; border: 1px solid #24262B; padding: 18px 20px; transition: border-color .15s ease, opacity .15s ease; }
+.hd-step-card.locked { opacity: 0.45; pointer-events: none; }
+.hd-step-title { font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700; color: #F4F2EE; text-transform: uppercase; letter-spacing: 0.01em; }
+.hd-step-sub { font-size: 13px; color: #93959C; margin-top: 3px; }
 
-.t-row{display:flex;align-items:center;gap:7px;padding:8px 9px;border-radius:7px;cursor:pointer;border:1px solid transparent;margin-bottom:1px;transition:all 0.12s;}
-.t-row:hover{background:var(--purple-dim);border-color:var(--purple-border);}
-.t-row.open{background:rgba(124,58,237,0.1);border-color:rgba(124,58,237,0.35);}
-.t-bar{width:3px;height:18px;border-radius:2px;background:var(--text-muted);flex-shrink:0;}
-.t-row.open .t-bar{background:var(--yellow);box-shadow:0 0 6px rgba(250,204,21,0.4);}
-.t-name{font-family:'Orbitron',monospace;font-size:9px;font-weight:700;color:var(--text-dim);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.t-row.open .t-name{color:#fff;}
-.t-chev{color:var(--text-muted);flex-shrink:0;}
-.t-row.open .t-chev{color:var(--yellow);}
-.rounds{padding:2px 0 4px 16px;}
-.r-row{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-radius:6px;cursor:pointer;border:1px solid transparent;margin-bottom:1px;transition:all 0.12s;}
-.r-row:hover{background:var(--purple-dim);border-color:var(--purple-border);}
-.r-row.sel{background:rgba(250,204,21,0.08);border-color:rgba(250,204,21,0.35);}
-.r-name{font-family:'Orbitron',monospace;font-size:9px;font-weight:700;color:var(--text-dim);}
-.r-row.sel .r-name{color:#facc15;}
-.r-live{display:flex;align-items:center;gap:3px;}
-.r-live-dot{width:5px;height:5px;border-radius:50%;background:#4ade80;box-shadow:0 0 4px #4ade80;}
-.r-live-txt{font-family:'Orbitron',monospace;font-size:7px;color:#4ade80;font-weight:700;}
+/* ── Search ── */
+.hd-search-wrap { position: relative; margin-top: 14px; max-width: 320px; }
+.hd-search-ic { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #55565C; font-size: 12px; pointer-events: none; }
+.hd-search-input { width: 100%; padding: 10px 13px 10px 34px; background: #0B0C0E; border: 1px solid #24262B; color: #F4F2EE; font-family: 'Inter', sans-serif; font-size: 13px; outline: none; transition: border-color .15s ease; }
+.hd-search-input::placeholder { color: #55565C; }
+.hd-search-input:focus { border-color: #E11D2E; }
+.hd-search-count { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #55565C; margin-top: 6px; }
 
-/* MAIN */
-.main{margin-left:324px;position:relative;z-index:1;min-height:100vh;display:flex;flex-direction:column;}
+/* ── Selects ── */
+.hd-select-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+@media (max-width: 560px) { .hd-select-row { grid-template-columns: 1fr; } }
+.hd-field-label { display: block; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #55565C; letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 6px; }
+.hd-select { width: 100%; padding: 11px 13px; background: #0B0C0E; border: 1px solid #24262B; color: #F4F2EE; font-family: 'Inter', sans-serif; font-size: 14px; outline: none; cursor: pointer; transition: border-color .15s ease; appearance: none; }
+.hd-select:focus { border-color: #E11D2E; }
+.hd-select:disabled { color: #55565C; cursor: not-allowed; }
 
-/* TOPBAR */
-.topbar{
-  position:sticky;top:0;z-index:50;
-  background:rgba(9,6,15,0.95);border-bottom:1px solid var(--border);
-  backdrop-filter:blur(24px);
-  display:flex;align-items:center;min-height:54px;padding:0 24px;
-}
-.topbar-round{font-family:'Orbitron',monospace;font-size:15px;font-weight:900;color:#fff;}
-.topbar-tour{font-size:13px;color:var(--text-dim);font-weight:500;margin-left:14px;}
-.topbar-idle{font-family:'Orbitron',monospace;font-size:10px;color:var(--text-muted);letter-spacing:2px;}
-.topbar-right{display:flex;align-items:center;gap:8px;margin-left:auto;}
+/* ── Match chips ── */
+.hd-chip-group { margin-top: 14px; }
+.hd-chip-hdr { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+.hd-chip-hdr-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+.hd-chip-hdr-sub { font-size: 12px; color: #55565C; }
+.hd-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.hd-chip { padding: 8px 16px; border-radius: 3px; cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; border: 1px solid #24262B; color: #93959C; background: #0B0C0E; transition: all .12s ease; user-select: none; }
+.hd-chip:hover { border-color: rgba(225,29,46,0.4); color: #F4F2EE; }
+.hd-chip.on-live { background: rgba(74,222,128,0.1); border-color: #4ADE80; color: #4ADE80; }
+.hd-chip.on-sched { background: rgba(225,29,46,0.1); border-color: #E11D2E; color: #E11D2E; }
 
-.status-pill{display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:6px;border:1px solid;}
-.pill-live{background:rgba(74,222,128,0.06);border-color:rgba(74,222,128,0.2);}
-.pill-sched{background:rgba(250,204,21,0.06);border-color:rgba(250,204,21,0.2);}
-.pill-dot{width:6px;height:6px;border-radius:50%;}
-.pill-lbl{font-family:'Orbitron',monospace;font-size:7px;letter-spacing:1px;font-weight:700;}
-.pill-val{font-family:'Orbitron',monospace;font-size:12px;font-weight:900;}
+/* ── Theme picker ── */
+.hd-theme-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.hd-theme-btn { padding: 9px 16px; border: 1px solid #24262B; background: #0B0C0E; color: #93959C; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; cursor: pointer; transition: all .12s ease; }
+.hd-theme-btn:hover { color: #F4F2EE; border-color: rgba(225,29,46,0.4); }
+.hd-theme-btn.on { background: rgba(225,29,46,0.1); border-color: #E11D2E; color: #E11D2E; }
 
-.theme-wrap{display:flex;align-items:center;gap:7px;margin-left:12px;padding-left:12px;border-left:1px solid var(--border);}
-.theme-lbl{font-family:'Orbitron',monospace;font-size:7px;color:var(--text-muted);letter-spacing:1.5px;}
-.theme-sel{background:var(--bg3);border:1px solid var(--purple-border);border-radius:7px;color:var(--yellow);padding:5px 10px;font-family:'Orbitron',monospace;font-size:10px;font-weight:700;outline:none;cursor:pointer;}
-.theme-sel option{background:#09060f;}
-.theme-sel:focus{border-color:var(--yellow);}
+/* ── Overlay groups ── */
+.hd-group { margin-bottom: 18px; }
+.hd-group:last-child { margin-bottom: 0; }
+.hd-group-hdr { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.hd-group-label { font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700; color: #F4F2EE; text-transform: uppercase; }
+.hd-group-hint { font-size: 11px; color: #55565C; }
+.hd-tiles { display: flex; flex-wrap: wrap; gap: 6px; }
+.hd-tile { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #0B0C0E; border: 1px solid #24262B; cursor: pointer; user-select: none; transition: border-color .12s ease, transform .1s ease; }
+.hd-tile:hover { border-color: #E11D2E; transform: translateY(-1px); }
+.hd-tile:active { transform: scale(0.97); }
+.hd-tile-label { font-size: 13px; font-weight: 600; color: #F4F2EE; }
+.hd-tile-ic { color: #55565C; font-size: 10px; }
+.hd-tile:hover .hd-tile-ic { color: #E11D2E; }
 
-/* MATCH BAR */
-.matchbar{padding:14px 24px;border-bottom:1px solid var(--border);background:rgba(13,10,24,0.8);display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;}
-.mzone{display:flex;flex-direction:column;gap:7px;}
-.mzone-hdr{display:flex;align-items:center;gap:5px;}
-.mzone-lbl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;letter-spacing:1.5px;}
-.mzone-sub{font-size:11px;color:var(--text-muted);font-weight:500;}
-.msep{width:1px;background:var(--border);align-self:stretch;margin:0 4px;}
-.mchips{display:flex;flex-wrap:wrap;gap:4px;}
-.mchip{
-  padding:4px 13px;border-radius:5px;cursor:pointer;
-  font-family:'Orbitron',monospace;font-size:10px;font-weight:700;
-  border:1px solid rgba(255,255,255,0.07);color:var(--text-muted);background:var(--bg3);
-  transition:all 0.12s;user-select:none;
-}
-.mchip:hover{border-color:var(--purple-border);color:var(--purple-light);}
-.mchip.live-on{background:rgba(74,222,128,0.08);border-color:#4ade80;color:#4ade80;box-shadow:0 0 8px rgba(74,222,128,0.12);}
-.mchip.sched-on{background:rgba(250,204,21,0.08);border-color:#facc15;color:#facc15;box-shadow:0 0 8px rgba(250,204,21,0.12);}
-
-/* CONTENT */
-.content{flex:1;padding:16px 24px 48px;display:flex;flex-direction:column;gap:0;}
-
-/* empty */
-.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 24px;gap:14px;}
-.empty-ring{width:72px;height:72px;border-radius:50%;border:1px solid var(--border);background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:28px;color:var(--text-muted);}
-.empty-h{font-family:'Orbitron',monospace;font-size:12px;color:var(--text-muted);letter-spacing:2px;}
-.empty-p{font-size:13px;color:var(--text-muted);}
-
-/* SECTION — folder-tab style */
-.section{margin-bottom:6px;}
-.sec-hdr{display:flex;align-items:center;}
-.sec-tab{
-  display:inline-flex;align-items:center;gap:8px;
-  padding:6px 16px 6px 12px;border-radius:6px 6px 0 0;
-  border:1px solid var(--border);border-bottom:none;
-  background:var(--bg2);
-}
-.sec-tab-label{font-family:'Orbitron',monospace;font-size:9px;font-weight:900;letter-spacing:1.5px;}
-.sec-tab-count{font-family:'Orbitron',monospace;font-size:8px;color:var(--text-muted);}
-.sec-hint{font-family:'Orbitron',monospace;font-size:7px;letter-spacing:1px;color:var(--text-muted);margin-left:10px;}
-
-.tile-block{
-  border:1px solid var(--border);
-  border-radius:0 8px 8px 8px;
-  background:var(--bg2);
-  padding:10px;margin-bottom:8px;
-}
-.tile-block.locked{opacity:0.3;pointer-events:none;}
-
-/* TILES — horizontal list rows, no play button */
-.tiles{display:flex;flex-wrap:wrap;gap:5px;}
-
-.tile{
-  cursor:pointer;user-select:none;display:flex;align-items:stretch;
-  border-radius:6px;border:1px solid rgba(255,255,255,0.06);
-  background:var(--bg3);overflow:hidden;
-  transition:border-color 0.13s,box-shadow 0.13s,transform 0.1s;
-  min-width:120px;
-}
-.tile:hover{
-  border-color:var(--tc);
-  box-shadow:0 0 0 1px var(--tc-dim),0 3px 14px rgba(0,0,0,0.5);
-}
-.tile:active{transform:scale(0.97);}
-
-.tile-accent{width:3px;background:var(--tc);opacity:0.4;flex-shrink:0;transition:opacity 0.13s;}
-.tile:hover .tile-accent{opacity:1;}
-
-.tile-body{padding:8px 12px;flex:1;display:flex;flex-direction:column;gap:2px;}
-.tile-label{font-size:13px;font-weight:600;color:#c4b5fd;letter-spacing:0.2px;line-height:1.2;}
-.tile:hover .tile-label{color:#fff;}
-.tile-key{font-family:'Orbitron',monospace;font-size:7px;color:var(--text-muted);letter-spacing:0.3px;margin-top:1px;}
-
-.tile-arrow{
-  display:flex;align-items:center;padding:0 9px;color:var(--text-muted);
-  font-size:9px;opacity:0;transition:opacity 0.13s;
-}
-.tile:hover .tile-arrow{opacity:0.7;}
-
-.no-matches{text-align:center;padding:48px;font-family:'Orbitron',monospace;font-size:9px;color:var(--text-muted);letter-spacing:1.5px;}
+/* ── Empty / locked notices ── */
+.hd-note { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px 13px; background: rgba(225,29,46,0.06); border: 1px solid rgba(225,29,46,0.2); font-size: 12px; color: #93959C; }
+.hd-empty { text-align: center; padding: 56px 20px; border: 1px dashed #24262B; }
 `;
+
+// ── Top navigation (identical identity to Team Ops) ─────────────────────────
+// Memoized: user rarely changes, but the page re-renders on every search
+// keystroke and chip click — without this the nav (and its polling manager)
+// would rebuild on each of those for no reason.
+const TopNav = memo(({ user }: { user: any }) => {
+  const [open, setOpen] = useState(false);
+
+  const links = [
+    { label: 'TOURNAMENTS', icon: <FaTrophy size={13} />, onClick: () => (window.location.href = '/dashboard') },
+    { label: 'TEAMS', icon: <FaUsers size={13} />, onClick: () => window.open('/teams', '_blank', 'noopener,noreferrer') },
+    { label: 'HUD', icon: <FaEye size={13} />, active: true },
+    { label: 'HELP', icon: <FaDiscord size={13} />, onClick: () => window.open('https://discord.com/channels/623776491682922526/1426117227257663558', '_blank') },
+  ];
+
+  return (
+    <nav className="hd-nav">
+      <div className="hd-nav-inner">
+        <div className="hd-nav-brand">
+          <img src="./logo.avif" alt="logo" style={{ width: 30, height: 30, objectFit: 'contain' }} />
+          <span className="hd-orb" style={{ fontSize: 14, fontWeight: 700, color: '#F4F2EE', letterSpacing: '0.02em' }}>OVERLAY CONTROL</span>
+        </div>
+
+        <div className="hd-nav-links">
+          {links.map(link => (
+            <button key={link.label} className={`hd-nav-link ${link.active ? 'active' : ''}`} onClick={link.onClick}>
+              {link.icon} {link.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="hd-nav-right">
+          <div className="hd-nav-poll">
+            <span className="hd-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: '#E11D2E' }} />
+            <PollingManager />
+          </div>
+          {user && (
+            <div className="hd-nav-user">
+              <div className="hd-nav-avatar">{(user.username || '?').slice(0, 2).toUpperCase()}</div>
+              <span className="hd-mono" style={{ fontSize: 11, color: '#F4F2EE' }}>{user.username}</span>
+            </div>
+          )}
+          <button className="hd-nav-burger" onClick={() => setOpen(v => !v)} aria-label="Toggle menu">
+            {open ? <FaTimes size={15} /> : <FaBars size={15} />}
+          </button>
+        </div>
+      </div>
+
+      <div className={`hd-nav-mobile-panel ${open ? 'open' : ''}`}>
+        {links.map(link => (
+          <button
+            key={link.label}
+            className={`hd-nav-link ${link.active ? 'active' : ''}`}
+            style={{ justifyContent: 'flex-start', padding: '12px 8px', borderBottom: 'none' }}
+            onClick={() => { link.onClick?.(); setOpen(false); }}
+          >
+            {link.icon} {link.label}
+          </button>
+        ))}
+      </div>
+    </nav>
+  );
+});
+
+// ── Tournament search box ────────────────────────────────────────────────────
+// Local state + a debounce keeps every keystroke instant even with a large
+// tournament list — the (potentially expensive) filter only runs 200ms after
+// typing stops, via useTransition so it never blocks the input itself.
+const TournamentSearch = memo(({ onQueryChange }: { onQueryChange: (q: string) => void }) => {
+  const [localQuery, setLocalQuery] = useState('');
+  const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    const id = setTimeout(() => {
+      startTransition(() => onQueryChange(localQuery));
+    }, localQuery === '' ? 0 : 200);
+    return () => clearTimeout(id);
+  }, [localQuery, onQueryChange]);
+
+  return (
+    <div className="hd-search-wrap">
+      <FaSearch className="hd-search-ic" />
+      <input
+        type="text"
+        value={localQuery}
+        onChange={e => setLocalQuery(e.target.value)}
+        placeholder="Search tournaments…"
+        className="hd-search-input"
+      />
+    </div>
+  );
+});
+
+// ── Overlay tile group ───────────────────────────────────────────────────────
+// Memoized so the six overlay groups (up to ~30 tiles) only re-render when
+// their own click handler or enabled state actually changes — not on every
+// keystroke in the search box or every unrelated chip toggle.
+const OverlayGroup = memo(({ group, onTileClick }: {
+  group: typeof VIEW_GROUPS[number];
+  onTileClick: (groupId: string, viewKey: string) => void;
+}) => (
+  <div className="hd-group">
+    <div className="hd-group-hdr">
+      <span className="hd-group-label">{group.label}</span>
+      <span className="hd-group-hint">{group.hint}</span>
+    </div>
+    <div className="hd-tiles">
+      {group.views.map(v => (
+        <div key={v.key} className="hd-tile" onClick={() => onTileClick(group.id, v.key)}>
+          <span className="hd-tile-label">{v.label}</span>
+          <FaExternalLinkAlt className="hd-tile-ic" />
+        </div>
+      ))}
+    </div>
+  </div>
+));
 
 const DisplayHud: React.FC = () => {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
-  const [expandedTours, setExpandedTours] = useState<string[]>([]);
-  const [roundsMap, setRoundsMap] = useState<Record<string, Round[]>>({});
-  const [matchesMap, setMatchesMap] = useState<Record<string, Match[]>>({});
-  const [activeRound, setActiveRound] = useState<{ tId: string; rId: string } | null>(null);
+  const [rounds, setRounds] = useState<Round[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
+
+  const [tournamentId, setTournamentId] = useState('');
+  const [roundId, setRoundId] = useState('');
+  const [tournamentQuery, setTournamentQuery] = useState('');
+
   const [selectedMatches, setSelectedMatches] = useState<Record<string, string | null>>({});
   const [selectedSchedule, setSelectedSchedule] = useState<Record<string, string[]>>({});
   const [user, setUser] = useState<any>(null);
@@ -295,7 +328,23 @@ const DisplayHud: React.FC = () => {
     try { const s = localStorage.getItem('selectedThemeMap'); return s ? JSON.parse(s) : {}; } catch { return {}; }
   });
 
-  const getTheme = (tId: string) => themeMap[tId] || 'Theme1';
+  const filteredTournaments = useMemo(() => {
+    const q = tournamentQuery.trim().toLowerCase();
+    const base = q ? tournaments.filter(t => t.tournamentName.toLowerCase().includes(q)) : tournaments;
+    // Keep the currently selected tournament in the list even if it no
+    // longer matches the search, so the <select> doesn't lose its label.
+    if (tournamentId && !base.some(t => t._id === tournamentId)) {
+      const current = tournaments.find(t => t._id === tournamentId);
+      if (current) return [current, ...base];
+    }
+    return base;
+  }, [tournaments, tournamentQuery, tournamentId]);
+
+  const roundKey = tournamentId && roundId ? `${tournamentId}_${roundId}` : '';
+  const theme = tournamentId ? (themeMap[tournamentId] || 'Theme1') : 'Theme1';
+  const liveMatchId = roundKey ? selectedMatches[roundKey] || null : null;
+  const schedMatchIds = roundKey ? selectedSchedule[roundKey] || [] : [];
+  const liveMatchObj = liveMatchId ? matches.find(m => m._id === liveMatchId) : null;
 
   useEffect(() => {
     api.get('/users/me').then(r => setUser(r.data)).catch(() => {});
@@ -314,314 +363,276 @@ const DisplayHud: React.FC = () => {
     try { localStorage.setItem('selectedThemeMap', JSON.stringify(themeMap)); } catch {}
   }, [themeMap]);
 
-  const toggleTournament = (tId: string) => {
-    if (expandedTours.includes(tId)) {
-      setExpandedTours(p => p.filter(id => id !== tId));
-      if (activeRound?.tId === tId) setActiveRound(null);
-    } else {
-      setExpandedTours(p => [...p, tId]);
-      if (!roundsMap[tId]) {
-        api.get(`/tournaments/${tId}/rounds`)
-          .then(r => setRoundsMap(p => ({ ...p, [tId]: r.data })))
-          .catch(() => setRoundsMap(p => ({ ...p, [tId]: [] })));
-      }
-    }
-  };
+  const handleTournamentChange = useCallback((id: string) => {
+    setTournamentId(id);
+    setRoundId('');
+    setRounds([]);
+    setMatches([]);
+    if (!id) return;
+    api.get(`/tournaments/${id}/rounds`).then(r => setRounds(r.data)).catch(() => setRounds([]));
+  }, []);
 
-  const selectRound = (tId: string, rId: string) => {
-    if (activeRound?.tId === tId && activeRound?.rId === rId) { setActiveRound(null); return; }
-    setActiveRound({ tId, rId });
-    const key = `${tId}_${rId}`;
-    if (!matchesMap[key]) {
-      api.get(`/tournaments/${tId}/rounds/${rId}/matches`)
-        .then(r => setMatchesMap(p => ({ ...p, [key]: r.data })))
-        .catch(() => setMatchesMap(p => ({ ...p, [key]: [] })));
-    }
-  };
+  const handleRoundChange = useCallback((id: string) => {
+    setRoundId(id);
+    setMatches([]);
+    if (!id || !tournamentId) return;
+    api.get(`/tournaments/${tournamentId}/rounds/${id}/matches`)
+      .then(r => setMatches(r.data))
+      .catch(() => setMatches([]));
+  }, [tournamentId]);
 
-  const toggleLiveMatch = async (tId: string, rId: string, mId: string, checked: boolean) => {
-    const key = `${tId}_${rId}`;
-    const prev = { ...selectedMatches };
-    setSelectedMatches(p => ({ ...p, [key]: checked ? mId : null }));
+  const toggleLiveMatch = useCallback(async (mId: string, checked: boolean) => {
+    if (!roundKey) return;
+    let prevValue: string | null = null;
+    setSelectedMatches(p => { prevValue = p[roundKey] ?? null; return { ...p, [roundKey]: checked ? mId : null }; });
     try {
-      const res = await api.post('/matchSelection/select', { tournamentId: tId, roundId: rId, matchId: mId });
-      if (res.data.deselected && checked) setSelectedMatches(p => ({ ...p, [key]: null }));
-      else if (!res.data.deselected && !checked) setSelectedMatches(p => ({ ...p, [key]: mId }));
+      const res = await api.post('/matchSelection/select', { tournamentId, roundId, matchId: mId });
+      if (res.data.deselected && checked) setSelectedMatches(p => ({ ...p, [roundKey]: null }));
+      else if (!res.data.deselected && !checked) setSelectedMatches(p => ({ ...p, [roundKey]: mId }));
       setPollingKey(p => p + 1);
     } catch {
-      setSelectedMatches(prev);
+      setSelectedMatches(p => ({ ...p, [roundKey]: prevValue }));
       alert('Failed to update match selection. Please try again.');
     }
-  };
+  }, [roundKey, tournamentId, roundId]);
 
-  const toggleSchedMatch = (tId: string, rId: string, mId: string, checked: boolean) => {
-    const key = `${tId}_${rId}`;
+  const toggleSchedMatch = useCallback((mId: string, checked: boolean) => {
+    if (!roundKey) return;
     setSelectedSchedule(p => {
-      const cur = p[key] || [];
-      return { ...p, [key]: checked ? [...cur, mId] : cur.filter(id => id !== mId) };
+      const cur = p[roundKey] || [];
+      return { ...p, [roundKey]: checked ? [...cur, mId] : cur.filter(id => id !== mId) };
     });
+  }, [roundKey]);
+
+  const openView = (view: string) => {
+    if (!liveMatchId) return;
+    window.open(`/public/tournament/${tournamentId}/round/${roundId}/match/${liveMatchId}?theme=${encodeURIComponent(theme)}&view=${encodeURIComponent(view)}&followSelected=true`, '_blank', 'noopener,noreferrer');
   };
 
-  const openView = (tId: string, rId: string, mId: string, theme: string, view: string) => {
-    if (!mId) return;
-    window.open(`/public/tournament/${tId}/round/${rId}/match/${mId}?theme=${encodeURIComponent(theme)}&view=${encodeURIComponent(view)}&followSelected=true`, '_blank', 'noopener,noreferrer');
+  const openSchedule = (view: string) => {
+    if (!schedMatchIds.length) return;
+    window.open(`/public/tournament/${tournamentId}/round/${roundId}/match/${schedMatchIds[0]}?theme=${encodeURIComponent(theme)}&view=${view}&followSelected=true&scheduleMatches=${encodeURIComponent(schedMatchIds.join(','))}`, '_blank', 'noopener,noreferrer');
   };
 
-  const openSchedule = (tId: string, rId: string, mIds: string[], theme: string, view: string) => {
-    if (!mIds.length) return;
-    window.open(`/public/tournament/${tId}/round/${rId}/match/${mIds[0]}?theme=${encodeURIComponent(theme)}&view=${view}&followSelected=true&scheduleMatches=${encodeURIComponent(mIds.join(','))}`, '_blank', 'noopener,noreferrer');
-  };
-
-  const ar = activeRound;
-  const arKey = ar ? `${ar.tId}_${ar.rId}` : '';
-  const arTour = ar ? tournaments.find(t => t._id === ar.tId) : null;
-  const arRound = ar ? roundsMap[ar.tId]?.find(r => r._id === ar.rId) : null;
-  const arMatches = ar ? (matchesMap[arKey] || []) : [];
-  const arLive = ar ? (selectedMatches[arKey] || null) : null;
-  const arSched = ar ? (selectedSchedule[arKey] || []) : [];
-  const arTheme = ar ? getTheme(ar.tId) : 'Theme1';
-  const liveMatchObj = arLive ? arMatches.find(m => m._id === arLive) : null;
-
-  const handleTileClick = (groupId: string, viewKey: string) => {
-    if (!ar) return;
+  const handleTileClick = useCallback((groupId: string, viewKey: string) => {
     if (groupId === 'schedule') {
-      if (viewKey === '__schedule') openSchedule(ar.tId, ar.rId, arSched, arTheme, 'Schedule');
-      if (viewKey === '__highlight') openSchedule(ar.tId, ar.rId, arSched, arTheme, 'HighlightSchedule');
+      if (viewKey === '__schedule') openSchedule('Schedule');
+      if (viewKey === '__highlight') openSchedule('HighlightSchedule');
     } else {
-      if (!arLive) return;
-      openView(ar.tId, ar.rId, arLive, arTheme, viewKey);
+      openView(viewKey);
     }
-  };
+  }, [tournamentId, roundId, theme, liveMatchId, schedMatchIds]);
 
-  const isTileEnabled = (groupId: string) =>
-    groupId === 'schedule' ? arSched.length > 0 : !!arLive;
+  const step1Done = !!tournamentId && !!roundId;
+  const step2Done = !!liveMatchId || schedMatchIds.length > 0;
+
+  const visibleGroups = useMemo(
+    () => VIEW_GROUPS.filter(g => (g.requires === 'schedule' ? schedMatchIds.length > 0 : !!liveMatchId)),
+    [liveMatchId, schedMatchIds]
+  );
+
+  const selectedTournamentName = useMemo(
+    () => tournaments.find(t => t._id === tournamentId)?.tournamentName || '',
+    [tournaments, tournamentId]
+  );
 
   return (
-    <>
-      <style>{S}</style>
-      <div className="r">
-        <div className="top-stripe" />
+    <div className="hd-root" style={{ minHeight: '100vh', background: '#0B0C0E' }}>
+      <style>{STYLES}</style>
+      <div className="hd-glow" />
 
-        {/* Sidebar */}
-        <div className="sb">
-          <div className="sb-logo">
-            <img src="./logo.avif" alt="logo" style={{ width: 38, height: 38, objectFit: 'contain' }} />
-          </div>
-          {user && (
-            <div className="sb-user">
-              <div className="sb-user-dot" />
-              <span className="sb-user-txt">{user.username?.slice(0, 5).toUpperCase()}</span>
+      <TopNav user={user} />
+
+      <div className="hd-page">
+        <div className="hd-header-row">
+          <div>
+            <div className="hd-eyebrow" style={{ marginBottom: 8 }}>
+              <span className="hd-eyebrow-dot" /> BROADCAST OVERLAYS
             </div>
-          )}
-          <div className="sb-div" />
-          <button className="sb-btn" onClick={() => window.location.href = '/dashboard'}>
-            <FaTrophy size={18} /><span>TOUR</span>
-          </button>
-          <button className="sb-btn" onClick={() => window.open('/teams', '_blank', 'noopener,noreferrer')}>
-            <FaUsers size={18} /><span>TEAMS</span>
-          </button>
-          <button className="sb-btn on">
-            <FaEye size={18} /><span>HUD</span>
-          </button>
-          <div className="sb-foot">
-            <div className="sb-div" />
-            <button className="sb-btn" onClick={() => window.open('https://discord.com/channels/623776491682922526/1426117227257663558', '_blank')}>
-              <FaDiscord size={18} /><span>HELP</span>
-            </button>
+            <h1 className="hd-orb" style={{ fontSize: 26, fontWeight: 800, color: '#F4F2EE', letterSpacing: '-0.01em', marginBottom: 6, textTransform: 'uppercase' }}>
+              Send an overlay live
+            </h1>
+            <p style={{ color: '#93959C', fontSize: 14, maxWidth: 460 }}>
+              Follow the steps below in order — pick a round, pick a match, then open the overlay you need.
+            </p>
+          </div>
+          <div className="hd-status-row">
+            <div className="hd-status">
+              <span className="hd-status-dot" style={{ background: liveMatchId ? '#4ADE80' : '#24262B' }} />
+              <span className="hd-mono" style={{ fontSize: 10, color: '#55565C', letterSpacing: '1px' }}>LIVE</span>
+              <span className="hd-orb" style={{ fontSize: 13, fontWeight: 700, color: liveMatchId ? '#4ADE80' : '#55565C' }}>
+                {liveMatchObj ? `Match ${liveMatchObj.matchNo ?? liveMatchObj._matchNo ?? '?'}` : 'None'}
+              </span>
+            </div>
+            <div className="hd-status">
+              <span className="hd-status-dot" style={{ background: schedMatchIds.length ? '#E11D2E' : '#24262B' }} />
+              <span className="hd-mono" style={{ fontSize: 10, color: '#55565C', letterSpacing: '1px' }}>SCHEDULE</span>
+              <span className="hd-orb" style={{ fontSize: 13, fontWeight: 700, color: schedMatchIds.length ? '#E11D2E' : '#55565C' }}>
+                {schedMatchIds.length ? `${schedMatchIds.length} matches` : 'None'}
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Left nav */}
-        <div className="nav">
-          <div className="nav-head">
-            <div className="nav-eyebrow">BROADCAST CONTROL</div>
-            <div className="orb nav-title">HUD <span>CTRL</span></div>
-            <div className="poll-row">
-              <div className="poll-dot" />
-              <PollingManager key={pollingKey} />
-            </div>
+        {tournaments.length === 0 ? (
+          <div className="hd-empty">
+            <h3 className="hd-orb" style={{ fontSize: 15, color: '#F4F2EE', marginBottom: 6, textTransform: 'uppercase' }}>No tournaments yet</h3>
+            <p style={{ color: '#93959C', fontSize: 13 }}>Create a tournament first, then come back here to control its overlays.</p>
           </div>
-          <div className="nav-scroll">
-            {tournaments.length === 0
-              ? <div style={{ padding: '32px 10px', textAlign: 'center', fontFamily: 'Orbitron,monospace', fontSize: 8, color: 'var(--text-muted)', letterSpacing: 1 }}>NO TOURNAMENTS</div>
-              : tournaments.map(t => {
-                  const isExp = expandedTours.includes(t._id);
-                  return (
-                    <div key={t._id} style={{ marginBottom: 1 }}>
-                      <div className={`t-row${isExp ? ' open' : ''}`} onClick={() => toggleTournament(t._id)}>
-                        <div className="t-bar" />
-                        <span className="orb t-name">{t.tournamentName}</span>
-                        <span className="t-chev">{isExp ? <FaChevronDown size={9} /> : <FaChevronRight size={9} />}</span>
-                      </div>
-                      {isExp && (
-                        <div className="rounds">
-                          {roundsMap[t._id]?.length
-                            ? roundsMap[t._id].map(r => {
-                                const key = `${t._id}_${r._id}`;
-                                const isSel = activeRound?.tId === t._id && activeRound?.rId === r._id;
-                                const hasLive = !!selectedMatches[key];
-                                return (
-                                  <div key={r._id} className={`r-row${isSel ? ' sel' : ''}`} onClick={() => selectRound(t._id, r._id)}>
-                                    <span className="orb r-name">{r.roundName}</span>
-                                    {hasLive && <div className="r-live"><div className="r-live-dot" /><span className="r-live-txt">LIVE</span></div>}
-                                  </div>
-                                );
-                              })
-                            : <div style={{ padding: '8px 10px', fontFamily: 'Orbitron,monospace', fontSize: 8, color: 'var(--text-muted)', letterSpacing: 1 }}>NO ROUNDS</div>
-                          }
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-            }
-          </div>
-        </div>
+        ) : (
+          <>
+            {/* STEP 1 — Tournament & round */}
+            <div className="hd-step">
+              <div className="hd-step-num-wrap">
+                <div className={`hd-step-num ${step1Done ? 'done' : ''}`}>{step1Done ? <FaCheckCircle size={13} /> : '01'}</div>
+                <div className="hd-step-line" />
+              </div>
+              <div className="hd-step-body">
+                <div className="hd-step-card">
+                  <div className="hd-step-title">Choose tournament &amp; round</div>
+                  <div className="hd-step-sub">This tells the HUD which matches to load.</div>
 
-        {/* Main */}
-        <div className="main">
-          {/* Topbar */}
-          <div className="topbar">
-            {ar
-              ? <><span className="orb topbar-round">{arRound?.roundName}</span><span className="topbar-tour">{arTour?.tournamentName}</span></>
-              : <span className="orb topbar-idle">← SELECT A ROUND</span>
-            }
-            <div className="topbar-right">
-              <div className="status-pill pill-live">
-                <div className="pill-dot" style={{ background: arLive ? '#4ade80' : '#1c2b20', boxShadow: arLive ? '0 0 6px #4ade80' : 'none' }} />
-                <span className="pill-lbl" style={{ color: '#4ade80' }}>LIVE</span>
-                <span className="pill-val" style={{ color: arLive ? '#4ade80' : '#1c2b20' }}>
-                  {liveMatchObj ? `M${liveMatchObj.matchNo ?? liveMatchObj._matchNo ?? '?'}` : '—'}
-                </span>
-              </div>
-              <div className="status-pill pill-sched">
-                <div className="pill-dot" style={{ background: arSched.length > 0 ? '#facc15' : '#1f1a09', boxShadow: arSched.length > 0 ? '0 0 6px #facc15' : 'none', borderRadius: 2 }} />
-                <span className="pill-lbl" style={{ color: '#facc15' }}>SCHED</span>
-                <span className="pill-val" style={{ color: arSched.length > 0 ? '#facc15' : '#1f1a09' }}>
-                  {arSched.length > 0 ? arSched.length : '—'}
-                </span>
-              </div>
-              <div className="theme-wrap">
-                <span className="theme-lbl">THEME</span>
-                <select className="theme-sel" value={ar ? arTheme : 'Theme1'} disabled={!ar}
-                  onChange={e => ar && setThemeMap(p => ({ ...p, [ar.tId]: e.target.value }))}>
-                  {THEMES.map(th => <option key={th} value={th}>{th}</option>)}
-                </select>
-              </div>
-            </div>
-          </div>
+                  <TournamentSearch onQueryChange={setTournamentQuery} />
+                  {tournamentQuery && (
+                    <div className="hd-search-count">
+                      {filteredTournaments.length} of {tournaments.length} tournaments match
+                    </div>
+                  )}
 
-          {!ar ? (
-            <div className="empty">
-              <div className="empty-ring"><FaSatelliteDish /></div>
-              <div className="orb empty-h">NO ROUND SELECTED</div>
-              <p className="empty-p">Choose a tournament → round from the left panel</p>
-            </div>
-          ) : (
-            <>
-              {/* Match selector */}
-              {arMatches.length > 0 && (
-                <div className="matchbar">
-                  <div className="mzone">
-                    <div className="mzone-hdr">
-                      <FaBroadcastTower size={10} style={{ color: '#4ade80' }} />
-                      <span className="orb mzone-lbl" style={{ color: '#4ade80' }}>LIVE</span>
-                      <span className="mzone-sub">single select</span>
+                  <div className="hd-select-row">
+                    <div>
+                      <label className="hd-field-label" htmlFor="hd-tournament">Tournament</label>
+                      <select id="hd-tournament" className="hd-select" value={tournamentId} onChange={e => handleTournamentChange(e.target.value)}>
+                        <option value="">Select a tournament…</option>
+                        {filteredTournaments.map(t => <option key={t._id} value={t._id}>{t.tournamentName}</option>)}
+                      </select>
                     </div>
-                    <div className="mchips">
-                      {arMatches.map(m => {
-                        const on = arLive === m._id;
-                        return (
-                          <div key={m._id} className={`mchip${on ? ' live-on' : ''}`}
-                            onClick={() => toggleLiveMatch(ar.tId, ar.rId, m._id, !on)}>
-                            M{m.matchNo ?? m._matchNo ?? '?'}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <div className="msep" />
-                  <div className="mzone">
-                    <div className="mzone-hdr">
-                      <FaCalendarAlt size={10} style={{ color: '#facc15' }} />
-                      <span className="orb mzone-lbl" style={{ color: '#facc15' }}>SCHEDULE</span>
-                      <span className="mzone-sub">multi select</span>
-                    </div>
-                    <div className="mchips">
-                      {arMatches.map(m => {
-                        const on = arSched.includes(m._id);
-                        return (
-                          <div key={`s-${m._id}`} className={`mchip${on ? ' sched-on' : ''}`}
-                            onClick={() => toggleSchedMatch(ar.tId, ar.rId, m._id, !on)}>
-                            M{m.matchNo ?? m._matchNo ?? '?'}
-                          </div>
-                        );
-                      })}
+                    <div>
+                      <label className="hd-field-label" htmlFor="hd-round">Round</label>
+                      <select id="hd-round" className="hd-select" value={roundId} disabled={!tournamentId} onChange={e => handleRoundChange(e.target.value)}>
+                        <option value="">{tournamentId ? 'Select a round…' : 'Choose a tournament first'}</option>
+                        {rounds.map(r => <option key={r._id} value={r._id}>{r.roundName}</option>)}
+                      </select>
                     </div>
                   </div>
                 </div>
-              )}
-
-              {/* Overlay groups */}
-              <div className="content">
-                {arMatches.length === 0
-                  ? <div className="no-matches">NO MATCHES IN THIS ROUND</div>
-                  : VIEW_GROUPS.map(group => {
-                      const enabled = isTileEnabled(group.id);
-                      const tc = group.color;
-                      const tcDim = `${tc}20`;
-
-                      return (
-                        <div key={group.id} className="section">
-                          <div className="sec-hdr">
-                            <div className="sec-tab" style={{
-                              borderColor: enabled ? `${tc}35` : 'var(--border)',
-                              background: enabled ? `${tc}08` : 'var(--bg2)',
-                            }}>
-                              <span className="orb sec-tab-label" style={{ color: enabled ? tc : 'var(--text-muted)' }}>
-                                {group.label}
-                              </span>
-                              <span className="sec-tab-count">{group.views.length}</span>
-                            </div>
-                            {!enabled && (
-                              <span className="sec-hint">
-                                {group.id === 'schedule' ? '· select schedule matches' : '· select live match first'}
-                              </span>
-                            )}
-                          </div>
-
-                          <div className={`tile-block${!enabled ? ' locked' : ''}`} style={{
-                            borderColor: enabled ? `${tc}22` : 'var(--border)',
-                            borderTopColor: enabled ? `${tc}35` : 'var(--border)',
-                          }}>
-                            <div className="tiles">
-                              {group.views.map(v => (
-                                <div
-                                  key={v.key}
-                                  className="tile"
-                                  style={{ '--tc': tc, '--tc-dim': tcDim } as React.CSSProperties}
-                                  onClick={() => enabled && handleTileClick(group.id, v.key)}
-                                >
-                                  <div className="tile-accent" />
-                                  <div className="tile-body">
-                                    <div className="tile-label">{v.label}</div>
-                                    <div className="tile-key">{v.key}</div>
-                                  </div>
-                                  <div className="tile-arrow"><FaExternalLinkAlt /></div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })
-                }
               </div>
-            </>
-          )}
-        </div>
+            </div>
+
+            {/* STEP 2 — Match */}
+            <div className="hd-step">
+              <div className="hd-step-num-wrap">
+                <div className={`hd-step-num ${step2Done ? 'done' : ''}`}>{step2Done ? <FaCheckCircle size={13} /> : '02'}</div>
+                <div className="hd-step-line" />
+              </div>
+              <div className="hd-step-body">
+                <div className={`hd-step-card ${step1Done ? '' : 'locked'}`}>
+                  <div className="hd-step-title">Choose a match</div>
+                  <div className="hd-step-sub">
+                    {step1Done
+                      ? `${matches.length} match${matches.length === 1 ? '' : 'es'} in ${selectedTournamentName}`
+                      : 'Finish step 1 first.'}
+                  </div>
+
+                  {step1Done && matches.length === 0 && (
+                    <div className="hd-note">This round has no matches yet.</div>
+                  )}
+
+                  {matches.length > 0 && (
+                    <>
+                      <div className="hd-chip-group">
+                        <div className="hd-chip-hdr">
+                          <FaBroadcastTower size={11} style={{ color: '#4ADE80' }} />
+                          <span className="hd-mono hd-chip-hdr-label" style={{ color: '#4ADE80' }}>Live now</span>
+                          <span className="hd-chip-hdr-sub">— pick one match</span>
+                        </div>
+                        <div className="hd-chips">
+                          {matches.map(m => {
+                            const on = liveMatchId === m._id;
+                            return (
+                              <div key={m._id} className={`hd-chip${on ? ' on-live' : ''}`} onClick={() => toggleLiveMatch(m._id, !on)}>
+                                Match {m.matchNo ?? m._matchNo ?? '?'}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="hd-chip-group">
+                        <div className="hd-chip-hdr">
+                          <FaCalendarAlt size={11} style={{ color: '#E11D2E' }} />
+                          <span className="hd-mono hd-chip-hdr-label" style={{ color: '#E11D2E' }}>Schedule</span>
+                          <span className="hd-chip-hdr-sub">— pick any number of matches</span>
+                        </div>
+                        <div className="hd-chips">
+                          {matches.map(m => {
+                            const on = schedMatchIds.includes(m._id);
+                            return (
+                              <div key={`s-${m._id}`} className={`hd-chip${on ? ' on-sched' : ''}`} onClick={() => toggleSchedMatch(m._id, !on)}>
+                                Match {m.matchNo ?? m._matchNo ?? '?'}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* STEP 3 — Theme */}
+            <div className="hd-step">
+              <div className="hd-step-num-wrap">
+                <div className="hd-step-num done"><FaCheckCircle size={13} /></div>
+                <div className="hd-step-line" />
+              </div>
+              <div className="hd-step-body">
+                <div className="hd-step-card">
+                  <div className="hd-step-title">Pick a theme</div>
+                  <div className="hd-step-sub">Applies to every overlay you open below. Defaults to Theme1.</div>
+                  <div className="hd-theme-row">
+                    {THEMES.map(th => (
+                      <button
+                        key={th}
+                        className={`hd-theme-btn ${theme === th ? 'on' : ''}`}
+                        disabled={!tournamentId}
+                        onClick={() => tournamentId && setThemeMap(p => ({ ...p, [tournamentId]: th }))}
+                      >
+                        {th}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* STEP 4 — Overlays */}
+            <div className="hd-step">
+              <div className="hd-step-num-wrap">
+                <div className={`hd-step-num ${step2Done ? 'done' : ''}`}>{step2Done ? <FaCheckCircle size={13} /> : '04'}</div>
+              </div>
+              <div className="hd-step-body">
+                <div className={`hd-step-card ${step2Done ? '' : 'locked'}`}>
+                  <div className="hd-step-title">Open an overlay</div>
+                  <div className="hd-step-sub">
+                    {step2Done ? 'Click any tile to open it in a new tab.' : 'Pick a live match or schedule matches in step 2 first.'}
+                  </div>
+
+                  {step2Done && (
+                    <div style={{ marginTop: 16 }}>
+                      {visibleGroups.map(group => (
+                        <OverlayGroup key={group.id} group={group} onTileClick={handleTileClick} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
-    </>
+    </div>
   );
 };
 

@@ -1,12 +1,45 @@
-import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 import api from '../login/api';
-import { socket } from "./socket";
+import { socket } from './socket';
 import SocketManager from './socketManager';
 import { requestQueue, UpdateBatcher } from './requestQueue';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload';
-import { FaUpload, FaEdit, FaTimes, FaPlus, FaCheck } from 'react-icons/fa';
+import {
+  FaUpload, FaEdit, FaTimes, FaPlus, FaCheck,
+  FaSearch, FaExclamationTriangle, FaCheckCircle, FaInfoCircle,
+} from 'react-icons/fa';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Same control-room visual language as the marketing site:
+//   bg / void      #0B0C0E
+//   panel          #131418
+//   panel-raised   #17181D
+//   line           #24262B
+//   text           #F4F2EE
+//   text-muted     #93959C
+//   text-dim       #55565C
+//   tally          #E11D2E   the one accent — used sparingly
+//   tally-dim      #8C1220
+//   Display: Space Grotesk / Body: Inter / Data: JetBrains Mono
+//
+// PERF NOTES (read before touching this file):
+// - TeamCard and PlayerRow are React.memo'd. Handlers passed down are created
+//   once with useCallback (empty/param-only deps) and read live state through
+//   matchDataRef instead of closing over `matchData`, so their identity never
+//   changes and memo actually holds. Functional setState updates only ever
+//   replace the one team/player object that changed — every other object in
+//   the tree keeps its old reference, which is what lets memo skip renders.
+// - Live delta updates (many per second while a match is running) no longer
+//   go through React state at all. They flash a player row by grabbing its
+//   DOM node from a ref map and toggling a CSS class directly. That was the
+//   single biggest source of full-tree re-renders in the old version.
+// - Ref callbacks (team cards, player rows) are cached per id in a Map so we
+//   never hand React a brand-new ref function on every render.
+// - The initial fetch uses AbortController so a fast route change can't let
+//   a stale response land after a newer one.
+// ─────────────────────────────────────────────────────────────────────────────
 
 const retryWithBackoff = async (fn: () => Promise<any>, maxRetries = 3, baseDelay = 1000) => {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -21,12 +54,21 @@ const retryWithBackoff = async (fn: () => Promise<any>, maxRetries = 3, baseDela
   }
 };
 
+// Force-restart a CSS animation even if it's already mid-flight.
+const pulse = (el: HTMLElement | null | undefined) => {
+  if (!el) return;
+  el.classList.remove('flash-live');
+  void el.offsetWidth; // reflow
+  el.classList.add('flash-live');
+};
+
 interface Player {
   _id: string; playerName: string; killNum: number;
   uId?: string | number;
   bHasDied: boolean; damage?: number; survivalTime?: number; assists?: number;
   location?: { x: number; y: number; z: number };
   health?: number; liveState?: number; isFiring?: boolean; isOutsideBlueCircle?: boolean;
+  photo?: string;
   [key: string]: any;
 }
 interface Team {
@@ -35,474 +77,336 @@ interface Team {
 }
 interface MatchData { _id: string; teams: Team[]; [key: string]: any; }
 
-// ── Styles ─────────────────────────────────────────────────────────────────────
-const STYLES = `
-  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&display=swap');
+type ToastKind = 'success' | 'error' | 'info';
+interface ToastState { kind: ToastKind; msg: string; }
 
-  .md-root { font-family: 'Rajdhani', sans-serif; }
-  .md-root *, .md-root *::before, .md-root *::after { box-sizing: border-box; }
-  .md-orb  { font-family: 'Orbitron', monospace !important; }
-  .md-bar  { font-family: 'Barlow Condensed', sans-serif !important; }
+// ── Small shared bits (mirrors the marketing site's building blocks) ─────────
+const Eyebrow: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="inline-flex items-center gap-2">
+    <span className="w-1.5 h-1.5 bg-[#E11D2E]" />
+    <span className="font-mono text-[10px] tracking-[0.22em] text-[#93959C]">{children}</span>
+  </div>
+);
 
-  /* ── Page ── */
-  .md-page {
-    min-height: 100vh;
-    background: linear-gradient(135deg, #120038 0%, #000000 50%, #120038 100%);
-    color: #fff;
-  }
-  .md-hex {
-    position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    background-image: radial-gradient(circle, rgba(168,85,247,0.04) 1px, transparent 1px);
-    background-size: 40px 40px;
-  }
-  .md-scan {
-    position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.018;
-    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(168,85,247,0.6) 2px, rgba(168,85,247,0.6) 4px);
-  }
-  .md-glow {
-    position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    background: radial-gradient(ellipse 80% 40% at 50% -5%, rgba(168,85,247,0.08), transparent);
-  }
+// Corner-bracket "broadcast frame" — reserved for the one card the operator
+// just jumped to, so the signature accent stays meaningful instead of noise.
+const Framed: React.FC<{ children: React.ReactNode; active: boolean }> = ({ children, active }) => (
+  <div className="relative">
+    {children}
+    {active && (
+      <>
+        <span className="pointer-events-none absolute -top-[1px] -left-[1px] w-4 h-4 border-t-2 border-l-2 border-[#E11D2E]" />
+        <span className="pointer-events-none absolute -top-[1px] -right-[1px] w-4 h-4 border-t-2 border-r-2 border-[#E11D2E]" />
+        <span className="pointer-events-none absolute -bottom-[1px] -left-[1px] w-4 h-4 border-b-2 border-l-2 border-[#E11D2E]" />
+        <span className="pointer-events-none absolute -bottom-[1px] -right-[1px] w-4 h-4 border-b-2 border-r-2 border-[#E11D2E]" />
+      </>
+    )}
+  </div>
+);
 
-  /* ── Sticky top bar ── */
-  .md-topbar {
-    position: sticky; top: 0; z-index: 50;
-    background: rgba(4,0,8,0.92);
-    border-bottom: 1px solid rgba(168,85,247,0.18);
-    backdrop-filter: blur(20px);
-  }
+// ── PlayerRow ─────────────────────────────────────────────────────────────────
+interface PlayerRowProps {
+  teamId: string;
+  player: Player;
+  registerRef: (el: HTMLDivElement | null) => void;
+  onKillChange: (teamId: string, playerId: string, change: number) => void;
+  onToggleDeath: (teamId: string, playerId: string) => void;
+}
+const PlayerRow = memo(function PlayerRow({ teamId, player, registerRef, onKillChange, onToggleDeath }: PlayerRowProps) {
+  const dead = !!player.bHasDied;
+  return (
+    <div
+      ref={registerRef}
+      className={`flex items-center gap-2.5 px-2.5 py-2 border transition-colors ${
+        dead ? 'bg-[#E11D2E]/[0.04] border-[#E11D2E]/15' : 'bg-[#17181D] border-[#24262B]'
+      }`}
+    >
+      <span
+        className={`flex-1 min-w-0 truncate font-sans text-[13.5px] font-medium ${dead ? 'text-[#55565C] line-through' : 'text-[#D7D5D0]'}`}
+        title={player.playerName}
+      >
+        {player.playerName}
+      </span>
 
-  /* ── Live stat pills ── */
-  .md-live-row {
-    display: flex; justify-content: center; align-items: center; gap: 24px;
-    padding: 14px 24px;
-    border-bottom: 1px solid rgba(168,85,247,0.1);
-  }
-  .md-live-pill {
-    display: flex; align-items: center; gap: 12px;
-    background: rgba(0,0,0,0.5); border: 1px solid rgba(168,85,247,0.2);
-    border-radius: 10px; padding: 10px 22px;
-  }
-  .md-live-pill-lbl {
-    font-family: 'Orbitron', monospace; font-size: 9px; font-weight: 700;
-    color: #4b5563; letter-spacing: 2px; text-transform: uppercase;
-  }
-  .md-live-pill-val {
-    font-family: 'Orbitron', monospace; font-size: 28px; font-weight: 900; color: #fff;
-    line-height: 1;
-  }
-  .md-live-pill-val.green { color: #a855f7; text-shadow: 0 0 12px rgba(168,85,247,0.5); }
-  .md-live-dot { width: 1px; height: 40px; background: rgba(168,85,247,0.15); }
+      <div className="flex items-center gap-1 shrink-0">
+        <button
+          type="button"
+          aria-label={`Remove kill from ${player.playerName}`}
+          className="w-6 h-6 flex items-center justify-center bg-[#0B0C0E] border border-[#24262B] text-[#93959C] hover:border-[#E11D2E]/50 hover:text-[#E11D2E] leading-none"
+          onClick={() => onKillChange(teamId, player._id, -1)}
+        >
+          −
+        </button>
+        <span className="font-mono text-[13px] font-bold text-[#F4F2EE] min-w-[20px] text-center tabular-nums">
+          {player.killNum ?? 0}
+        </span>
+        <button
+          type="button"
+          aria-label={`Add kill to ${player.playerName}`}
+          className="w-6 h-6 flex items-center justify-center bg-[#0B0C0E] border border-[#24262B] text-[#93959C] hover:border-[#E11D2E]/50 hover:text-[#E11D2E] leading-none"
+          onClick={() => onKillChange(teamId, player._id, 1)}
+        >
+          +
+        </button>
+      </div>
 
-  /* ── Slot nav ── */
-  .md-slot-nav {
-    display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
-    padding: 10px 20px;
-  }
-  .md-slot-btn {
-    font-family: 'Orbitron', monospace; font-size: 10px; font-weight: 700;
-    padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(168,85,247,0.2);
-    background: rgba(0,0,0,0.4); color: #6b7280; cursor: pointer; letter-spacing: 0.5px;
-  }
-  .md-slot-btn:hover { background: rgba(168,85,247,0.07); color: #a855f7; border-color: rgba(168,85,247,0.4); }
-  .md-slot-btn.dead { background: rgba(220,38,38,0.08); color: #ef4444; border-color: rgba(220,38,38,0.25); }
-  .md-slot-btn.highlighted { border-color: #a855f7; background: rgba(168,85,247,0.12); color: #a855f7; box-shadow: 0 0 10px rgba(168,85,247,0.25); }
+      <button
+        type="button"
+        onClick={() => onToggleDeath(teamId, player._id)}
+        title={dead ? 'Mark alive' : 'Mark eliminated'}
+        aria-pressed={dead}
+        className={`relative w-11 h-[22px] shrink-0 border transition-colors ${
+          dead ? 'bg-[#E11D2E]/20 border-[#E11D2E]/50' : 'bg-[#0B0C0E] border-[#24262B]'
+        }`}
+      >
+        <span
+          className={`absolute top-[2px] w-[16px] h-[16px] transition-[left] ${dead ? 'left-[24px] bg-[#E11D2E]' : 'left-[2px] bg-[#55565C]'}`}
+        />
+        <span className={`absolute font-mono text-[7px] font-bold top-1/2 -translate-y-1/2 tracking-wide ${dead ? 'left-[5px] text-white' : 'right-[5px] text-[#55565C]'}`}>
+          {dead ? 'OUT' : 'IN'}
+        </span>
+      </button>
+    </div>
+  );
+});
 
-  /* ── Sort bar ── */
-  .md-sort-bar {
-    display: flex; justify-content: flex-end; align-items: center; gap: 10px;
-    padding: 16px 24px 8px; position: relative; z-index: 1;
-  }
-  .md-sort-lbl { font-family: 'Orbitron', monospace; font-size: 9px; color: #374151; letter-spacing: 1.5px; }
-  .md-sort-select {
-    background: rgba(0,0,0,0.5); border: 1px solid rgba(168,85,247,0.2);
-    border-radius: 7px; color: #a855f7; padding: 6px 12px;
-    font-family: 'Orbitron', monospace; font-size: 10px; font-weight: 700;
-    outline: none; cursor: pointer;
-  }
-  .md-sort-select option { background: #0a0110; }
+// ── TeamCard ──────────────────────────────────────────────────────────────────
+interface TeamCardProps {
+  team: Team;
+  isHighlighted: boolean;
+  registerRef: (el: HTMLDivElement | null) => void;
+  registerPlayerRef: (playerId: string) => (el: HTMLDivElement | null) => void;
+  onToggleAllDeath: (teamId: string) => void;
+  onOpenRoster: (teamId: string, teamName: string) => void;
+  onPointsChange: (teamId: string, value: number) => void;
+  onPointsCommit: (teamId: string, value: number) => void;
+  onKillChange: (teamId: string, playerId: string, change: number) => void;
+  onToggleDeath: (teamId: string, playerId: string) => void;
+}
+const TeamCard = memo(function TeamCard({
+  team, isHighlighted, registerRef, registerPlayerRef,
+  onToggleAllDeath, onOpenRoster, onPointsChange, onPointsCommit, onKillChange, onToggleDeath,
+}: TeamCardProps) {
+  const allDead = team.players.length > 0 && team.players.every(p => p.bHasDied);
+  const totalKills = team.players.reduce((s, p) => s + (p.killNum ?? 0), 0);
+  const totalPts = (team.placePoints ?? 0) + totalKills;
 
-  /* ── Teams grid ── */
-  .md-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 14px; padding: 0 20px 40px; position: relative; z-index: 1;
-  }
+  return (
+    <div ref={registerRef}>
+      <Framed active={isHighlighted}>
+        <div
+          className={`bg-[#131418] border overflow-hidden ${
+            isHighlighted ? 'border-[#E11D2E]' : allDead ? 'border-[#E11D2E]/25' : 'border-[#24262B] hover:border-[#3a3d44]'
+          }`}
+        >
+          <div className={`h-[3px] ${allDead ? 'bg-[#8C1220]' : 'bg-[#E11D2E]'}`} />
 
-  /* ── Team card ── */
-  .md-card {
-    background: rgba(0,0,0,0.5);
-    border: 1px solid rgba(168,85,247,0.12);
-    border-radius: 14px; overflow: hidden;
-    position: relative;
-  }
-  .md-card:hover { border-color: rgba(168,85,247,0.32); box-shadow: 0 0 20px rgba(168,85,247,0.06); }
-  .md-card.eliminated { border-color: rgba(220,38,38,0.25); }
-  .md-card.highlighted { border-color: #a855f7; box-shadow: 0 0 24px rgba(168,85,247,0.2); }
+          {/* Header */}
+          <div className="flex items-start justify-between gap-2 px-4 pt-3.5 pb-2.5 border-b border-[#24262B]">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="font-mono text-[11px] font-bold px-2 py-1 border border-[#E11D2E]/35 text-[#E11D2E] bg-[#E11D2E]/[0.06] shrink-0">
+                S{team.slot ?? '-'}
+              </span>
+              <div className="min-w-0">
+                <div className="font-display font-bold text-[13.5px] text-[#F4F2EE] uppercase tracking-tight truncate" title={team.teamName}>
+                  {team.teamName}
+                </div>
+                {team.teamTag && <div className="font-mono text-[10px] text-[#55565C] mt-0.5">[{team.teamTag}]</div>}
+              </div>
+            </div>
 
-  /* Top color bar */
-  .md-card-topbar { height: 3px; background: linear-gradient(90deg, #a855f7, #6b21a8, transparent); }
-  .md-card.eliminated .md-card-topbar { background: linear-gradient(90deg, #ef4444, #7f1d1d, transparent); }
+            <div className="flex flex-col items-end gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => onToggleAllDeath(team._id)}
+                className="flex items-center gap-1.5"
+                aria-pressed={allDead}
+                title={allDead ? 'Revive whole team' : 'Eliminate whole team'}
+              >
+                <span className={`font-mono text-[8px] tracking-wider ${allDead ? 'text-[#E11D2E]' : 'text-[#55565C]'}`}>ELIM</span>
+                <span className={`relative w-8 h-[18px] border ${allDead ? 'bg-[#E11D2E]/25 border-[#E11D2E]/60' : 'bg-[#0B0C0E] border-[#24262B]'}`}>
+                  <span className={`absolute top-[2px] w-[12px] h-[12px] transition-[left] ${allDead ? 'left-[18px] bg-[#E11D2E]' : 'left-[2px] bg-[#55565C]'}`} />
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenRoster(team.teamId || team._id, team.teamName)}
+                className="flex items-center gap-1.5 font-mono text-[9px] font-semibold tracking-wide px-2 py-1 border border-[#24262B] text-[#93959C] hover:border-[#E11D2E]/50 hover:text-[#E11D2E]"
+              >
+                <FaEdit size={9} /> ROSTER
+              </button>
+            </div>
+          </div>
 
-  /* Card header */
-  .md-card-hdr {
-    display: flex; align-items: flex-start; justify-content: space-between;
-    padding: 14px 16px 10px;
-    border-bottom: 1px solid rgba(168,85,247,0.08);
-  }
-  .md-card-hdr-l { display: flex; align-items: center; gap: 10px; }
+          {/* Points */}
+          <div className="flex items-center justify-between px-4 py-2.5 bg-[#0F1013] border-b border-[#24262B]">
+            <label className="flex items-center gap-2">
+              <span className="font-mono text-[9px] tracking-wider text-[#55565C] uppercase">Place pts</span>
+              <input
+                type="number"
+                min={0}
+                inputMode="numeric"
+                value={team.placePoints ?? 0}
+                className="w-14 py-1 text-center font-mono text-[14px] font-bold bg-[#0B0C0E] border border-[#24262B] text-[#F4F2EE] outline-none focus-visible:border-[#E11D2E]"
+                onChange={e => {
+                  const v = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
+                  onPointsChange(team._id, isNaN(v) ? 0 : v);
+                }}
+                onBlur={e => {
+                  const v = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
+                  if (!isNaN(v)) onPointsCommit(team._id, v);
+                }}
+              />
+            </label>
 
-  .md-slot-badge {
-    font-family: 'Orbitron', monospace; font-size: 11px; font-weight: 900;
-    background: rgba(168,85,247,0.12); border: 1px solid rgba(168,85,247,0.3);
-    color: #a855f7; border-radius: 6px; padding: 4px 10px; flex-shrink: 0;
-  }
-  .md-card.eliminated .md-slot-badge { background: rgba(220,38,38,0.1); border-color: rgba(220,38,38,0.3); color: #ef4444; }
+            <div className="flex items-center gap-3">
+              <div className="flex flex-col items-end">
+                <span className="font-mono text-[8px] tracking-wider text-[#55565C] uppercase">Kills</span>
+                <span className="font-mono text-[15px] font-bold text-[#F4F2EE] tabular-nums">{totalKills}</span>
+              </div>
+              <div className="w-px h-6 bg-[#24262B]" />
+              <div className="flex flex-col items-end">
+                <span className="font-mono text-[8px] tracking-wider text-[#55565C] uppercase">Total</span>
+                <span className="font-mono text-[17px] font-extrabold text-[#E11D2E] tabular-nums">{totalPts}</span>
+              </div>
+            </div>
+          </div>
 
-  .md-team-name {
-    font-family: 'Orbitron', monospace; font-size: 13px; font-weight: 900;
-    color: #fff; letter-spacing: 0.3px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px;
-  }
-  .md-team-tag { font-size: 11px; color: #6b7280; font-weight: 600; margin-top: 1px; }
-
-  .md-card-hdr-r { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-
-  /* Elim toggle */
-  .md-elim-toggle {
-    display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;
-  }
-  .md-elim-lbl { font-family: 'Orbitron', monospace; font-size: 8px; letter-spacing: 1px; color: #374151; }
-  .md-card.eliminated .md-elim-lbl { color: #ef4444; }
-
-  .md-toggle-track {
-    width: 36px; height: 20px; border-radius: 10px;
-    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
-    position: relative; cursor: pointer;
-  }
-  .md-toggle-track.on { background: #dc2626; border-color: rgba(220,38,38,0.5); box-shadow: 0 0 8px rgba(220,38,38,0.35); }
-  .md-toggle-thumb {
-    position: absolute; top: 2px; left: 2px;
-    width: 14px; height: 14px; border-radius: 50%; background: #6b7280;
-  }
-  .md-toggle-track.on .md-toggle-thumb { left: 18px; background: #fff; }
-
-  .md-edit-roster-btn {
-    font-family: 'Orbitron', monospace; font-size: 8px; font-weight: 700; letter-spacing: 0.5px;
-    background: rgba(37,99,235,0.12); border: 1px solid rgba(37,99,235,0.3);
-    color: #60a5fa; border-radius: 5px; padding: 4px 10px; cursor: pointer;
-    display: flex; align-items: center; gap: 5px;
-  }
-  .md-edit-roster-btn:hover { background: rgba(37,99,235,0.22); border-color: rgba(37,99,235,0.5); }
-
-  /* ── Points row ── */
-  .md-points-row {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 16px; background: rgba(0,0,0,0.3);
-    border-bottom: 1px solid rgba(168,85,247,0.06);
-  }
-  .md-pts-group { display: flex; align-items: center; gap: 8px; }
-  .md-pts-lbl { font-size: 10px; color: #4b5563; letter-spacing: 0.5px; text-transform: uppercase; font-weight: 600; }
-  .md-pts-input {
-    width: 52px; padding: 5px 8px; text-align: center;
-    background: rgba(0,0,0,0.6); border: 1px solid rgba(168,85,247,0.25);
-    border-radius: 6px; color: #a855f7;
-    font-family: 'Orbitron', monospace; font-size: 14px; font-weight: 900; outline: none;
-  }
-  .md-pts-input:focus { border-color: rgba(168,85,247,0.7); box-shadow: 0 0 0 2px rgba(168,85,247,0.1); }
-
-  .md-totals { display: flex; align-items: center; gap: 12px; }
-  .md-total-item { display: flex; flex-direction: column; align-items: flex-end; }
-  .md-total-lbl { font-size: 9px; color: #374151; letter-spacing: 0.5px; text-transform: uppercase; }
-  .md-total-val { font-family: 'Orbitron', monospace; font-size: 16px; font-weight: 900; }
-  .md-total-val.kills { color: #f59e0b; }
-  .md-total-val.total { color: #a855f7; }
-  .md-total-divider { width: 1px; height: 28px; background: rgba(168,85,247,0.1); }
-
-  /* ── Player rows ── */
-  .md-players { padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 5px; }
-
-  .md-player-row {
-    display: flex; align-items: center; gap: 8px;
-    padding: 8px 10px; border-radius: 8px;
-    background: rgba(168,85,247,0.04); border: 1px solid rgba(168,85,247,0.1);
-    transition: border-color 0.3s, background 0.3s;
-  }
-  .md-player-row.dead { background: rgba(220,38,38,0.05); border-color: rgba(220,38,38,0.15); }
-
-  /* Flash animation for live delta updates */
-  @keyframes md-flash { 0% { border-color: #a855f7; box-shadow: 0 0 8px rgba(168,85,247,0.5); } 100% { border-color: rgba(168,85,247,0.1); box-shadow: none; } }
-  .md-player-row.flashing { animation: md-flash 0.8s ease-out forwards; }
-
-  .md-player-name {
-    flex: 1; font-size: 14px; font-weight: 600; color: #d1d5db;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.3px;
-  }
-  .md-player-row.dead .md-player-name { color: #4b5563; text-decoration: line-through; }
-
-  /* Kill counter */
-  .md-kill-group { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-  .md-kill-btn {
-    width: 24px; height: 24px; border-radius: 5px; border: none; cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 14px; font-weight: 700; line-height: 1;
-  }
-  .md-kill-btn.minus {
-    background: rgba(220,38,38,0.1); border: 1px solid rgba(220,38,38,0.2); color: #ef4444;
-  }
-  .md-kill-btn.minus:hover { background: rgba(220,38,38,0.25); }
-  .md-kill-btn.plus {
-    background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.2); color: #a855f7;
-  }
-  .md-kill-btn.plus:hover { background: rgba(168,85,247,0.25); }
-  .md-kill-val {
-    font-family: 'Orbitron', monospace; font-size: 13px; font-weight: 900;
-    color: #f59e0b; min-width: 22px; text-align: center;
-  }
-
-  /* Death toggle per player */
-  .md-death-toggle {
-    width: 42px; height: 22px; border-radius: 11px; cursor: pointer; flex-shrink: 0;
-    background: rgba(168,85,247,0.15); border: 1px solid rgba(168,85,247,0.3);
-    position: relative;
-  }
-  .md-death-toggle.dead { background: rgba(220,38,38,0.25); border-color: rgba(220,38,38,0.4); box-shadow: 0 0 6px rgba(220,38,38,0.2); }
-  .md-death-thumb {
-    position: absolute; top: 2px; left: 2px;
-    width: 16px; height: 16px; border-radius: 50%; background: #a855f7;
-  }
-  .md-death-toggle.dead .md-death-thumb { left: 22px; background: #ef4444; }
-  .md-death-lbl {
-    position: absolute; font-family: 'Orbitron', monospace; font-size: 7px; font-weight: 900;
-    top: 50%; transform: translateY(-50%); letter-spacing: 0.3px;
-  }
-  .md-death-lbl.alive { right: 4px; color: rgba(168,85,247,0.8); }
-  .md-death-lbl.dead  { left: 4px;  color: rgba(239,68,68,0.8); }
-
-  /* ── Loading / Error ── */
-  .md-center {
-    min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(135deg, #120038 0%, #000 50%, #120038 100%);
-    flex-direction: column; gap: 16px;
-  }
-  .md-spinner { width: 48px; height: 48px; border: 3px solid rgba(168,85,247,0.12); border-top-color: #a855f7; border-radius: 50%; animation: mdspin 1s linear infinite; }
-  @keyframes mdspin { to { transform: rotate(360deg); } }
-  .md-spin-txt { font-family: 'Orbitron', monospace; font-size: 11px; color: #a855f7; letter-spacing: 2px; }
-
-  /* ── Roster modal ── */
-  .md-modal-overlay {
-    position: fixed; inset: 0; z-index: 200;
-    background: rgba(4,0,8,0.9); backdrop-filter: blur(16px);
-    display: flex; align-items: center; justify-content: center; padding: 16px;
-  }
-  .md-modal {
-    background: #0a0110; border: 1px solid rgba(168,85,247,0.25);
-    border-radius: 18px; width: 100%; max-width: 900px; max-height: 92vh;
-    display: flex; flex-direction: column; overflow: hidden;
-    box-shadow: 0 0 60px rgba(168,85,247,0.08), 0 40px 80px rgba(0,0,0,0.8);
-  }
-  .md-modal-hdr {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 20px 28px; border-bottom: 1px solid rgba(168,85,247,0.12);
-    background: rgba(0,0,0,0.5); flex-shrink: 0;
-  }
-  .md-modal-hdr-l { display: flex; align-items: center; gap: 10px; }
-  .md-modal-tag {
-    font-family: 'Orbitron', monospace; font-size: 9px; font-weight: 700;
-    letter-spacing: 2px; color: #a855f7;
-    background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.25);
-    padding: 3px 9px; border-radius: 4px;
-  }
-  .md-modal-title { font-family: 'Orbitron', monospace; font-size: 15px; font-weight: 900; color: #fff; letter-spacing: 0.5px; }
-  .md-modal-team { font-size: 13px; color: #a855f7; font-weight: 600; margin-top: 1px; }
-  .md-modal-close {
-    width: 30px; height: 30px; border-radius: 7px; cursor: pointer;
-    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
-    color: #6b7280; display: flex; align-items: center; justify-content: center; font-size: 14px;
-  }
-  .md-modal-close:hover { background: rgba(220,38,38,0.12); color: #f87171; border-color: rgba(220,38,38,0.3); }
-
-  .md-modal-body {
-    flex: 1; overflow-y: auto; display: grid; grid-template-columns: 1fr 1px 1fr; gap: 0;
-  }
-  .md-modal-body::-webkit-scrollbar { width: 4px; }
-  .md-modal-body::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.15); border-radius: 4px; }
-
-  .md-modal-col { padding: 24px; overflow-y: auto; }
-  .md-modal-divider { background: rgba(168,85,247,0.1); }
-
-  .md-modal-col-title {
-    font-family: 'Orbitron', monospace; font-size: 9px; font-weight: 700;
-    letter-spacing: 2px; color: #a855f7; margin-bottom: 14px;
-    display: flex; align-items: center; gap: 7px;
-  }
-  .md-modal-col-title::before { content: ''; width: 3px; height: 12px; background: #a855f7; border-radius: 2px; box-shadow: 0 0 5px #a855f7; }
-
-  /* Player selection rows */
-  .md-player-sel-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 12px; border-radius: 9px; margin-bottom: 5px; cursor: pointer;
-    background: rgba(0,0,0,0.35); border: 1px solid rgba(168,85,247,0.08);
-  }
-  .md-player-sel-row:hover { border-color: rgba(168,85,247,0.3); background: rgba(168,85,247,0.04); }
-  .md-player-sel-row.sel { background: rgba(168,85,247,0.08); border-color: #a855f7; }
-
-  .md-check-box {
-    width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0;
-    background: rgba(0,0,0,0.5); border: 1px solid rgba(168,85,247,0.2);
-    display: flex; align-items: center; justify-content: center;
-  }
-  .md-player-sel-row.sel .md-check-box { background: #a855f7; border-color: #a855f7; box-shadow: 0 0 6px rgba(168,85,247,0.4); }
-
-  .md-sel-player-name { font-size: 14px; font-weight: 700; color: #9ca3af; flex: 1; font-family: 'Barlow Condensed', sans-serif; }
-  .md-player-sel-row.sel .md-sel-player-name { color: #e5e7eb; }
-
-  /* Add player form */
-  .md-field-lbl { font-size: 10px; color: #6b7280; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; font-weight: 600; }
-  .md-add-input {
-    width: 100%; padding: 10px 13px; margin-bottom: 12px;
-    background: rgba(0,0,0,0.6); border: 1px solid rgba(168,85,247,0.2);
-    border-radius: 8px; color: #fff;
-    font-family: 'Rajdhani', sans-serif; font-size: 14px; outline: none;
-  }
-  .md-add-input::placeholder { color: #1f2937; }
-  .md-add-input:focus { border-color: rgba(168,85,247,0.5); box-shadow: 0 0 0 2px rgba(168,85,247,0.08); }
-
-  .md-upload-lbl {
-    display: flex; align-items: center; gap: 8px;
-    padding: 10px 13px; border-radius: 8px; cursor: pointer; margin-bottom: 12px;
-    background: rgba(0,0,0,0.5); border: 1px solid rgba(168,85,247,0.15); color: #6b7280;
-    font-size: 13px; font-weight: 600;
-  }
-  .md-upload-lbl:hover { border-color: rgba(168,85,247,0.35); color: #9ca3af; }
-
-  .md-photo-preview { width: 80px; height: 80px; border-radius: 10px; object-fit: cover; border: 1px solid rgba(168,85,247,0.3); margin-bottom: 12px; }
-
-  .md-add-btn {
-    width: 100%; padding: 11px;
-    background: linear-gradient(135deg, #9333ea, #7e22ce);
-    color: #fff; border: 1px solid rgba(168,85,247,0.4);
-    font-family: 'Orbitron', monospace; font-size: 10px; font-weight: 700;
-    letter-spacing: 1px; border-radius: 8px; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-  }
-  .md-add-btn:hover { box-shadow: 0 0 14px rgba(168,85,247,0.28); }
-  .md-add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  /* Modal footer */
-  .md-modal-footer {
-    display: flex; align-items: center; justify-content: flex-end; gap: 10px;
-    padding: 16px 28px; border-top: 1px solid rgba(168,85,247,0.1);
-    background: rgba(0,0,0,0.4); flex-shrink: 0;
-  }
-  .md-btn-save {
-    background: linear-gradient(135deg, #9333ea, #7e22ce);
-    color: #fff; border: 1px solid rgba(168,85,247,0.4);
-    font-family: 'Orbitron', monospace; font-size: 10px; font-weight: 700;
-    letter-spacing: 1px; padding: 11px 22px; border-radius: 8px; cursor: pointer;
-    display: flex; align-items: center; gap: 8px;
-  }
-  .md-btn-save:hover { box-shadow: 0 0 16px rgba(168,85,247,0.28); }
-  .md-btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
-  .md-btn-cancel {
-    background: rgba(0,0,0,0.4); color: #6b7280;
-    border: 1px solid rgba(255,255,255,0.08);
-    font-family: 'Rajdhani', sans-serif; font-size: 14px; font-weight: 600;
-    padding: 11px 20px; border-radius: 8px; cursor: pointer;
-  }
-  .md-btn-cancel:hover { color: #9ca3af; }
-
-  /* Spinner sm */
-  .md-spinner-sm { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: mdspin 0.8s linear infinite; }
-
-  /* Player loading */
-  .md-player-loading { display: flex; flex-direction: column; align-items: center; padding: 40px; gap: 12px; }
-  .md-sel-count { font-family: 'Orbitron', monospace; font-size: 9px; color: #374151; letter-spacing: 1px; margin-bottom: 10px; }
-  .md-sel-count span { color: #a855f7; font-weight: 900; }
-`;
+          {/* Players */}
+          <div className="flex flex-col gap-1.5 p-2.5">
+            {team.players.map(player => (
+              <PlayerRow
+                key={player._id}
+                teamId={team._id}
+                player={player}
+                registerRef={registerPlayerRef(player._id)}
+                onKillChange={onKillChange}
+                onToggleDeath={onToggleDeath}
+              />
+            ))}
+          </div>
+        </div>
+      </Framed>
+    </div>
+  );
+});
 
 // ── Component ──────────────────────────────────────────────────────────────────
 const MatchDataViewer: React.FC = () => {
   const { t } = useTranslation();
   const { tournamentId, roundId, matchId } = useParams<{ tournamentId: string; roundId: string; matchId: string }>();
 
-  const [matchData, setMatchData]             = useState<any>(null);
+  const [matchData, setMatchData]             = useState<MatchData | null>(null);
   const [loading, setLoading]                 = useState(false);
   const [error, setError]                     = useState<string | null>(null);
   const [highlightedTeam, setHighlightedTeam] = useState<string | null>(null);
   const [sortBy, setSortBy]                   = useState<'slot' | 'placePoints'>('slot');
-  const [editingTeam, setEditingTeam]         = useState<null | { teamIndex: number; teamId: string; teamName: string }>(null);
+
+  const [editingTeam, setEditingTeam]           = useState<null | { teamId: string; teamName: string }>(null);
   const [availablePlayers, setAvailablePlayers] = useState<any[]>([]);
   const [selectedPlayers, setSelectedPlayers]   = useState<string[]>([]);
-  const [playersLoading, setPlayersLoading]   = useState(false);
-  const [savingRoster, setSavingRoster]       = useState(false);
-  const [newPlayerName, setNewPlayerName]     = useState('');
-  const [newPlayerId, setNewPlayerId]         = useState('');
-  const [newPlayerPhoto, setNewPlayerPhoto]   = useState<File | null>(null);
-  const [addingPlayer, setAddingPlayer]       = useState(false);
+  const [playersLoading, setPlayersLoading]     = useState(false);
+  const [savingRoster, setSavingRoster]         = useState(false);
+  const [rosterSearch, setRosterSearch]         = useState('');
+  const [rosterWarning, setRosterWarning]       = useState<string | null>(null);
 
-  // ✅ Track which player rows are flashing from live delta updates
-  const [flashingPlayers, setFlashingPlayers] = useState<Set<string>>(new Set());
+  const [newPlayerName, setNewPlayerName]   = useState('');
+  const [newPlayerId, setNewPlayerId]       = useState('');
+  const [newPlayerPhoto, setNewPlayerPhoto] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const [addingPlayer, setAddingPlayer]     = useState(false);
 
-  const teamRefs          = useRef<Record<string, HTMLDivElement | null>>({});
-  const lastUpdateRef     = useRef<Record<string, number>>({});
-  const killUpdateBatcher  = useRef(new UpdateBatcher<{ change: number }>(3000, (e, n) => ({ change: e.change + n.change })));
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const showToast = useCallback((kind: ToastKind, msg: string) => setToast({ kind, msg }), []);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3200);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  // Object URL for the new-player photo preview — created/revoked only when
+  // the file actually changes, not on every render (the old code called
+  // URL.createObjectURL directly in JSX, leaking a blob URL per re-render).
+  useEffect(() => {
+    if (!newPlayerPhoto) { setPhotoPreviewUrl(null); return; }
+    const url = URL.createObjectURL(newPlayerPhoto);
+    setPhotoPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [newPlayerPhoto]);
+
+  const matchDataRef = useRef<MatchData | null>(null);
+  useEffect(() => { matchDataRef.current = matchData; }, [matchData]);
+
+  const teamRefs        = useRef<Record<string, HTMLDivElement | null>>({});
+  const playerRowRefs   = useRef<Record<string, HTMLDivElement | null>>({});
+  const teamRefCbCache   = useRef(new Map<string, (el: HTMLDivElement | null) => void>());
+  const playerRefCbCache = useRef(new Map<string, (el: HTMLDivElement | null) => void>());
+
+  const getTeamRefCb = useCallback((id: string) => {
+    let cb = teamRefCbCache.current.get(id);
+    if (!cb) { cb = (el) => { teamRefs.current[id] = el; }; teamRefCbCache.current.set(id, cb); }
+    return cb;
+  }, []);
+  const getPlayerRefCb = useCallback((id: string) => {
+    let cb = playerRefCbCache.current.get(id);
+    if (!cb) { cb = (el) => { playerRowRefs.current[id] = el; }; playerRefCbCache.current.set(id, cb); }
+    return cb;
+  }, []);
+
+  const lastUpdateRef       = useRef<Record<string, number>>({});
+  const killUpdateBatcher   = useRef(new UpdateBatcher<{ change: number }>(3000, (e, n) => ({ change: e.change + n.change })));
   const pointsUpdateBatcher = useRef(new UpdateBatcher<{ points: number }>(4000));
   const deathUpdateBatcher  = useRef(new UpdateBatcher<{ bHasDied: boolean }>(2500));
 
-  const setTeamRef = (id: string) => (el: HTMLDivElement | null) => { if (el) teamRefs.current[id] = el; };
-
-  // ✅ Flash a player row briefly when a live delta arrives
-  const flashPlayer = useCallback((playerId: string) => {
-    setFlashingPlayers(prev => new Set(prev).add(playerId));
-    setTimeout(() => {
-      setFlashingPlayers(prev => {
-        const next = new Set(prev);
-        next.delete(playerId);
-        return next;
-      });
-    }, 900);
-  }, []);
+  const normalizeMatch = (data: any): MatchData => ({
+    ...data,
+    teams: Array.isArray(data?.teams)
+      ? data.teams.map((t: Team) => ({ ...t, _id: t?._id || t?.teamId || null, placePoints: t.placePoints ?? 0 }))
+      : [],
+  });
 
   const fetchMatchData = useCallback(async () => {
+    const controller = new AbortController();
     setLoading(true); setError(null);
     try {
-      const { data } = await api.get(`/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata`);
-      setMatchData({
-        ...data,
-        teams: Array.isArray(data?.teams)
-          ? data.teams.map((t: Team) => ({ ...t, _id: t?._id || t?.teamId || null, placePoints: t.placePoints ?? 0 }))
-          : [],
-      });
-    } catch (err: any) { setError(err.message || 'Failed to fetch match data'); }
-    finally { setLoading(false); }
+      const { data } = await api.get(
+        `/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata`,
+        { signal: controller.signal }
+      );
+      setMatchData(normalizeMatch(data));
+    } catch (err: any) {
+      if (err?.name !== 'CanceledError' && err?.name !== 'AbortError') {
+        setError(err.message || 'Failed to fetch match data');
+      }
+    } finally { setLoading(false); }
+    return () => controller.abort();
   }, [tournamentId, roundId, matchId]);
 
-  useEffect(() => { if (tournamentId && roundId && matchId) fetchMatchData(); }, [tournamentId, roundId, matchId, fetchMatchData]);
+  useEffect(() => {
+    let cancelFn: (() => void) | undefined;
+    if (tournamentId && roundId && matchId) {
+      fetchMatchData().then(fn => { cancelFn = fn; });
+    }
+    return () => { cancelFn?.(); };
+  }, [tournamentId, roundId, matchId, fetchMatchData]);
 
+  // ── Socket wiring ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!socket) return;
 
-    // ── existing handlers ────────────────────────────────────────────────────
     const handleLiveMatchUpdate = (data: any) => {
       if (!data) return;
       const inId = typeof data.matchId === 'object' && data.matchId?._id ? data.matchId._id : data.matchId;
       if (inId?.toString?.() !== matchId?.toString?.()) return;
-      setMatchData({
-        ...data,
-        teams: Array.isArray(data?.teams)
-          ? data.teams.map((t: any) => ({ ...t, _id: t?._id || t?.teamId || null, placePoints: t.placePoints ?? 0 }))
-          : [],
-      });
+      setMatchData(normalizeMatch(data));
     };
 
     const handleTeamUpdate = (data: any) => {
-      setMatchData((prev: any) => {
+      setMatchData((prev) => {
         if (!prev?.teams) return prev;
         return {
           ...prev,
-          teams: prev.teams.map((team: any) => {
+          teams: prev.teams.map((team) => {
             if (team._id !== data.teamId) return team;
             const changes = data?.changes || {};
             const next: any = { ...team, ...changes };
@@ -521,170 +425,193 @@ const MatchDataViewer: React.FC = () => {
     };
 
     const handlePlayerUpdate = (data: any) => {
-      setMatchData((prev: any) => {
+      setMatchData((prev) => {
         if (!prev?.teams) return prev;
         return {
           ...prev,
-          teams: prev.teams.map((team: any) =>
+          teams: prev.teams.map((team) =>
             team._id !== data.teamId ? team : {
               ...team,
-              players: team.players.map((p: any) =>
-                p._id === data.playerId ? { ...p, ...data.updates } : p
-              ),
+              players: team.players.map((p) => p._id === data.playerId ? { ...p, ...data.updates } : p),
             }
           ),
         };
       });
     };
 
-    // ✅ NEW: Handle live delta updates from the PUBG socket engine
+    // Live delta stream from the PUBG socket engine. This can fire many
+    // times a second per player, so it deliberately never touches React
+    // state for the "flash" effect — only for the actual stat change.
     const handlePlayerDeltaUpdate = (data: any) => {
       if (!data) return;
-
-      // Only process events for the current match
       if (data.matchId?.toString() !== matchId?.toString()) return;
 
-      setMatchData((prev: any) => {
+      let updatedPlayerId: string | null = null;
+
+      setMatchData((prev) => {
         if (!prev?.teams) return prev;
-
-        let updatedPlayerId: string | null = null;
-
-        const updatedTeams = prev.teams.map((team: any) => {
-          const updatedPlayers = team.players.map((player: any) => {
-            // ✅ Match by uId (PUBG player ID stored as String in schema)
+        const updatedTeams = prev.teams.map((team) => {
+          const updatedPlayers = team.players.map((player) => {
             if (String(player.uId) !== String(data.uId)) return player;
-
-            updatedPlayerId = player._id?.toString();
-
+            updatedPlayerId = player._id?.toString() || null;
             return {
               ...player,
               ...data.changes,
-              // ✅ Merge nested location object rather than replacing entirely
-              ...(data.changes.location && {
-                location: { ...player.location, ...data.changes.location },
-              }),
-              // ✅ If liveState indicates death (5 = dead in PUBG), sync bHasDied
-              ...(data.changes.liveState !== undefined && {
-                bHasDied: data.changes.liveState === 5,
-              }),
+              ...(data.changes.location && { location: { ...player.location, ...data.changes.location } }),
+              ...(data.changes.liveState !== undefined && { bHasDied: data.changes.liveState === 5 }),
             };
           });
-
           return { ...team, players: updatedPlayers };
         });
-
-        // ✅ Flash the updated player row so the operator can see the live change
-        if (updatedPlayerId) flashPlayer(updatedPlayerId);
-
         return { ...prev, teams: updatedTeams };
       });
+
+      if (updatedPlayerId) pulse(playerRowRefs.current[updatedPlayerId]);
     };
 
     socket.on('liveMatchUpdate',    handleLiveMatchUpdate);
     socket.on('matchDataUpdated',   handleTeamUpdate);
     socket.on('playerStatsUpdated', handlePlayerUpdate);
-    socket.on('playerDeltaUpdate',  handlePlayerDeltaUpdate); // ✅ NEW
+    socket.on('playerDeltaUpdate',  handlePlayerDeltaUpdate);
 
     return () => {
       socket.off('liveMatchUpdate',    handleLiveMatchUpdate);
       socket.off('matchDataUpdated',   handleTeamUpdate);
       socket.off('playerStatsUpdated', handlePlayerUpdate);
-      socket.off('playerDeltaUpdate',  handlePlayerDeltaUpdate); // ✅ NEW
+      socket.off('playerDeltaUpdate',  handlePlayerDeltaUpdate);
       SocketManager.getInstance().disconnect();
     };
-  }, [matchId, flashPlayer]);
+  }, [matchId]);
 
-  // ── Handlers ────────────────────────────────────────────────────────────────
-  const updateKillCount = async (teamIndex: number, playerIndex: number, change: number) => {
-    if (!matchData) return;
-    const now = Date.now(); const key = `${teamIndex}-${playerIndex}`;
+  // ── Handlers — stable identity, read live data via matchDataRef ─────────────
+  const updateKillCount = useCallback((teamId: string, playerId: string, change: number) => {
+    const key = `${teamId}-${playerId}`;
+    const now = Date.now();
     if (lastUpdateRef.current[key] && now - lastUpdateRef.current[key] < 200) return;
     lastUpdateRef.current[key] = now;
-    const team = matchData.teams[teamIndex]; const player = team.players[playerIndex];
-    const newKillNum = Math.max(0, player.killNum + change);
-    const actualChange = newKillNum - player.killNum;
-    setMatchData((prev: any) => {
-      if (!prev) return prev;
-      const t = [...prev.teams];
-      t[teamIndex] = { ...team, players: team.players.map((p: Player, i: number) => i === playerIndex ? { ...p, killNum: newKillNum } : p) };
-      return { ...prev, teams: t };
-    });
+
+    const current = matchDataRef.current;
+    const team = current?.teams.find(t => t._id === teamId);
+    const player = team?.players.find(p => p._id === playerId);
+    if (!current || !team || !player) return;
+
+    const newKillNum = Math.max(0, (player.killNum ?? 0) + change);
+    const actualChange = newKillNum - (player.killNum ?? 0);
     if (actualChange === 0) return;
-    killUpdateBatcher.current.batch(`${teamIndex}-${playerIndex}`, { change: actualChange }, async (u) => {
+
+    setMatchData(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        teams: prev.teams.map(t => t._id !== teamId ? t : {
+          ...t,
+          players: t.players.map(p => p._id !== playerId ? p : { ...p, killNum: newKillNum }),
+        }),
+      };
+    });
+
+    killUpdateBatcher.current.batch(key, { change: actualChange }, async (u) => {
       await retryWithBackoff(() => api.patch(
-        `/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${matchData._id}/team/${team._id}/player/${player._id}/stats`,
+        `/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${current._id}/team/${teamId}/player/${playerId}/stats`,
         { killNumChange: u.change }
       ));
     });
-  };
+  }, [tournamentId, roundId, matchId]);
 
-  const savePlacePoints = async (teamId: string, teamIndex: number, newPoints: number) => {
-    if (!matchData) return;
-    const now = Date.now(); const key = `${teamId}-points`;
+  const savePlacePointsLocal = useCallback((teamId: string, value: number) => {
+    setMatchData(prev => {
+      if (!prev) return prev;
+      return { ...prev, teams: prev.teams.map(t => t._id !== teamId ? t : { ...t, placePoints: value }) };
+    });
+  }, []);
+
+  const commitPlacePoints = useCallback((teamId: string, value: number) => {
+    const key = `${teamId}-points`;
+    const now = Date.now();
     if (lastUpdateRef.current[key] && now - lastUpdateRef.current[key] < 300) return;
     lastUpdateRef.current[key] = now;
-    setMatchData((prev: any) => {
-      if (!prev?.teams?.[teamIndex]) return prev;
-      const t = [...prev.teams];
-      t[teamIndex] = { ...t[teamIndex], placePoints: typeof newPoints === 'number' ? newPoints : 0 };
-      return { ...prev, teams: t };
-    });
-    pointsUpdateBatcher.current.batch(`${teamId}-points`, { points: newPoints }, async (u) => {
+    const current = matchDataRef.current;
+    if (!current) return;
+    pointsUpdateBatcher.current.batch(key, { points: value }, async (u) => {
       await retryWithBackoff(() => api.patch(
-        `/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${matchData._id}/team/${teamId}/points`,
+        `/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${current._id}/team/${teamId}/points`,
         { placePoints: u.points }
       ));
     });
-  };
+  }, [tournamentId, roundId, matchId]);
 
-  const togglePlayerDeath = async (teamIndex: number, playerIndex: number) => {
-    if (!matchData) return;
-    const now = Date.now(); const key = `${teamIndex}-${playerIndex}-death`;
+  const togglePlayerDeath = useCallback((teamId: string, playerId: string) => {
+    const key = `${teamId}-${playerId}-death`;
+    const now = Date.now();
     if (lastUpdateRef.current[key] && now - lastUpdateRef.current[key] < 250) return;
     lastUpdateRef.current[key] = now;
-    const team = matchData.teams[teamIndex]; const player = team.players[playerIndex];
+
+    const current = matchDataRef.current;
+    const team = current?.teams.find(t => t._id === teamId);
+    const player = team?.players.find(p => p._id === playerId);
+    if (!current || !team || !player) return;
     const newVal = !player.bHasDied;
-    setMatchData((prev: MatchData | null) => {
+
+    setMatchData(prev => {
       if (!prev) return prev;
-      const t = [...prev.teams];
-      t[teamIndex] = { ...team, players: team.players.map((p: Player, i: number) => i === playerIndex ? { ...p, bHasDied: newVal } : p) };
-      return { ...prev, teams: t };
+      return {
+        ...prev,
+        teams: prev.teams.map(t => t._id !== teamId ? t : {
+          ...t,
+          players: t.players.map(p => p._id !== playerId ? p : { ...p, bHasDied: newVal }),
+        }),
+      };
     });
+
     deathUpdateBatcher.current.batch(key, { bHasDied: newVal }, async (u) => {
       await retryWithBackoff(() => api.patch(
-        `/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${matchData._id}/team/${team._id}/player/${player._id}/stats`,
+        `/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${current._id}/team/${teamId}/player/${playerId}/stats`,
         { bHasDied: u.bHasDied }
       ));
     });
-  };
+  }, [tournamentId, roundId, matchId]);
 
-  const toggleAllPlayersDeath = async (teamIndex: number) => {
-    if (!matchData) return;
-    const now = Date.now(); const key = `team-${teamIndex}-all-death`;
+  const toggleAllPlayersDeath = useCallback((teamId: string) => {
+    const key = `team-${teamId}-all-death`;
+    const now = Date.now();
     if (lastUpdateRef.current[key] && now - lastUpdateRef.current[key] < 500) return;
     lastUpdateRef.current[key] = now;
-    const team = matchData.teams[teamIndex];
-    const newVal = !team.players.every((p: Player) => p.bHasDied);
-    setMatchData((prev: MatchData | null) => {
+
+    const current = matchDataRef.current;
+    const team = current?.teams.find(t => t._id === teamId);
+    if (!current || !team) return;
+    const newVal = !team.players.every(p => p.bHasDied);
+
+    setMatchData(prev => {
       if (!prev) return prev;
-      const t = [...prev.teams];
-      t[teamIndex] = { ...team, players: team.players.map((p: Player) => ({ ...p, bHasDied: newVal })) };
-      return { ...prev, teams: t };
+      return {
+        ...prev,
+        teams: prev.teams.map(t => t._id !== teamId ? t : { ...t, players: t.players.map(p => ({ ...p, bHasDied: newVal })) }),
+      };
     });
+
     requestQueue.add(async () => {
       await api.patch(
-        `/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${matchData._id}/team/${team._id}/bulk`,
+        `/tournament/${tournamentId}/round/${roundId}/match/${matchId}/matchdata/${current._id}/team/${teamId}/bulk`,
         { bHasDied: newVal }
       );
-    }).catch(console.error);
-  };
+    }).catch((err: any) => {
+      console.error(err);
+      showToast('error', t('matchData.failedToUpdateTeam', 'Could not update that team — try again.'));
+    });
+  }, [tournamentId, roundId, matchId, showToast, t]);
 
-  const openChangePlayers = async (teamIndex: number, teamId: string, teamName: string) => {
-    setEditingTeam({ teamIndex, teamId, teamName }); setPlayersLoading(true);
+  // ── Roster modal handlers ────────────────────────────────────────────────
+  const openChangePlayers = useCallback(async (teamId: string, teamName: string) => {
+    setEditingTeam({ teamId, teamName });
+    setRosterSearch(''); setRosterWarning(null);
+    setPlayersLoading(true);
     try {
       const { data: teamData } = await api.get(`/teams/${teamId}`);
       const playersForTeam = (teamData.players || []).filter((p: any) => p && p.playerName && p._id);
-      const preselected    = (matchData?.teams?.[teamIndex]?.players || []).filter((p: any) => p && p.playerName && p._id);
+      const teamOnBoard = matchDataRef.current?.teams.find(t => (t.teamId || t._id) === teamId);
+      const preselected = (teamOnBoard?.players || []).filter((p: any) => p && p.playerName && p._id);
+
       const norm = (n: string) => n.trim().toLowerCase();
       const preMap = new Map<string, any>();
       preselected.forEach((p: Player) => preMap.set(norm(p.playerName), p));
@@ -696,12 +623,33 @@ const MatchDataViewer: React.FC = () => {
       [...preselected, ...filtered].forEach((p: any) => combined.set(p._id.toString(), p));
       setAvailablePlayers(Array.from(combined.values()));
       setSelectedPlayers(preselected.map((p: Player) => p._id.toString()).filter((id: string) => combined.has(id)));
-    } catch (err: any) { setError(err.message || 'Failed to fetch team players'); }
-    finally { setPlayersLoading(false); }
-  };
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch team players');
+      showToast('error', t('matchData.failedToFetchPlayers', "Couldn't load this team's roster."));
+    } finally { setPlayersLoading(false); }
+  }, [showToast, t]);
+
+  const closeRosterModal = useCallback(() => {
+    setEditingTeam(null); setNewPlayerName(''); setNewPlayerId(''); setNewPlayerPhoto(null); setRosterWarning(null);
+  }, []);
+
+  const filteredAvailablePlayers = useMemo(() => {
+    const q = rosterSearch.trim().toLowerCase();
+    if (!q) return availablePlayers;
+    return availablePlayers.filter(p => p.playerName?.toLowerCase().includes(q));
+  }, [availablePlayers, rosterSearch]);
+
+  const togglePlayerSelection = useCallback((id: string) => {
+    setSelectedPlayers(prev => {
+      if (prev.includes(id)) { setRosterWarning(null); return prev.filter(x => x !== id); }
+      if (prev.length >= 4) { setRosterWarning(t('matchData.pleaseUntickPlayer', 'A team can only have 4 players — remove one first.')); return prev; }
+      setRosterWarning(null);
+      return [...prev, id];
+    });
+  }, [t]);
 
   const addNewPlayer = async () => {
-    if (!editingTeam || !newPlayerName.trim()) { alert(t('matchData.pleaseEnterPlayerName')); return; }
+    if (!editingTeam || !newPlayerName.trim()) { showToast('error', t('matchData.pleaseEnterPlayerName', 'Enter a player name first.')); return; }
     setAddingPlayer(true);
     try {
       let photoUrl = '';
@@ -715,379 +663,394 @@ const MatchDataViewer: React.FC = () => {
       if (!newPlayer) throw new Error('Failed to find newly added player');
       setAvailablePlayers(prev => [...prev, newPlayer]);
       setNewPlayerName(''); setNewPlayerId(''); setNewPlayerPhoto(null);
-      alert(t('matchData.playerAddedSuccessfully'));
-    } catch { alert(t('matchData.failedToAddPlayer')); }
-    finally { setAddingPlayer(false); }
+      showToast('success', t('matchData.playerAddedSuccessfully', 'Player added to the roster pool.'));
+    } catch {
+      showToast('error', t('matchData.failedToAddPlayer', 'Could not add that player — try again.'));
+    } finally { setAddingPlayer(false); }
   };
 
   const saveChangedPlayers = async () => {
-    if (!editingTeam || selectedPlayers.length < 1 || selectedPlayers.length > 4) { alert(t('matchData.pleaseSelectPlayers')); return; }
+    if (!editingTeam || selectedPlayers.length < 1 || selectedPlayers.length > 4) {
+      setRosterWarning(t('matchData.pleaseSelectPlayers', 'Select between 1 and 4 players to save.'));
+      return;
+    }
     setSavingRoster(true);
     try {
-      const oldPlayers = matchData.teams[editingTeam.teamIndex].players.map((p: any) => p._id.toString());
+      const current = matchDataRef.current;
+      const teamOnBoard = current?.teams.find(t => (t.teamId || t._id) === editingTeam.teamId);
+      const oldPlayers = (teamOnBoard?.players || []).map((p: any) => p._id.toString());
       const newPlayers = selectedPlayers.map(id => id.toString());
       const removed    = oldPlayers.filter((id: string) => !newPlayers.includes(id));
       const added      = newPlayers.filter(id => !oldPlayers.includes(id));
       const replacements = removed
         .map((oldId: string, i: number) => ({ oldPlayerId: oldId, newPlayerId: added[i] }))
         .filter((r: any) => r.newPlayerId !== undefined);
+
       if (replacements.length > 0)
-        await api.put(`/matchdata/${matchData._id}/team/${editingTeam.teamId}/replace`, { replacements });
+        await api.put(`/matchdata/${current!._id}/team/${editingTeam.teamId}/replace`, { replacements });
       if (added.length > removed.length)
-        await api.post(`/matchdata/${matchData._id}/team/${editingTeam.teamId}/player/add`, { newPlayerIds: added.slice(removed.length) });
+        await api.post(`/matchdata/${current!._id}/team/${editingTeam.teamId}/player/add`, { newPlayerIds: added.slice(removed.length) });
       if (removed.length > added.length)
-        await api.delete(`/matchdata/${matchData._id}/team/${editingTeam.teamId}/players/remove`, { data: { playerIds: removed.slice(added.length) } });
-      setMatchData((prev: any) => {
+        await api.delete(`/matchdata/${current!._id}/team/${editingTeam.teamId}/players/remove`, { data: { playerIds: removed.slice(added.length) } });
+
+      setMatchData(prev => {
         if (!prev) return prev;
-        const t = [...prev.teams];
-        const current = t[editingTeam.teamIndex].players;
-        t[editingTeam.teamIndex] = {
-          ...t[editingTeam.teamIndex],
-          players: selectedPlayers
-            .map(id => {
-              const ex = current.find((p: any) => p._id.toString() === id);
-              if (ex) return ex;
-              const fa = availablePlayers.find(p => p._id.toString() === id);
-              return fa ? { ...fa, killNum: 0, damage: 0, survivalTime: 0, assists: 0, bHasDied: false } : null;
-            })
-            .filter(Boolean),
+        return {
+          ...prev,
+          teams: prev.teams.map(t => {
+            if ((t.teamId || t._id) !== editingTeam.teamId) return t;
+            const currentPlayers = t.players;
+            return {
+              ...t,
+              players: selectedPlayers
+                .map(id => {
+                  const ex = currentPlayers.find((p: any) => p._id.toString() === id);
+                  if (ex) return ex;
+                  const fa = availablePlayers.find(p => p._id.toString() === id);
+                  return fa ? { ...fa, killNum: 0, damage: 0, survivalTime: 0, assists: 0, bHasDied: false } : null;
+                })
+                .filter(Boolean) as Player[],
+            };
+          }),
         };
-        return { ...prev, teams: t };
       });
-      setEditingTeam(null); setNewPlayerName(''); setNewPlayerId(''); setNewPlayerPhoto(null);
-    } catch (err: any) { setError(err.message || 'Failed to update players'); }
-    finally { setSavingRoster(false); }
+
+      showToast('success', t('matchData.rosterSaved', 'Roster updated.'));
+      closeRosterModal();
+    } catch (err: any) {
+      setError(err.message || 'Failed to update players');
+      showToast('error', t('matchData.failedToUpdatePlayers', 'Could not save the roster — try again.'));
+    } finally { setSavingRoster(false); }
   };
 
+  // ── Derived data ─────────────────────────────────────────────────────────
   const sortedTeams = useMemo(() => {
-    const t = [...(matchData?.teams ?? [])];
-    t.sort((a: any, b: any) => sortBy === 'slot' ? (a.slot ?? 0) - (b.slot ?? 0) : (b.placePoints ?? 0) - (a.placePoints ?? 0));
-    return t;
+    const arr = [...(matchData?.teams ?? [])];
+    arr.sort((a, b) => sortBy === 'slot' ? (a.slot ?? 0) - (b.slot ?? 0) : (b.placePoints ?? 0) - (a.placePoints ?? 0));
+    return arr;
   }, [matchData?.teams, sortBy]);
 
-  const totalTeams   = useMemo(() => (matchData?.teams || []).filter((t: any) => t.players.some((p: any) => !p.bHasDied)).length, [matchData?.teams]);
-  const totalPlayers = useMemo(() => (matchData?.teams || []).reduce((s: number, t: any) => s + t.players.filter((p: any) => !p.bHasDied).length, 0), [matchData?.teams]);
+  const totalTeams   = useMemo(() => (matchData?.teams || []).filter(t => t.players.some(p => !p.bHasDied)).length, [matchData?.teams]);
+  const totalPlayers = useMemo(() => (matchData?.teams || []).reduce((s, t) => s + t.players.filter(p => !p.bHasDied).length, 0), [matchData?.teams]);
 
-  // ── Loading / Error ──────────────────────────────────────────────────────────
-  if (loading) return (
-    <><style>{STYLES}</style>
-      <div className="md-root md-center">
-        <div className="md-spinner" />
-        <p className="md-spin-txt">LOADING MATCH DATA</p>
-      </div>
-    </>
+  const jumpToTeam = useCallback((teamId: string) => {
+    setHighlightedTeam(teamId);
+    requestAnimationFrame(() => { teamRefs.current[teamId]?.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+    setTimeout(() => setHighlightedTeam(prev => prev === teamId ? null : prev), 1800);
+  }, []);
+
+  // ── Loading / Error / Empty ──────────────────────────────────────────────
+  const Shell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+    <div className="min-h-screen bg-[#0B0C0E] text-[#F4F2EE] font-sans antialiased">
+      <GlobalStyle />
+      {children}
+    </div>
   );
 
-  if (error) return (
-    <><style>{STYLES}</style>
-      <div className="md-root md-center">
-        <p style={{ fontFamily: 'Orbitron,monospace', color: '#f87171', fontSize: 14 }}>ERROR: {error}</p>
-      </div>
-    </>
-  );
+  if (loading) {
+    return (
+      <Shell>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+          <div className="mb-8 h-6 w-40 bg-[#131418] animate-pulse" />
+          <div className="grid gap-3.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}>
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="h-[280px] bg-[#131418] border border-[#24262B] animate-pulse" />
+            ))}
+          </div>
+        </div>
+      </Shell>
+    );
+  }
 
-  if (!matchData) return (
-    <><style>{STYLES}</style>
-      <div className="md-root md-center">
-        <p style={{ fontFamily: 'Orbitron,monospace', color: '#374151', fontSize: 12, letterSpacing: 2 }}>NO MATCH DATA</p>
-      </div>
-    </>
-  );
+  if (error) {
+    return (
+      <Shell>
+        <div className="min-h-screen flex items-center justify-center px-4">
+          <div className="max-w-md text-center bg-[#131418] border border-[#E11D2E]/30 p-8">
+            <FaExclamationTriangle className="mx-auto mb-4 text-[#E11D2E]" size={22} />
+            <p className="font-display font-bold text-lg uppercase mb-2">Couldn't load match data</p>
+            <p className="text-[#93959C] text-sm mb-6">{error}</p>
+            <button
+              onClick={() => fetchMatchData()}
+              className="px-6 py-3 bg-[#E11D2E] hover:bg-[#8C1220] text-white font-display font-bold text-sm tracking-wide"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </Shell>
+    );
+  }
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+  if (!matchData) {
+    return (
+      <Shell>
+        <div className="min-h-screen flex items-center justify-center">
+          <p className="font-mono text-xs tracking-[0.2em] text-[#55565C]">NO MATCH DATA</p>
+        </div>
+      </Shell>
+    );
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <>
-      <style>{STYLES}</style>
-      <div className="md-root md-page">
-        <div className="md-hex" />
-        <div className="md-scan" />
-        <div className="md-glow" />
-
-        {/* ── Sticky Top Bar ── */}
-        <div className="md-topbar">
-          <div className="md-live-row">
-            <div className="md-live-pill">
-              <span className="md-live-pill-lbl">Teams Alive</span>
-              <span className="md-orb md-live-pill-val">{totalTeams}</span>
+    <Shell>
+      {/* Sticky top bar */}
+      <div className="sticky top-0 z-40 bg-[#0B0C0E] border-b border-[#24262B] backdrop-blur-0">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-wrap items-center justify-center gap-3 py-3">
+            <div className="flex items-center gap-2 bg-[#131418] border border-[#24262B] px-4 py-2">
+              <span className="font-mono text-[9px] tracking-[0.15em] text-[#55565C] uppercase">Teams alive</span>
+              <span className="font-mono text-2xl font-extrabold text-[#F4F2EE] tabular-nums">{totalTeams}</span>
             </div>
-            <div className="md-live-dot" />
-            <div className="md-live-pill">
-              <span className="md-live-pill-lbl">Players Alive</span>
-              <span className="md-orb md-live-pill-val green">{totalPlayers}</span>
+            <div className="flex items-center gap-2 bg-[#131418] border border-[#24262B] px-4 py-2">
+              <span className="font-mono text-[9px] tracking-[0.15em] text-[#55565C] uppercase">Players alive</span>
+              <span className="font-mono text-2xl font-extrabold text-[#E11D2E] tabular-nums">{totalPlayers}</span>
             </div>
           </div>
 
-          <div className="md-slot-nav">
-            {matchData.teams.map((team: any) => {
-              const dead = team.players.length > 0 && team.players.every((p: any) => p.bHasDied);
+          <div className="flex flex-wrap gap-1.5 justify-center pb-3">
+            {matchData.teams.map(team => {
+              const dead = team.players.length > 0 && team.players.every(p => p.bHasDied);
+              const active = highlightedTeam === team._id;
               return (
                 <button
                   key={team._id}
-                  className={`md-slot-btn${dead ? ' dead' : ''}${highlightedTeam === team._id ? ' highlighted' : ''}`}
-                  onClick={() => {
-                    setHighlightedTeam(team._id);
-                    setTimeout(() => { teamRefs.current[team._id]?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 0);
-                    setTimeout(() => setHighlightedTeam(p => p === team._id ? null : p), 1800);
-                  }}
+                  onClick={() => jumpToTeam(team._id)}
+                  className={`font-mono text-[10px] font-semibold px-2.5 py-1 border ${
+                    active ? 'border-[#E11D2E] bg-[#E11D2E]/15 text-[#E11D2E]'
+                      : dead ? 'border-[#E11D2E]/25 bg-[#E11D2E]/[0.04] text-[#8C1220]'
+                      : 'border-[#24262B] bg-[#131418] text-[#93959C] hover:border-[#E11D2E]/40 hover:text-[#E11D2E]'
+                  }`}
                 >
-                  {`${team.slot} - ${team.teamTag}`}
+                  {team.slot}·{team.teamTag}
                 </button>
               );
             })}
           </div>
         </div>
+      </div>
 
-        {/* Sort */}
-        <div className="md-sort-bar">
-          <span className="md-sort-lbl">SORT</span>
-          <select className="md-sort-select" value={sortBy} onChange={e => setSortBy(e.target.value as 'slot' | 'placePoints')}>
-            <option value="slot">SLOT</option>
-            <option value="placePoints">POINTS</option>
-          </select>
-        </div>
+      {/* Sort */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-end items-center gap-2 pt-4 pb-2">
+        <span className="font-mono text-[9px] tracking-[0.18em] text-[#55565C] uppercase">Sort</span>
+        <select
+          value={sortBy}
+          onChange={e => setSortBy(e.target.value as 'slot' | 'placePoints')}
+          className="bg-[#131418] border border-[#24262B] text-[#E11D2E] font-mono text-[10px] font-bold px-3 py-1.5 outline-none focus-visible:border-[#E11D2E]"
+        >
+          <option value="slot">SLOT</option>
+          <option value="placePoints">POINTS</option>
+        </select>
+      </div>
 
-        {/* ── Teams Grid ── */}
-        <div className="md-grid">
-          {sortedTeams.map((team: any) => {
-            const teamIndex  = matchData.teams.findIndex((t: any) => t._id === team._id);
-            const allDead    = team.players.every((p: any) => p.bHasDied);
-            const totalKills = team.players.reduce((s: number, p: any) => s + (p.killNum ?? 0), 0);
-            const totalPts   = (team.placePoints ?? 0) + totalKills;
-            const isHighlighted = highlightedTeam === team._id;
+      {/* Teams grid */}
+      <div
+        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16 grid gap-3.5"
+        style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}
+      >
+        {sortedTeams.map(team => (
+          <TeamCard
+            key={team._id}
+            team={team}
+            isHighlighted={highlightedTeam === team._id}
+            registerRef={getTeamRefCb(team._id)}
+            registerPlayerRef={getPlayerRefCb}
+            onToggleAllDeath={toggleAllPlayersDeath}
+            onOpenRoster={openChangePlayers}
+            onPointsChange={savePlacePointsLocal}
+            onPointsCommit={commitPlacePoints}
+            onKillChange={updateKillCount}
+            onToggleDeath={togglePlayerDeath}
+          />
+        ))}
+      </div>
 
-            return (
-              <div
-                key={team._id}
-                ref={setTeamRef(team._id)}
-                className={`md-card${allDead ? ' eliminated' : ''}${isHighlighted ? ' highlighted' : ''}`}
-              >
-                <div className="md-card-topbar" />
-
-                {/* Card header */}
-                <div className="md-card-hdr">
-                  <div className="md-card-hdr-l">
-                    <span className="md-orb md-slot-badge">S{team.slot}</span>
-                    <div>
-                      <div className="md-orb md-team-name" title={team.teamName}>{team.teamName}</div>
-                      {team.teamTag && <div className="md-team-tag">[{team.teamTag}]</div>}
-                    </div>
-                  </div>
-                  <div className="md-card-hdr-r">
-                    <div className="md-elim-toggle" onClick={() => toggleAllPlayersDeath(teamIndex)}>
-                      <span className="md-orb md-elim-lbl">ELIM</span>
-                      <div className={`md-toggle-track${allDead ? ' on' : ''}`}>
-                        <div className="md-toggle-thumb" />
-                      </div>
-                    </div>
-                    <button
-                      className="md-edit-roster-btn"
-                      onClick={() => openChangePlayers(teamIndex, team.teamId || team._id, team.teamName)}
-                    >
-                      <FaEdit size={9} /> ROSTER
-                    </button>
-                  </div>
+      {/* Roster modal */}
+      {editingTeam && (
+        <div className="fixed inset-0 z-[200] bg-[#0B0C0E]/92 flex items-center justify-center p-4">
+          <div className="w-full max-w-3xl max-h-[92vh] bg-[#131418] border border-[#24262B] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 bg-[#0F1013] border-b border-[#24262B] shrink-0">
+              <div className="flex items-center gap-3">
+                <span className="font-mono text-[9px] font-bold tracking-[0.2em] text-[#E11D2E] border border-[#E11D2E]/35 bg-[#E11D2E]/[0.06] px-2 py-1">ROSTER</span>
+                <div>
+                  <div className="font-display font-bold text-base text-[#F4F2EE] uppercase">Edit roster</div>
+                  <div className="font-mono text-[11px] text-[#93959C]">{editingTeam.teamName}</div>
                 </div>
+              </div>
+              <button onClick={closeRosterModal} aria-label="Close" className="w-8 h-8 flex items-center justify-center border border-[#24262B] text-[#55565C] hover:border-[#E11D2E]/50 hover:text-[#E11D2E]">
+                <FaTimes size={13} />
+              </button>
+            </div>
 
-                {/* Points row */}
-                <div className="md-points-row">
-                  <div className="md-pts-group">
-                    <span className="md-pts-lbl">Place Pts</span>
+            {playersLoading ? (
+              <div className="flex flex-col items-center gap-3 py-16">
+                <div className="w-10 h-10 border-2 border-[#24262B] border-t-[#E11D2E] rounded-full animate-spin" />
+                <p className="font-mono text-[11px] tracking-[0.15em] text-[#55565C]">LOADING PLAYERS</p>
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto grid md:grid-cols-2 divide-x divide-[#24262B]">
+                {/* Left — select players */}
+                <div className="p-6">
+                  <Eyebrow>SELECT PLAYERS</Eyebrow>
+                  <div className="flex items-center justify-between mt-3 mb-3">
+                    <span className="font-mono text-[10px] tracking-wider text-[#55565C]">
+                      SELECTED <span className={selectedPlayers.length > 4 ? 'text-[#E11D2E]' : 'text-[#F4F2EE]'}>{selectedPlayers.length}</span> / 4
+                    </span>
+                  </div>
+
+                  <div className="relative mb-3">
+                    <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-[#55565C]" size={11} />
                     <input
-                      type="number" min={0}
-                      value={team.placePoints ?? 0}
-                      className="md-pts-input"
-                      onChange={e => {
-                        const v = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
-                        setMatchData((prev: MatchData | null) => {
-                          if (!prev) return prev;
-                          const t = [...prev.teams];
-                          t[teamIndex] = { ...t[teamIndex], placePoints: isNaN(v) ? 0 : v };
-                          return { ...prev, teams: t };
-                        });
-                      }}
-                      onBlur={e => {
-                        const v = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
-                        if (!isNaN(v)) savePlacePoints(team._id, teamIndex, v);
-                      }}
+                      type="text"
+                      value={rosterSearch}
+                      onChange={e => setRosterSearch(e.target.value)}
+                      placeholder="Search players"
+                      className="w-full pl-8 pr-3 py-2 bg-[#0B0C0E] border border-[#24262B] text-sm text-[#F4F2EE] placeholder:text-[#55565C] outline-none focus-visible:border-[#E11D2E]"
                     />
                   </div>
-                  <div className="md-totals">
-                    <div className="md-total-item">
-                      <span className="md-total-lbl">Kills</span>
-                      <span className="md-orb md-total-val kills">{totalKills}</span>
+
+                  {rosterWarning && (
+                    <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-[#E11D2E]/10 border border-[#E11D2E]/30">
+                      <FaExclamationTriangle className="text-[#E11D2E] shrink-0" size={11} />
+                      <span className="text-[12px] text-[#F4F2EE]">{rosterWarning}</span>
                     </div>
-                    <div className="md-total-divider" />
-                    <div className="md-total-item">
-                      <span className="md-total-lbl">Total</span>
-                      <span className="md-orb md-total-val total">{totalPts}</span>
-                    </div>
-                  </div>
-                </div>
+                  )}
 
-                {/* Players */}
-                <div className="md-players">
-                  {team.players.map((player: any, pi: number) => {
-                    const isFlashing = flashingPlayers.has(player._id?.toString());
-                    return (
-                      <div
-                        key={player._id}
-                        className={`md-player-row${player.bHasDied ? ' dead' : ''}${isFlashing ? ' flashing' : ''}`}
-                      >
-                        <span className="md-bar md-player-name" title={player.playerName}>
-                          {player.playerName}
-                        </span>
+                  {filteredAvailablePlayers.length === 0 && (
+                    <p className="text-[13px] text-[#55565C] py-6 text-center">No players match "{rosterSearch}".</p>
+                  )}
 
-                        {/* Kill counter */}
-                        <div className="md-kill-group">
-                          <button className="md-kill-btn minus" onClick={() => updateKillCount(teamIndex, pi, -1)}>−</button>
-                          <span className="md-orb md-kill-val">{player.killNum ?? 0}</span>
-                          <button className="md-kill-btn plus"  onClick={() => updateKillCount(teamIndex, pi, 1)}>+</button>
-                        </div>
-
-                        {/* Death toggle */}
-                        <div
-                          className={`md-death-toggle${player.bHasDied ? ' dead' : ''}`}
-                          onClick={() => togglePlayerDeath(teamIndex, pi)}
-                          title={player.bHasDied ? 'Mark ALIVE' : 'Mark DEAD'}
-                        >
-                          <div className="md-death-thumb" />
-                          {player.bHasDied
-                            ? <span className="md-death-lbl dead">OUT</span>
-                            : <span className="md-death-lbl alive">IN</span>
-                          }
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* ── Roster Modal ── */}
-        {editingTeam && (
-          <div className="md-modal-overlay">
-            <div className="md-modal">
-              <div className="md-modal-hdr">
-                <div className="md-modal-hdr-l">
-                  <span className="md-modal-tag">ROSTER</span>
-                  <div>
-                    <div className="md-orb md-modal-title">Edit Roster</div>
-                    <div className="md-modal-team">{editingTeam.teamName}</div>
-                  </div>
-                </div>
-                <button
-                  className="md-modal-close"
-                  onClick={() => { setEditingTeam(null); setNewPlayerName(''); setNewPlayerId(''); setNewPlayerPhoto(null); }}
-                >
-                  <FaTimes size={13} />
-                </button>
-              </div>
-
-              {playersLoading ? (
-                <div className="md-player-loading">
-                  <div className="md-spinner" />
-                  <p className="md-spin-txt">LOADING PLAYERS</p>
-                </div>
-              ) : (
-                <div className="md-modal-body">
-                  {/* Left — player selection */}
-                  <div className="md-modal-col">
-                    <div className="md-orb md-modal-col-title">SELECT PLAYERS</div>
-                    <p className="md-sel-count">SELECTED <span>{selectedPlayers.length}</span> / 4</p>
-                    {availablePlayers.map(player => {
-                      const id    = player._id.toString();
+                  <div className="flex flex-col gap-1.5">
+                    {filteredAvailablePlayers.map(player => {
+                      const id = player._id.toString();
                       const isSel = selectedPlayers.includes(id);
                       return (
-                        <div
+                        <button
+                          type="button"
                           key={id}
-                          className={`md-player-sel-row${isSel ? ' sel' : ''}`}
-                          onClick={() => {
-                            if (isSel) {
-                              setSelectedPlayers(prev => prev.filter(x => x !== id));
-                            } else {
-                              if (selectedPlayers.length >= 4) { alert(t('matchData.pleaseUntickPlayer')); return; }
-                              setSelectedPlayers(prev => [...prev, id]);
-                            }
-                          }}
+                          onClick={() => togglePlayerSelection(id)}
+                          className={`flex items-center gap-3 px-3 py-2.5 border text-left ${
+                            isSel ? 'bg-[#E11D2E]/10 border-[#E11D2E]' : 'bg-[#0B0C0E] border-[#24262B] hover:border-[#3a3d44]'
+                          }`}
                         >
-                          <div className="md-check-box">
-                            {isSel && <FaCheck size={9} color="#000" />}
-                          </div>
-                          <span className="md-sel-player-name">{player.playerName}</span>
-                        </div>
+                          <span className={`w-[18px] h-[18px] flex items-center justify-center border shrink-0 ${isSel ? 'bg-[#E11D2E] border-[#E11D2E]' : 'bg-[#131418] border-[#24262B]'}`}>
+                            {isSel && <FaCheck size={9} color="#0B0C0E" />}
+                          </span>
+                          <span className={`text-[14px] font-medium truncate ${isSel ? 'text-[#F4F2EE]' : 'text-[#93959C]'}`}>{player.playerName}</span>
+                        </button>
                       );
                     })}
                   </div>
+                </div>
 
-                  <div className="md-modal-divider" />
+                {/* Right — add new player */}
+                <div className="p-6">
+                  <Eyebrow>ADD NEW PLAYER</Eyebrow>
 
-                  {/* Right — add new player */}
-                  <div className="md-modal-col">
-                    <div className="md-orb md-modal-col-title">ADD NEW PLAYER</div>
+                  <div className="mt-4 space-y-4">
+                    <div>
+                      <label className="block font-mono text-[10px] tracking-wider text-[#55565C] uppercase mb-1.5">Player name *</label>
+                      <input
+                        type="text" placeholder="Enter player name"
+                        value={newPlayerName} onChange={e => setNewPlayerName(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-[#0B0C0E] border border-[#24262B] text-[#F4F2EE] text-sm placeholder:text-[#55565C] outline-none focus-visible:border-[#E11D2E]"
+                      />
+                    </div>
 
-                    <p className="md-field-lbl">Player Name *</p>
-                    <input
-                      type="text" placeholder="Enter player name"
-                      value={newPlayerName} onChange={e => setNewPlayerName(e.target.value)}
-                      className="md-add-input"
-                    />
+                    <div>
+                      <label className="block font-mono text-[10px] tracking-wider text-[#55565C] uppercase mb-1.5">Player ID (optional)</label>
+                      <input
+                        type="text" placeholder="Enter player ID"
+                        value={newPlayerId} onChange={e => setNewPlayerId(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-[#0B0C0E] border border-[#24262B] text-[#F4F2EE] text-sm placeholder:text-[#55565C] outline-none focus-visible:border-[#E11D2E]"
+                      />
+                    </div>
 
-                    <p className="md-field-lbl">Player ID (Optional)</p>
-                    <input
-                      type="text" placeholder="Enter player ID"
-                      value={newPlayerId} onChange={e => setNewPlayerId(e.target.value)}
-                      className="md-add-input"
-                    />
-
-                    <p className="md-field-lbl">Player Photo</p>
-                    <label htmlFor="new-player-photo" className="md-upload-lbl">
-                      <FaUpload size={13} color="#4ade80" /> Upload Photo
-                    </label>
-                    <input
-                      id="new-player-photo" type="file" accept="image/*"
-                      style={{ display: 'none' }}
-                      onChange={e => setNewPlayerPhoto(e.target.files?.[0] || null)}
-                    />
-                    {newPlayerPhoto && (
-                      <img src={URL.createObjectURL(newPlayerPhoto)} alt="Preview" className="md-photo-preview" loading="lazy" />
-                    )}
+                    <div>
+                      <label className="block font-mono text-[10px] tracking-wider text-[#55565C] uppercase mb-1.5">Player photo</label>
+                      <label htmlFor="new-player-photo" className="flex items-center gap-2 px-3 py-2.5 border border-[#24262B] text-[#93959C] text-sm cursor-pointer hover:border-[#E11D2E]/50 hover:text-[#E11D2E]">
+                        <FaUpload size={12} /> Upload photo
+                      </label>
+                      <input
+                        id="new-player-photo" type="file" accept="image/*"
+                        className="hidden"
+                        onChange={e => setNewPlayerPhoto(e.target.files?.[0] || null)}
+                      />
+                      {photoPreviewUrl && (
+                        <img src={photoPreviewUrl} alt="Preview" width={72} height={72} className="w-[72px] h-[72px] object-cover border border-[#24262B] mt-3" />
+                      )}
+                    </div>
 
                     <button
-                      className="md-add-btn"
                       onClick={addNewPlayer}
                       disabled={addingPlayer || !newPlayerName.trim()}
+                      className="w-full flex items-center justify-center gap-2 py-3 bg-[#E11D2E] hover:bg-[#8C1220] disabled:opacity-40 disabled:cursor-not-allowed text-white font-display font-bold text-[12px] tracking-wide"
                     >
                       {addingPlayer
-                        ? <><span className="md-spinner-sm" /> Adding...</>
-                        : <><FaPlus size={10} /> Add Player</>
+                        ? <><span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Adding…</>
+                        : <><FaPlus size={11} /> Add player</>
                       }
                     </button>
                   </div>
                 </div>
-              )}
-
-              <div className="md-modal-footer">
-                <button
-                  className="md-btn-cancel"
-                  onClick={() => { setEditingTeam(null); setNewPlayerName(''); setNewPlayerId(''); setNewPlayerPhoto(null); }}
-                >
-                  Cancel
-                </button>
-                <button className="md-btn-save" onClick={saveChangedPlayers} disabled={savingRoster}>
-                  {savingRoster
-                    ? <><span className="md-spinner-sm" /> Saving...</>
-                    : <><FaCheck size={11} /> Save Roster</>
-                  }
-                </button>
               </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 bg-[#0F1013] border-t border-[#24262B] shrink-0">
+              <button onClick={closeRosterModal} className="px-5 py-2.5 border border-[#24262B] text-[#93959C] text-sm font-medium hover:text-[#F4F2EE] hover:border-[#3a3d44]">
+                Cancel
+              </button>
+              <button
+                onClick={saveChangedPlayers}
+                disabled={savingRoster || selectedPlayers.length < 1 || selectedPlayers.length > 4}
+                className="flex items-center gap-2 px-5 py-2.5 bg-[#E11D2E] hover:bg-[#8C1220] disabled:opacity-40 disabled:cursor-not-allowed text-white font-display font-bold text-[12px] tracking-wide"
+              >
+                {savingRoster
+                  ? <><span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving…</>
+                  : <><FaCheck size={11} /> Save roster</>
+                }
+              </button>
             </div>
           </div>
-        )}
-      </div>
-    </>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-[300] flex items-center gap-2.5 px-4 py-3 bg-[#131418] border max-w-sm shadow-lg"
+          style={{ borderColor: toast.kind === 'error' ? '#E11D2E' : toast.kind === 'success' ? '#3a3d44' : '#24262B' }}
+        >
+          {toast.kind === 'error' && <FaExclamationTriangle className="text-[#E11D2E] shrink-0" size={14} />}
+          {toast.kind === 'success' && <FaCheckCircle className="text-[#F4F2EE] shrink-0" size={14} />}
+          {toast.kind === 'info' && <FaInfoCircle className="text-[#93959C] shrink-0" size={14} />}
+          <span className="text-[13px] text-[#F4F2EE]">{toast.msg}</span>
+        </div>
+      )}
+    </Shell>
   );
 };
+
+// Fonts + the one keyframe used for live-update pulses. Kept as a single
+// static <style> tag (same approach as the marketing page) so it's injected
+// once and never recomputed per render.
+const GlobalStyle: React.FC = () => (
+  <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap');
+    .font-display { font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; }
+    .font-sans { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+    @keyframes md-flash-pulse {
+      0%   { box-shadow: 0 0 0 1px rgba(225,29,46,0.9), 0 0 14px rgba(225,29,46,0.45); border-color: #E11D2E; background-color: rgba(225,29,46,0.08); }
+      100% { box-shadow: none; }
+    }
+    .flash-live { animation: md-flash-pulse 0.9s ease-out; }
+
+    a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 2px solid #E11D2E; outline-offset: 2px;
+    }
+  `}</style>
+);
 
 export default MatchDataViewer;

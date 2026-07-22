@@ -492,7 +492,7 @@ const GroupCard = React.memo(function GroupCard({
 // ── Main Component ─────────────────────────────────────────────────────────────
 const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref) => {
   const { tournamentId } = useParams<{ tournamentId: string }>();
-
+const [groupName, setGroupName] = useState("");
   const [showForm, setShowForm]       = useState(false);
   const [teams, setTeams]             = useState<Team[]>([]);
   const [selectedTeams, setSelectedTeams] = useState<SelectedTeam[]>([]);
@@ -551,7 +551,7 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
   }, [loadInitialData]);
 
   const clearForm = () => {
-    if (groupNameRef.current) groupNameRef.current.value = "";
+   setGroupName("");
     setSelectedTeams([]);
     setEditingGroupId(null);
     setSearchTerm("");
@@ -574,7 +574,7 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
   }, []);
 
   const openFormForEditGroup = useCallback((group: Group) => {
-    if (groupNameRef.current) groupNameRef.current.value = group.groupName;
+   setGroupName(group.groupName);
     setSelectedTeams((group.slots || []).filter((s): s is Slot & { team: Team } => !!s.team).map(s => ({ teamId: s.team._id, slot: s.slot })));
     setEditingGroupId(group._id);
     setActiveStep(1);
@@ -584,7 +584,7 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
 
   const handleSubmit = async () => {
     if (submittingRef.current) return; // hard stop against rapid double-clicks
-    const name = groupNameRef.current?.value || "";
+ const name = groupName;
     if (!name.trim()) { setActiveStep(2); alert("Group name is required."); return; }
     if (selectedTeams.length === 0) { alert("Select at least one team."); return; }
     for (const t of selectedTeams) {
@@ -807,7 +807,13 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
               <div className="gx-panel">
                 <div className="gx-panel-hdr">
                   <div className="gx-panel-label">Name &amp; assign slots</div>
-                  <input ref={groupNameRef} type="text" placeholder="Group name…" className="gx-group-name-input" />
+                 <input
+    type="text"
+    value={groupName}
+    onChange={(e) => setGroupName(e.target.value)}
+    placeholder="Group name…"
+    className="gx-group-name-input"
+/>
                 </div>
 
                 <div className="gx-slots-wrap">

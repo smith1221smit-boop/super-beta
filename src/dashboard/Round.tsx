@@ -43,13 +43,27 @@ const STYLES = `
 /* ── Buttons ── */
 .rd-btn-primary { display: inline-flex; align-items: center; gap: 8px; background: #E11D2E; color: #fff; border: 1px solid #E11D2E; font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700; padding: 11px 20px; cursor: pointer; }
 .rd-btn-primary:hover { background: #F4F2EE; color: #0B0C0E; border-color: #F4F2EE; }
+.rd-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.rd-btn-primary:disabled:hover { background: #E11D2E; color: #fff; border-color: #E11D2E; }
 .rd-btn-ghost { display: inline-flex; align-items: center; gap: 8px; background: transparent; color: #93959C; border: 1px solid #24262B; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; padding: 10px 18px; cursor: pointer; }
 .rd-btn-ghost:hover { border-color: #E11D2E; color: #F4F2EE; }
 .rd-btn-cancel { background: transparent; color: #93959C; border: 1px solid #24262B; font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 600; padding: 10px 18px; cursor: pointer; }
 .rd-btn-cancel:hover { border-color: #55565C; color: #F4F2EE; }
+.rd-btn-cancel:disabled { opacity: 0.5; cursor: not-allowed; }
 .rd-icon-btn { width: 32px; height: 32px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: #131418; border: 1px solid #24262B; color: #93959C; cursor: pointer; }
 .rd-icon-btn:hover { border-color: #F4F2EE; color: #F4F2EE; }
 .rd-icon-btn.danger:hover { border-color: #E11D2E; color: #E11D2E; }
+.rd-icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Button spinner ── */
+.rd-btn-spinner {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: rd-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
 
 /* ── Stats bar ── */
 .rd-statsbar { display: flex; gap: 10px; margin-bottom: 26px; flex-wrap: wrap; }
@@ -104,6 +118,7 @@ const STYLES = `
 .rd-input { width: 100%; padding: 11px 13px; background: #131418; border: 1px solid #24262B; color: #F4F2EE; font-family: 'Inter', sans-serif; font-size: 14px; outline: none; }
 .rd-input::placeholder { color: #55565C; }
 .rd-input:focus { border-color: #E11D2E; }
+.rd-input:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .rd-toggle { display: flex; align-items: center; gap: 10px; padding: 11px 13px; background: #131418; border: 1px solid #24262B; cursor: pointer; }
 .rd-toggle.on { border-color: rgba(225,29,46,0.5); background: rgba(225,29,46,0.06); }
@@ -111,6 +126,8 @@ const STYLES = `
 .rd-toggle span { font-size: 14px; font-weight: 600; color: #F4F2EE; }
 
 .rd-modal-actions { display: flex; gap: 10px; margin-top: 22px; padding-top: 18px; border-top: 1px solid #24262B; }
+
+@keyframes rd-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 560px) {
   .rd-header { align-items: flex-start; }
@@ -137,6 +154,7 @@ const Round: React.FC = () => {
   const [roundNumber, setRoundNumber] = useState<number>(1);
   const [day, setDay] = useState('');
   const [apiEnable, setApiEnable] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Edit states
   const [editRoundId, setEditRoundId] = useState<string | null>(null);
@@ -144,6 +162,10 @@ const Round: React.FC = () => {
   const [editRoundNumber, setEditRoundNumber] = useState<number>(1);
   const [editDay, setEditDay] = useState('');
   const [editApiEnable, setEditApiEnable] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  // Track per-row delete-in-flight so only the clicked row's button spins
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchRounds = useCallback(async () => {
     setLoading(true);
@@ -181,26 +203,43 @@ const Round: React.FC = () => {
     setApiEnable(false);
   };
 
-  const closeAddModal = () => setShowAddModal(false);
+  const closeAddModal = () => {
+    if (isSaving) return; // don't let the user dismiss mid-save
+    setShowAddModal(false);
+  };
 
+  // ── Optimized create: uses the server's returned round directly instead
+  // of re-fetching the whole list. If this round turned apiEnable on, we
+  // mirror that locally by clearing apiEnable on every other round, since
+  // the backend enforces only one active round per user/tournament.
   const handleAddRound = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!roundName) return;
+    if (!roundName || isSaving) return;
+    setIsSaving(true);
     try {
       const url = tournamentId
         ? `/tournaments/${tournamentId}/rounds`
         : '/tournaments/undefined/rounds';
-      await api.post(url, { roundName, roundNumber, day, apiEnable });
-      sessionStorage.removeItem(cacheKey);
-      await fetchRounds();
+      const { data: newRound } = await api.post(url, { roundName, roundNumber, day, apiEnable });
+
+      setRounds(prev => {
+        const base = apiEnable ? prev.map(r => ({ ...r, apiEnable: false })) : prev;
+        const next = [newRound, ...base];
+        sessionStorage.setItem(cacheKey, JSON.stringify(next));
+        return next;
+      });
+
       closeAddModal();
     } catch (err: any) {
       alert(err.message || 'Error creating round');
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleDelete = async (roundId: string) => {
     if (!window.confirm('Are you sure you want to delete this round?')) return;
+    setDeletingId(roundId);
     try {
       const url = tournamentId
         ? `/tournaments/${tournamentId}/rounds/${roundId}`
@@ -211,6 +250,8 @@ const Round: React.FC = () => {
       sessionStorage.setItem(cacheKey, JSON.stringify(updatedRounds));
     } catch (err: any) {
       alert(err.message || 'Error deleting round');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -222,26 +263,43 @@ const Round: React.FC = () => {
     setEditApiEnable(round.apiEnable || false);
   };
 
-  const closeEditModal = () => setEditRoundId(null);
+  const closeEditModal = () => {
+    if (isUpdating) return;
+    setEditRoundId(null);
+  };
 
+  // ── Optimized update: same idea — apply the server's returned round
+  // directly, and mirror the "only one apiEnable at a time" rule locally.
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editRoundId) return;
+    if (!editRoundId || isUpdating) return;
+    setIsUpdating(true);
     try {
       const url = tournamentId
         ? `/tournaments/${tournamentId}/rounds/${editRoundId}`
         : `/rounds/${editRoundId}`;
-      await api.put(url, {
+      const { data: updated } = await api.put(url, {
         roundName: editRoundName,
         roundNumber: editRoundNumber,
         day: editDay,
         apiEnable: editApiEnable,
       });
-      sessionStorage.removeItem(cacheKey);
-      await fetchRounds();
+
+      setRounds(prev => {
+        const next = prev.map(r => {
+          if (r._id === updated._id) return updated;
+          if (updated.apiEnable && r.apiEnable) return { ...r, apiEnable: false };
+          return r;
+        });
+        sessionStorage.setItem(cacheKey, JSON.stringify(next));
+        return next;
+      });
+
       setEditRoundId(null);
     } catch (err: any) {
       alert(err.message || 'Error updating round');
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -254,7 +312,6 @@ const Round: React.FC = () => {
         <style>{STYLES}</style>
         <div className="rd-root rd-loading">
           <div className="rd-spinner" style={{ animation: 'rd-spin 0.9s linear infinite' }} />
-          <style>{`@keyframes rd-spin { to { transform: rotate(360deg); } }`}</style>
           <p className="rd-loading-text">LOADING ROUNDS…</p>
         </div>
       </>
@@ -354,11 +411,27 @@ const Round: React.FC = () => {
                     </div>
 
                     <div className="rd-actions">
-                      <button className="rd-icon-btn" onClick={() => handleEditClick(round)} aria-label="Edit round" title="Edit">
+                      <button
+                        className="rd-icon-btn"
+                        onClick={() => handleEditClick(round)}
+                        aria-label="Edit round"
+                        title="Edit"
+                        disabled={deletingId === round._id}
+                      >
                         <FaEdit size={12} />
                       </button>
-                      <button className="rd-icon-btn danger" onClick={() => handleDelete(round._id)} aria-label="Delete round" title="Delete">
-                        <FaTrash size={12} />
+                      <button
+                        className="rd-icon-btn danger"
+                        onClick={() => handleDelete(round._id)}
+                        aria-label="Delete round"
+                        title="Delete"
+                        disabled={deletingId === round._id}
+                      >
+                        {deletingId === round._id ? (
+                          <span className="rd-btn-spinner" style={{ borderColor: 'rgba(225,29,46,0.35)', borderTopColor: '#E11D2E' }} />
+                        ) : (
+                          <FaTrash size={12} />
+                        )}
                       </button>
                     </div>
                   </div>
@@ -391,62 +464,65 @@ const Round: React.FC = () => {
                     {t('rounds.addNewRound')}
                   </span>
                 </div>
-                <button className="rd-icon-btn" onClick={closeAddModal} aria-label="Close"><FaTimes size={13} /></button>
+                <button className="rd-icon-btn" onClick={closeAddModal} aria-label="Close" disabled={isSaving}><FaTimes size={13} /></button>
               </div>
 
               <div className="rd-modal-body">
                 <form onSubmit={handleAddRound}>
-                  <div className="rd-fields">
-                    <div>
-                      <p className="rd-field-label">{t('rounds.roundName')}</p>
-                      <input
-                        type="text"
-                        placeholder="e.g. Grand Finals"
-                        value={roundName}
-                        onChange={e => setRoundName(e.target.value)}
-                        className="rd-input"
-                        autoFocus
-                        required
-                      />
+                  <fieldset disabled={isSaving} style={{ border: 'none', padding: 0, margin: 0 }}>
+                    <div className="rd-fields">
+                      <div>
+                        <p className="rd-field-label">{t('rounds.roundName')}</p>
+                        <input
+                          type="text"
+                          placeholder="e.g. Grand Finals"
+                          value={roundName}
+                          onChange={e => setRoundName(e.target.value)}
+                          className="rd-input"
+                          autoFocus
+                          required
+                        />
+                      </div>
+                      <div>
+                        <p className="rd-field-label">Round number</p>
+                        <input
+                          type="number"
+                          min={1}
+                          value={roundNumber}
+                          onChange={e => setRoundNumber(parseInt(e.target.value, 10) || 1)}
+                          className="rd-input"
+                        />
+                      </div>
+                      <div>
+                        <p className="rd-field-label">{t('rounds.day')}</p>
+                        <input
+                          type="text"
+                          placeholder="e.g. Day 1"
+                          value={day}
+                          onChange={e => setDay(e.target.value)}
+                          className="rd-input"
+                        />
+                      </div>
+                      <label className={`rd-toggle${apiEnable ? ' on' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={apiEnable}
+                          onChange={e => setApiEnable(e.target.checked)}
+                        />
+                        <span>{t('rounds.enableApi')}</span>
+                      </label>
                     </div>
-                    <div>
-                      <p className="rd-field-label">Round number</p>
-                      <input
-                        type="number"
-                        min={1}
-                        value={roundNumber}
-                        onChange={e => setRoundNumber(parseInt(e.target.value, 10) || 1)}
-                        className="rd-input"
-                      />
-                    </div>
-                    <div>
-                      <p className="rd-field-label">{t('rounds.day')}</p>
-                      <input
-                        type="text"
-                        placeholder="e.g. Day 1"
-                        value={day}
-                        onChange={e => setDay(e.target.value)}
-                        className="rd-input"
-                      />
-                    </div>
-                    <label className={`rd-toggle${apiEnable ? ' on' : ''}`}>
-                      <input
-                        type="checkbox"
-                        checked={apiEnable}
-                        onChange={e => setApiEnable(e.target.checked)}
-                      />
-                      <span>{t('rounds.enableApi')}</span>
-                    </label>
-                  </div>
 
-                  <div className="rd-modal-actions">
-                    <button type="button" className="rd-btn-cancel" style={{ flex: 1 }} onClick={closeAddModal}>
-                      {t('rounds.cancel')}
-                    </button>
-                    <button type="submit" className="rd-btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
-                      {t('rounds.saveRound')}
-                    </button>
-                  </div>
+                    <div className="rd-modal-actions">
+                      <button type="button" className="rd-btn-cancel" style={{ flex: 1 }} onClick={closeAddModal} disabled={isSaving}>
+                        {t('rounds.cancel')}
+                      </button>
+                      <button type="submit" className="rd-btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={isSaving}>
+                        {isSaving ? <span className="rd-btn-spinner" /> : null}
+                        {isSaving ? t('rounds.saving') || 'Saving…' : t('rounds.saveRound')}
+                      </button>
+                    </div>
+                  </fieldset>
                 </form>
               </div>
             </div>
@@ -464,52 +540,55 @@ const Round: React.FC = () => {
                     {t('rounds.saveChanges')}
                   </span>
                 </div>
-                <button className="rd-icon-btn" onClick={closeEditModal} aria-label="Close"><FaTimes size={13} /></button>
+                <button className="rd-icon-btn" onClick={closeEditModal} aria-label="Close" disabled={isUpdating}><FaTimes size={13} /></button>
               </div>
 
               <div className="rd-modal-body">
                 <form onSubmit={handleUpdate}>
-                  <div className="rd-fields">
-                    <div>
-                      <p className="rd-field-label">{t('rounds.name')}</p>
-                      <input
-                        type="text"
-                        value={editRoundName}
-                        onChange={e => setEditRoundName(e.target.value)}
-                        className="rd-input"
-                        placeholder="Round name"
-                        autoFocus
-                        required
-                      />
+                  <fieldset disabled={isUpdating} style={{ border: 'none', padding: 0, margin: 0 }}>
+                    <div className="rd-fields">
+                      <div>
+                        <p className="rd-field-label">{t('rounds.name')}</p>
+                        <input
+                          type="text"
+                          value={editRoundName}
+                          onChange={e => setEditRoundName(e.target.value)}
+                          className="rd-input"
+                          placeholder="Round name"
+                          autoFocus
+                          required
+                        />
+                      </div>
+                      <div>
+                        <p className="rd-field-label">{t('rounds.day')}</p>
+                        <input
+                          type="text"
+                          value={editDay}
+                          onChange={e => setEditDay(e.target.value)}
+                          className="rd-input"
+                          placeholder="e.g. Day 1"
+                        />
+                      </div>
+                      <label className={`rd-toggle${editApiEnable ? ' on' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={editApiEnable}
+                          onChange={e => setEditApiEnable(e.target.checked)}
+                        />
+                        <span>{t('rounds.enableApi')}</span>
+                      </label>
                     </div>
-                    <div>
-                      <p className="rd-field-label">{t('rounds.day')}</p>
-                      <input
-                        type="text"
-                        value={editDay}
-                        onChange={e => setEditDay(e.target.value)}
-                        className="rd-input"
-                        placeholder="e.g. Day 1"
-                      />
-                    </div>
-                    <label className={`rd-toggle${editApiEnable ? ' on' : ''}`}>
-                      <input
-                        type="checkbox"
-                        checked={editApiEnable}
-                        onChange={e => setEditApiEnable(e.target.checked)}
-                      />
-                      <span>{t('rounds.enableApi')}</span>
-                    </label>
-                  </div>
 
-                  <div className="rd-modal-actions">
-                    <button type="button" className="rd-btn-cancel" style={{ flex: 1 }} onClick={closeEditModal}>
-                      {t('rounds.cancel')}
-                    </button>
-                    <button type="submit" className="rd-btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
-                      {t('rounds.saveChanges')}
-                    </button>
-                  </div>
+                    <div className="rd-modal-actions">
+                      <button type="button" className="rd-btn-cancel" style={{ flex: 1 }} onClick={closeEditModal} disabled={isUpdating}>
+                        {t('rounds.cancel')}
+                      </button>
+                      <button type="submit" className="rd-btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={isUpdating}>
+                        {isUpdating ? <span className="rd-btn-spinner" /> : null}
+                        {isUpdating ? t('saving changes') || 'Saving…' : t('rounds.saveChanges')}
+                      </button>
+                    </div>
+                  </fieldset>
                 </form>
               </div>
             </div>

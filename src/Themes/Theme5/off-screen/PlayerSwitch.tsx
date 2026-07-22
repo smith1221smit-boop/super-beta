@@ -46,11 +46,20 @@ const PlayerSwitch: React.FC<PlayerSwitchProps> = ({ match, matchData, loading, 
   if (!matchData?.teams) return;
 
   const validTeams = matchData.teams
-    .map(team => ({
-      ...team,
-      players: team.players.filter(p => p.picUrl && p.picUrl.trim() !== ''),
-    }))
-    .filter(team => team.players.length > 0);
+  .map(team => ({
+    ...team,
+    players: team.players.filter((p) => {
+      const img = p.picUrl?.toLowerCase().trim() || "";
+
+      return (
+        img &&
+        !img.includes("def_char") &&
+        !img.includes("default") &&
+        !imageErrors[p.uId]
+      );
+    }),
+  }))
+  .filter(team => team.players.length > 0);
 
   if (validTeams.length < 2) return;
 
@@ -82,7 +91,7 @@ const PlayerSwitch: React.FC<PlayerSwitchProps> = ({ match, matchData, loading, 
 
   setPlayerPairs(pairs);
   setCurrentPairIndex(0);
-}, [matchData]);
+}, [matchData, imageErrors]);
 
   // Auto-cycle through pairs every 5 seconds
   useEffect(() => {
@@ -95,16 +104,14 @@ const PlayerSwitch: React.FC<PlayerSwitchProps> = ({ match, matchData, loading, 
     return () => clearInterval(interval);
   }, [playerPairs]);
 
-  const handleImageError = (playerId: string) => {
-    setImageErrors(prev => ({ ...prev, [playerId]: true }));
-  };
+const handleImageError = (playerId: string) => {
+  setImageErrors(prev => ({
+    ...prev,
+    [playerId]: true,
+  }));
+};
 
-  const getPlayerImage = (player: Player) => {
-    if (imageErrors[player.uId]) {
-      return '/def_char.png';
-    }
-    return player.picUrl || '/def_char.png';
-  };
+ const getPlayerImage = (player: Player) => player.picUrl!;
 
   if (loading) {
     return (
@@ -185,7 +192,7 @@ const PlayerSwitch: React.FC<PlayerSwitchProps> = ({ match, matchData, loading, 
               duration: 0.8,
               ease: [0.6, 0.05, 0.01, 0.9]
             }}
-            className='absolute right-[200px] top-[100px]'
+     className='absolute right-[-260px] top-[100px]  flex justify-center items-center'
             style={{ 
               width: '900px', 
               height: '100%', 
@@ -204,19 +211,7 @@ const PlayerSwitch: React.FC<PlayerSwitchProps> = ({ match, matchData, loading, 
           </motion.div>
         </AnimatePresence>
         
-        {/* Player Info Overlay */}
-        <div style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          background: 'linear-gradient(to top, rgba(0, 0, 0, 1), transparent)',
-          padding: '60px',
-          color: '#fff'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          </div>
-        </div>
+        
       </div>
 
       {/* Right Player */}
@@ -235,7 +230,7 @@ const PlayerSwitch: React.FC<PlayerSwitchProps> = ({ match, matchData, loading, 
               duration: 0.8,
               ease: [0.6, 0.05, 0.01, 0.9]
             }}
-            className='absolute left-[200px] top-[100px]'
+            className='absolute left-[-100px] top-[100px]  flex justify-center items-center'
             style={{ 
               width: '900px', 
               height: '100%', 
@@ -254,19 +249,7 @@ const PlayerSwitch: React.FC<PlayerSwitchProps> = ({ match, matchData, loading, 
           </motion.div>
         </AnimatePresence>
         
-        {/* Player Info Overlay */}
-        <div style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          background: 'linear-gradient(to top, rgba(0,0,0,0.9), transparent)',
-          padding: '60px',
-          color: '#fff'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '15px', justifyContent: 'flex-end' }}>
-          </div>
-        </div>
+       
       </div>
     </div>
   );

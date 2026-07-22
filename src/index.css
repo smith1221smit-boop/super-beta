@@ -7,7 +7,7 @@
 
 @font-face {
     font-family: "PaybAck";
-    src: url("./assets/fonts/PaybAck.ttf") format("truetype");
+    src: url("./assets/fonts/PaybAck.woff2") format("woff2");
     font-weight: normal;
     font-style: normal;
     font-display: swap;
@@ -16,7 +16,7 @@
 /* New Awaking font */
 @font-face {
     font-family: "Awaking";
-    src: url("./assets/fonts/AWAKENNING.ttf") format("truetype");
+    src: url("./assets/fonts/AWAKENNING.woff2") format("woff2");
     font-weight: normal;
     font-style: normal;
     font-display: swap;
@@ -25,7 +25,7 @@
 /* New Awaking font */
 @font-face {
     font-family: "Supermolot";
-    src: url("./assets/fonts/Supermolot.ttf") format("truetype");
+    src: url("./assets/fonts/Supermolot.woff2") format("woff2");
     font-weight: normal;
     font-style: normal;
     font-display: swap;
@@ -43,7 +43,7 @@
 /* New Awaking font */
 @font-face {
     font-family: "Tungsten";
-    src: url("./assets/fonts/Tungsten.ttf") format("truetype");
+    src: url("./assets/fonts/Tungsten.woff2") format("woff2");
     font-weight: normal;
     font-style: normal;
     font-display: swap;
@@ -53,7 +53,7 @@
 /* New Awaking font */
 @font-face {
     font-family: "Bebas";
-    src: url("./assets/fonts/Bebas.ttf") format("truetype");
+    src: url("./assets/fonts/Bebas.woff2") format("woff2");
     font-weight: normal;
     font-style: normal;
     font-display: swap;

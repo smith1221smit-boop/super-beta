@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import api from '../login/api.tsx';
+import SocketManager from '../dashboard/socketManager.tsx';
 
 // Import theme components
 import Lower from '../Themes/Theme1/on-screen/Lower.tsx';
@@ -30,8 +31,6 @@ import MapPreview from '../Themes/Theme1/off-screen/mapPreview.tsx'
 import Slots from '../Themes/Theme1/off-screen/slots.tsx'
 import RosterShowCase from '../Themes/Theme4/off-screen/RosterShowCase.tsx'
 import PlayerSwitch from '../Themes/Theme4/off-screen/PlayerSwitch.tsx'
-
-// Theme2 imports removed
 
 // Theme3 imports
 import Lower3 from '../Themes/Theme3/on-screen/Lower.tsx';
@@ -148,7 +147,7 @@ import TeamH2H6 from '../Themes/Theme6/off-screen/teamh2h.tsx'
 import ZoneClose6 from '../Themes/Theme6/on-screen/zoneClose.tsx'
 import Intro6 from '../Themes/Theme6/on-screen/intro.tsx'
 import MapPreview6 from '../Themes/Theme6/off-screen/mapPreview.tsx'
-import Slots6 from '../Themes/Theme6/off-screen/slots.tsx'  
+import Slots6 from '../Themes/Theme6/off-screen/slots.tsx'
 import Achieve6 from '../Themes/Theme6/on-screen/Achieve.tsx'
 import Mvp6 from '../Themes/Theme6/off-screen/mvp.tsx'
 import HighlightPoints6 from '../Themes/Theme6/off-screen/HighlightPoints.tsx'
@@ -199,13 +198,6 @@ interface OverallData {
   createdAt: string;
 }
 
-interface MatchData {
-    _id: string;
-    matchId: string;
-    userId: string;
-    teams: any[];
-}
-
 interface BackpackInfo {
     userId: string;
     tournamentId: string;
@@ -217,14 +209,33 @@ interface BackpackInfo {
     };
 }
 
-interface Match {
-  _id: string;
-  matchName?: string;
-  matchNo?: number;
-  _matchNo?: number;
-}
+/* --------------------------------------------------------------------
+   The bulk endpoint (public/bulk/:tournamentId/:roundId/:matchId) always
+   returns tournament, round, matches, matchDatas, currentMatchData and
+   overallData in one shot — so the view no longer needs to tell the
+   fetch layer what to ask for. The only thing bulk doesn't return today
+   is backpack info, so that's the one call still gated by view.
+-------------------------------------------------------------------- */
+const VIEWS_NEEDING_BACKPACK = new Set(['Upper']);
 
 const PublicThemeRenderer: React.FC = () => {
+  // Module-level cache shared across all mounts of this component in the
+  // current tab session — survives view switches and re-mounts, cleared
+  // only on a hard page reload. Doesn't touch the backend at all; just
+  // stops re-requesting data we already have.
+  const cacheRef = useRef<Map<string, any>>((PublicThemeRenderer as any)._cache ||= new Map());
+
+  const cachedGet = async (url: string, signal: AbortSignal, ttlMs = 5000) => {
+    const cache = cacheRef.current;
+    const hit = cache.get(url);
+    if (hit && Date.now() - hit.time < ttlMs) {
+      return hit.response;
+    }
+    const response = await api.get(url, { signal });
+    cache.set(url, { response, time: Date.now() });
+    return response;
+  };
+
   const { tournamentId, roundId, matchId } = useParams<{
     tournamentId: string;
     roundId: string;
@@ -238,206 +249,76 @@ const PublicThemeRenderer: React.FC = () => {
 
   const themes = {
     Theme1: {
-      Lower: Lower,
-      Upper: Upper,
-      Dom: Dom,
-      Alerts: Alerts,
-      LiveStats: LiveStats,
-      LiveFrags: LiveFrags,
-      MatchData: MatchData,
-      MatchFragrs: MatchFragrs,
-      WwcdSummary: WwcdSummary,
-      WwcdStats: WwcdStats,
-      OverallData: OverallData,
-      OverallFrags: OverallFrags,
-      Schedule: Schedule,
-      CommingUpNext: CommingUpNext,
-      Champions: Champions,
-      FirstRunnerUp: FirstRunnerUp,
-      SecondRunnerUp: SecondRunnerUp,
-      EventMvp: EventMvp,
-      MatchSummary: MatchSummary,
-      PlayerH2H: PlayerH2H,
-      TeamH2H: TeamH2H,
-      ZoneClose: ZoneClose,
-      Intro: Intro,
-      MapPreview: MapPreview,
-      Slots: Slots,
-      Mvp: MatchFragrs,
-      HighlightPoints: OverallData,
-      HighlightSchedule: Schedule,
+      Lower: Lower, Upper: Upper, Dom: Dom, Alerts: Alerts, LiveStats: LiveStats,
+      LiveFrags: LiveFrags, MatchData: MatchData, MatchFragrs: MatchFragrs,
+      WwcdSummary: WwcdSummary, WwcdStats: WwcdStats, OverallData: OverallData,
+      OverallFrags: OverallFrags, Schedule: Schedule, CommingUpNext: CommingUpNext,
+      Champions: Champions, FirstRunnerUp: FirstRunnerUp, SecondRunnerUp: SecondRunnerUp,
+      EventMvp: EventMvp, MatchSummary: MatchSummary, PlayerH2H: PlayerH2H, TeamH2H: TeamH2H,
+      ZoneClose: ZoneClose, Intro: Intro, MapPreview: MapPreview, Slots: Slots,
+      Mvp: MatchFragrs, HighlightPoints: OverallData, HighlightSchedule: Schedule,
       RosterShowCase: RosterShowCase,
     },
-    
     Theme3: {
-      Lower: Lower3,
-      Upper: Upper3,
-      Dom: Dom3,
-      Alerts: Alerts3,
-      LiveStats: LiveStats3,
-      LiveFrags: LiveFrags3,
-      MatchData: MatchData3,
-      MatchFragrs: MatchFragrs3,
-      WwcdSummary: WwcdSummary3,
-      WwcdStats: WwcdStats3,
-      OverallData: OverallData3,
-      OverallFrags: OverallFrags3,
-      Schedule: Schedule3,
-      CommingUpNext: CommingUpNext3,
-      Champions: Champions3,
-      FirstRunnerUp: FirstRunnerUp3,
-      SecondRunnerUp: SecondRunnerUp3,
-      EventMvp: EventMvp3,
-      MatchSummary: MatchSummary3,
-      PlayerH2H: PlayerH2H3,
-      TeamH2H: TeamH2H3,
-      ZoneClose: ZoneClose3,
-      Intro: Intro3,
-      MapPreview: MapPreview3,
-      Slots: Slots3,
-      Mvp: MatchFragrs3,
-      HighlightPoints: OverallData3,
-      HighlightSchedule: Schedule3,
-      RosterShowCase: RosterShowCase,
-      PlayerSwitch: null,
+      Lower: Lower3, Upper: Upper3, Dom: Dom3, Alerts: Alerts3, LiveStats: LiveStats3,
+      LiveFrags: LiveFrags3, MatchData: MatchData3, MatchFragrs: MatchFragrs3,
+      WwcdSummary: WwcdSummary3, WwcdStats: WwcdStats3, OverallData: OverallData3,
+      OverallFrags: OverallFrags3, Schedule: Schedule3, CommingUpNext: CommingUpNext3,
+      Champions: Champions3, FirstRunnerUp: FirstRunnerUp3, SecondRunnerUp: SecondRunnerUp3,
+      EventMvp: EventMvp3, MatchSummary: MatchSummary3, PlayerH2H: PlayerH2H3, TeamH2H: TeamH2H3,
+      ZoneClose: ZoneClose3, Intro: Intro3, MapPreview: MapPreview3, Slots: Slots3,
+      Mvp: MatchFragrs3, HighlightPoints: OverallData3, HighlightSchedule: Schedule3,
+      RosterShowCase: RosterShowCase, PlayerSwitch: null,
     },
     Theme4: {
-      Lower: Lower4,
-      Upper: Upper4,
-      Dom: Dom4,
-      Alerts: Alerts4,
-      LiveStats: LiveStats4,
-      LiveFrags: LiveFrags4,
-      MatchData: MatchData4,
-      MatchFragrs: MatchFragrs4,
-      WwcdSummary: WwcdSummary4,
-      WwcdStats: WwcdStats4,
-      OverallData: OverallData4,
-      OverallFrags: OverallFrags4,
-      Schedule: Schedule4,
-      CommingUpNext: CommingUpNext4,
-      Champions: Champions4,
-      FirstRunnerUp: FirstRunnerUp4,
-      SecondRunnerUp: SecondRunnerUp4,
-      EventMvp: EventMvp4,
-      MatchSummary: MatchSummary4,
-      PlayerH2H: PlayerH2H4,
-      TeamH2H: TeamH2H4,
-      ZoneClose: ZoneClose4,
-      Intro: Intro4,
-      MapPreview: MapPreview4,
-      Slots: Slots4,
-      Mvp: Mvp,
-      HighlightPoints: HighlightPoints,
-      HighlightSchedule: HighlightSchedule,
-      RosterShowCase: RosterShowCase,
-      PlayerSwitch: PlayerSwitch,
+      Lower: Lower4, Upper: Upper4, Dom: Dom4, Alerts: Alerts4, LiveStats: LiveStats4,
+      LiveFrags: LiveFrags4, MatchData: MatchData4, MatchFragrs: MatchFragrs4,
+      WwcdSummary: WwcdSummary4, WwcdStats: WwcdStats4, OverallData: OverallData4,
+      OverallFrags: OverallFrags4, Schedule: Schedule4, CommingUpNext: CommingUpNext4,
+      Champions: Champions4, FirstRunnerUp: FirstRunnerUp4, SecondRunnerUp: SecondRunnerUp4,
+      EventMvp: EventMvp4, MatchSummary: MatchSummary4, PlayerH2H: PlayerH2H4, TeamH2H: TeamH2H4,
+      ZoneClose: ZoneClose4, Intro: Intro4, MapPreview: MapPreview4, Slots: Slots4,
+      Mvp: Mvp, HighlightPoints: HighlightPoints, HighlightSchedule: HighlightSchedule,
+      RosterShowCase: RosterShowCase, PlayerSwitch: PlayerSwitch,
     },
     Theme5: {
-      Lower: Lower5,
-      Upper: Upper5,
-      Dom: Dom5,
-      Alerts: Alerts5,
-      LiveStats: LiveStats5,
-      LiveFrags: LiveFrags5,
-      MatchData: MatchData5,
-      MatchFragrs: MatchFragrs5,
-      WwcdSummary: WwcdSummary5,
-      WwcdStats: WwcdStats5,
-      OverallData: OverallData5,
-      OverallFrags: OverallFrags5,
-      Schedule: Schedule5,
-      CommingUpNext: CommingUpNext5,
-      Champions: Champions5,
-      FirstRunnerUp: FirstRunnerUp5,
-      SecondRunnerUp: SecondRunnerUp5,
-      EventMvp: EventMvp5,
-      MatchSummary: MatchSummary5,
-      PlayerH2H: PlayerH2H5,
-      TeamH2H: TeamH2H5,
-      ZoneClose: ZoneClose5,
-      Intro: Intro5,
-      MapPreview: MapPreview5,
-      Slots: Slots5,
-      Mvp: Mvp5,
-      HighlightPoints: HighlightPoints5,
-      HighlightSchedule: HighlightSchedule5,
-      RosterShowCase: RosterShowCase5,
-      PlayerSwitch: PlayerSwitch5,
-      TopFragger: TopFragger5,
+      Lower: Lower5, Upper: Upper5, Dom: Dom5, Alerts: Alerts5, LiveStats: LiveStats5,
+      LiveFrags: LiveFrags5, MatchData: MatchData5, MatchFragrs: MatchFragrs5,
+      WwcdSummary: WwcdSummary5, WwcdStats: WwcdStats5, OverallData: OverallData5,
+      OverallFrags: OverallFrags5, Schedule: Schedule5, CommingUpNext: CommingUpNext5,
+      Champions: Champions5, FirstRunnerUp: FirstRunnerUp5, SecondRunnerUp: SecondRunnerUp5,
+      EventMvp: EventMvp5, MatchSummary: MatchSummary5, PlayerH2H: PlayerH2H5, TeamH2H: TeamH2H5,
+      ZoneClose: ZoneClose5, Intro: Intro5, MapPreview: MapPreview5, Slots: Slots5,
+      Mvp: Mvp5, HighlightPoints: HighlightPoints5, HighlightSchedule: HighlightSchedule5,
+      RosterShowCase: RosterShowCase5, PlayerSwitch: PlayerSwitch5, TopFragger: TopFragger5,
     },
     Theme6: {
-      Lower: Lower6,
-      Upper: Upper6,
-      Dom: Dom6,
-      Alerts: Alerts6,
-      LiveStats: LiveStats6,
-      LiveFrags: LiveFrags6,
-      MatchData: MatchData6,
-      MatchFragrs: MatchFragrs6,
-      WwcdSummary: WwcdSummary6,
-      WwcdStats: WwcdStats6,
-      OverallData: OverallData6,
-      OverallFrags: OverallFrags6,
-      Schedule: Schedule6,
-      CommingUpNext: CommingUpNext6,
-      Champions: Champions6,
-      FirstRunnerUp: FirstRunnerUp6,
-      SecondRunnerUp: SecondRunnerUp6,
-      EventMvp: EventMvp6,
-      MatchSummary: MatchSummary6,
-      PlayerH2H: PlayerH2H6,
-      TeamH2H: TeamH2H6,
-      ZoneClose: ZoneClose6,
-      Intro: Intro6,
-      MapPreview: MapPreview6,
-      Slots: Slots6,
-      Achive: Achieve6,
-      Mvp: Mvp6,
-      HighlightPoints: HighlightPoints6,
-      HighlightSchedule: HighlightSchedule6,
-      RosterShowCase: RosterShowCase6,
-      PlayerSwitch: PlayerSwitch6,
-      TopFragger: TopFragger6,
+      Lower: Lower6, Upper: Upper6, Dom: Dom6, Alerts: Alerts6, LiveStats: LiveStats6,
+      LiveFrags: LiveFrags6, MatchData: MatchData6, MatchFragrs: MatchFragrs6,
+      WwcdSummary: WwcdSummary6, WwcdStats: WwcdStats6, OverallData: OverallData6,
+      OverallFrags: OverallFrags6, Schedule: Schedule6, CommingUpNext: CommingUpNext6,
+      Champions: Champions6, FirstRunnerUp: FirstRunnerUp6, SecondRunnerUp: SecondRunnerUp6,
+      EventMvp: EventMvp6, MatchSummary: MatchSummary6, PlayerH2H: PlayerH2H6, TeamH2H: TeamH2H6,
+      ZoneClose: ZoneClose6, Intro: Intro6, MapPreview: MapPreview6, Slots: Slots6,
+      Achive: Achieve6, Mvp: Mvp6, HighlightPoints: HighlightPoints6, HighlightSchedule: HighlightSchedule6,
+      RosterShowCase: RosterShowCase6, PlayerSwitch: PlayerSwitch6, TopFragger: TopFragger6,
       Battlebar: Battlebar,
     },
   };
-const activeTheme = themes[theme as 'Theme1'  | 'Theme3' | 'Theme4' | 'Theme5' | 'Theme6'] || themes['Theme1'];
 
+  const activeTheme = themes[theme as 'Theme1' | 'Theme3' | 'Theme4' | 'Theme5' | 'Theme6'] || themes['Theme1'];
 
   const {
-    Lower: LowerComp,
-    Upper: UpperComp,
-    Dom: DomComp,
-    Alerts: AlertsComp,
-    LiveStats: LiveStatsComp,
-    LiveFrags: LiveFragsComp,
-    MatchData: MatchDataComp,
-    MatchFragrs: MatchFragrsComp,
-    WwcdSummary: WwcdSummaryComp,
-    WwcdStats: WwcdStatsComp,
-    OverallData: OverallDataComp,
-    OverallFrags: OverallFragsComp,
-    Schedule: ScheduleComp,
-    CommingUpNext: CommingUpNextComp,
-    Champions: ChampionsComp,
-    FirstRunnerUp: FirstRunnerUpComp,
-    SecondRunnerUp: SecondRunnerUpComp,
-    EventMvp: EventMvpComp,
-    MatchSummary: MatchSummaryComp,
-    PlayerH2H: PlayerH2HComp,
-    TeamH2H: TeamH2HComp,
-    ZoneClose: ZoneCloseComp,
-    Intro: IntroComp,
-    MapPreview: MapPreviewComp,
-    Slots: SlotsComp,
-    Mvp: MvpComp,
-    Battlebar : BattlebarComp,
-      Achive: AchiveComp,
-    HighlightPoints: HighlightPointsComp,
-    HighlightSchedule: HighlightScheduleComp,
-    RosterShowCase: RosterShowCaseComp,
-    PlayerSwitch: PlayerSwitchComp,
+    Lower: LowerComp, Upper: UpperComp, Dom: DomComp, Alerts: AlertsComp, LiveStats: LiveStatsComp,
+    LiveFrags: LiveFragsComp, MatchData: MatchDataComp, MatchFragrs: MatchFragrsComp,
+    WwcdSummary: WwcdSummaryComp, WwcdStats: WwcdStatsComp, OverallData: OverallDataComp,
+    OverallFrags: OverallFragsComp, Schedule: ScheduleComp, CommingUpNext: CommingUpNextComp,
+    Champions: ChampionsComp, FirstRunnerUp: FirstRunnerUpComp, SecondRunnerUp: SecondRunnerUpComp,
+    EventMvp: EventMvpComp, MatchSummary: MatchSummaryComp, PlayerH2H: PlayerH2HComp,
+    TeamH2H: TeamH2HComp, ZoneClose: ZoneCloseComp, Intro: IntroComp, MapPreview: MapPreviewComp,
+    Slots: SlotsComp, Mvp: MvpComp, Battlebar: BattlebarComp, Achive: AchiveComp,
+    HighlightPoints: HighlightPointsComp, HighlightSchedule: HighlightScheduleComp,
+    RosterShowCase: RosterShowCaseComp, PlayerSwitch: PlayerSwitchComp,
   } = activeTheme as any;
 
   const [tournament, setTournament] = useState<Tournament | null>(null);
@@ -447,185 +328,169 @@ const activeTheme = themes[theme as 'Theme1'  | 'Theme3' | 'Theme4' | 'Theme5' |
   const [overallData, setOverallData] = useState<OverallData | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [matchDatas, setMatchDatas] = useState<MatchData[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [selectedScheduleMatches, setSelectedScheduleMatches] = useState<string[]>([]);
   const [backpackInfo, setBackpackInfo] = useState<BackpackInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!tournamentId || !roundId) return;
+  // Shared by the initial fetch and every live 'bulkUpdate' push, so the
+  // two paths can never drift out of sync with each other.
+  const applyBulkPayload = (bulk: any) => {
+    setTournament(bulk.tournamentData);
+    setRound(bulk.roundData);
+    setMatch(bulk.matchesData?.current ?? null);
+    setMatches(bulk.matchesData?.list ?? []);
+    setMatchData(bulk.currentMatchData?.matchData ?? null);
+    setOverallData(bulk.overallData ?? null);
+    setMatchDatas(
+      (bulk.matchDatasData ?? [])
+        .map((entry: any) => entry.matchData)
+        .filter(Boolean)
+    );
+  };
 
+  const refreshBackpackInfo = async (bulk: any, signal?: AbortSignal) => {
+    if (!VIEWS_NEEDING_BACKPACK.has(view)) return;
+    const effectiveMatchId = bulk.matchesData?.effectiveMatchId || matchId;
+    const matchDataId = bulk.currentMatchData?.matchData?._id;
+    if (!matchDataId) return;
+    try {
+      const backpackRes = await cachedGet(
+        `public/bagPack/tournament/${tournamentId}/round/${roundId}/match/${effectiveMatchId}/matchdata/${matchDataId}`,
+        signal as AbortSignal,
+        3000
+      );
+      setBackpackInfo(backpackRes.data);
+    } catch (err) {
+      console.error('Failed to fetch backpack info:', err);
+      setBackpackInfo(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!tournamentId || !roundId) return;
+
+    // Cancel any in-flight request set from a previous render (e.g. rapid
+    // view/param changes) so a slow stale response can't overwrite fresh state.
+    const controller = new AbortController();
+    let cancelled = false;
+
+    const LIVE_TTL = 3000;
+
+    const fetchData = async () => {
       try {
         setLoading(true);
-
-        // Determine what data is needed based on the view
-        const needsOverallData = ['OverAllData', 'OverallFrags', 'LiveStats', '1stRunnerUp', '2ndRunnerUp', 'EventMvp', 'highlightPoints'].includes(view);
-        const needsMatches = true;
-        const needsMatchDatas = [ 'Schedule', 'highlightPoints', 'HighlightSchedule'].includes(view);
-        const needsOverallWithMatch = false; // OverallFrags uses round-level overall data, not match-specific
-        const needsMatchData = ['Upper', 'Dom', 'Alerts', 'LiveStats', 'LiveFrags', 'MatchData', 'Achive','MatchFragrs', 'WwcdSummary', 'WwcdStats', 'playerH2H', 'mapPreview', 'slots', 'TeamH2H', 'mvp', 'RosterShowCase', 'MatchSummary', 'Champions','1stRunnerUp', '2ndRunnerUp', 'EventMvp', 'PlayerSwitch' ,'Battlebar'].includes(view);
-        const needsBackpackInfo = [ 'Upper',].includes(view);
-
-        // Always fetch basic data
-        const basePromises: Promise<any>[] = [
-          api.get(`public/tournaments/${tournamentId}?t=${Date.now()}`),
-          api.get(`public/tournaments/${tournamentId}/rounds/${roundId}?t=${Date.now()}`),
-        ];
-
-        if (followSelected) {
-          basePromises.push(api.get(`public/tournaments/${tournamentId}/rounds/${roundId}/selected-match`).catch(() => null));
-        }
-
-        const groupsPromise = api.get(`public/tournaments/${tournamentId}/groups`);
-        const matchesPromise = api.get(`public/rounds/${roundId}/matches`);
-        basePromises.push(groupsPromise, matchesPromise);
-
-        const baseResults = await Promise.all(basePromises);
-        const tournamentData = baseResults[0].data;
-        setTournament(tournamentData);
-
-        const roundData = baseResults[1].data;
-        setRound(roundData);
-
-        let selectedMatchResponse = null;
-        let groupsResponse = null;
-        let matchesResponse = null;
-
-        if (followSelected) {
-          selectedMatchResponse = baseResults[2];
-        }
-
-        groupsResponse = baseResults[followSelected ? 3 : 2];
-        matchesResponse = baseResults[followSelected ? 4 : 3];
-        const rawMatches = matchesResponse.data;
-        // Create map from group ID to groupName
-        const groupMap = new Map();
-        groupsResponse.data.forEach((group: any) => {
-          groupMap.set(group._id, group.groupName);
-        });
-        // Attach full groupNames array to each match for multi-group support
-        const enrichedMatches = rawMatches.map((match: any) => {
-          if (match.groups && match.groups.length > 0) {
-            match.groupName = groupMap.get(match.groups[0]) || 'Unknown'; // Legacy single
-            match.groupNames = match.groups.slice(0,2).map((id: string) => groupMap.get(id) || 'Unknown').filter(Boolean); // Dynamic array
-          } else {
-            match.groupName = 'Unknown';
-            match.groupNames = [];
-          }
-          return match;
-        });
-        setMatches(enrichedMatches);
-
-        // Resolve effective matchId
-        let effectiveMatchId = matchId;
-        if (followSelected && selectedMatchResponse?.data?.matchId) {
-          effectiveMatchId = selectedMatchResponse.data.matchId;
-        }
-
-        // Fetch match-specific data
-        const matchPromises: Promise<any>[] = [api.get(`public/matches/${effectiveMatchId}`)];
-        if (needsMatchData) {
-          matchPromises.push(api.get(`public/matches/${effectiveMatchId}/matchdata`).catch(() => null));
-        }
-
-        const matchResults = await Promise.all(matchPromises);
-        const matchDataFetched = matchResults[0].data;
-        setMatch(matchDataFetched);
-
-        if (needsMatchData && matchResults[1]) {
-          const fetchedMatchData = matchResults[1].data;
-          setMatchData(fetchedMatchData);
-
-          // Fetch backpack info if needed
-          if (needsBackpackInfo && fetchedMatchData._id) {
-            try {
-              const backpackRes = await api.get(`public/bagPack/tournament/${tournamentId}/round/${roundId}/match/${effectiveMatchId}/matchdata/${fetchedMatchData._id}`);
-              setBackpackInfo(backpackRes.data);
-            } catch (backpackErr) {
-              console.error('Failed to fetch backpack info:', backpackErr);
-              setBackpackInfo(null);
-            }
-          }
-        }
-
-        // Fetch additional data in parallel
-        const additionalPromises: Promise<any>[] = [];
-
-        if (needsOverallWithMatch && effectiveMatchId) {
-          additionalPromises.push(api.get(`public/tournaments/${tournamentId}/rounds/${roundId}/matches/${effectiveMatchId}/overall`).catch(() => null));
-        } else if (needsOverallData) {
-          additionalPromises.push(api.get(`public/tournaments/${tournamentId}/rounds/${roundId}/overall`).catch(() => null));
-        }
-
-        if (needsMatchDatas && matchesResponse) {
-          const matchesData = matchesResponse.data;
-          additionalPromises.push(
-            ...matchesData.map((match: Match) =>
-              api.get(`public/matches/${match._id}/matchdata`).catch(() => null)
-            )
-          );
-        }
-
-        if (additionalPromises.length > 0) {
-          const additionalResults = await Promise.all(additionalPromises);
-
-          if (needsOverallWithMatch || needsOverallData) {
-            const overallResponse = additionalResults.shift();
-            if (overallResponse) {
-              setOverallData(overallResponse.data);
-            }
-          }
-
-          if (needsMatchDatas) {
-            const validMatchDatas = additionalResults.filter(result => result !== null).map(result => result.data);
-            setMatchDatas(validMatchDatas);
-          }
-        }
-
         setError(null);
+
+        // ------------------------------------------------------------
+        // Single call instead of the old tournament / round / groups /
+        // matches / match / matchdata / overall fan-out. The backend
+        // resolves followSelected -> effectiveMatchId itself and
+        // returns everything any view could need in one payload:
+        //   tournamentData, roundData, matchesData: { list, current,
+        //   effectiveMatchId }, matchDatasData, currentMatchData,
+        //   overallData
+        // Views keep reading the exact same state vars/props as
+        // before — only where those vars get filled from changes.
+        // ------------------------------------------------------------
+        const query = followSelected ? '?followSelected=true' : '';
+        const bulkRes = await cachedGet(
+          `public/bulk/${tournamentId}/${roundId}/${matchId}${query}`,
+          controller.signal,
+          LIVE_TTL
+        );
+        const bulk = bulkRes.data;
+
+        if (cancelled) return;
+
+        applyBulkPayload(bulk);
+
+        // Backpack info isn't part of the bulk payload yet (server-side
+        // TODO to fold in), so it stays its own call — only fired for
+        // the one view that actually needs it.
+        await refreshBackpackInfo(bulk, controller.signal);
+        if (cancelled) return;
       } catch (err: any) {
+        if (controller.signal.aborted) return;
         console.error('Failed to fetch data:', err);
-        setError('Failed to load tournament data');
+        if (!cancelled) setError('Failed to load tournament data');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchData();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [tournamentId, roundId, matchId, followSelected, view]);
+
+  // ----------------------------------------------------------------
+  // Live updates. bulkSocket.js emits a fresh full payload to room
+  // `bulk:{tournamentId}:{roundId}` on every relevant DB change. We
+  // join that room once per tournament/round; round-wide fields
+  // (tournament/round/matches/matchDatas/overallData) get re-applied
+  // on every push, while match-scoped fields (match/matchData/
+  // backpack) only get re-applied when the push is actually about
+  // the match this client is showing — see the guard below. Every
+  // child component just sees new props either way, same as a
+  // re-fetch, just pushed instead of pulled.
+  // ----------------------------------------------------------------
+  useEffect(() => {
+    if (!tournamentId || !roundId) return;
+
+    const socketManager = SocketManager.getInstance();
+    const socket = socketManager.connect();
+
+    socket.emit('joinBulkRoom', { tournamentId, roundId });
+
+    const handleBulkUpdate = (bulk: any) => {
+      // Room is scoped to tournamentId:roundId, not to a single match, so
+      // a push triggered by some other match in the round still lands
+      // here. Round-wide fields are always safe to refresh; match-scoped
+      // fields (match/matchData/backpack) only get applied if the pushed
+      // payload is actually about the match this client is showing —
+      // otherwise a Match 1 view would flash Match 3's data whenever
+      // Match 3 updates elsewhere in the round.
+      setTournament(bulk.tournamentData);
+      setRound(bulk.roundData);
+      setMatches(bulk.matchesData?.list ?? []);
+      setOverallData(bulk.overallData ?? null);
+      setMatchDatas(
+        (bulk.matchDatasData ?? [])
+          .map((entry: any) => entry.matchData)
+          .filter(Boolean)
+      );
+
+      const pushedMatchId = bulk.matchesData?.effectiveMatchId || bulk.matchesData?.current?._id;
+      const isOurMatch = followSelected || !pushedMatchId || pushedMatchId === matchId;
+      if (isOurMatch) {
+        setMatch(bulk.matchesData?.current ?? null);
+        setMatchData(bulk.currentMatchData?.matchData ?? null);
+        refreshBackpackInfo(bulk);
+      }
+    };
+
+    socket.on('bulkUpdate', handleBulkUpdate);
+
+    return () => {
+      socket.off('bulkUpdate', handleBulkUpdate);
+      socket.emit('leaveBulkRoom', { tournamentId, roundId });
+      socketManager.disconnect();
+    };
+  }, [tournamentId, roundId]);
 
   const renderView = () => {
     if (loading) {
       return (
-        <div style={{
-          width: '100%',
-          height: '100%',
-       
-          color: '#fff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '24px'
-        }}>
-         
-        </div>
+        <div style={{ width: '100%', height: '100%', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }} />
       );
     }
 
     if (error) {
       return (
-        <div style={{
-          width: '100%',
-          height: '100%',
-         
-          color: '#ff0000',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '24px'
-        }}>
+        <div style={{ width: '100%', height: '100%', color: '#ff0000', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>
           {error}
         </div>
       );
@@ -633,22 +498,12 @@ const activeTheme = themes[theme as 'Theme1'  | 'Theme3' | 'Theme4' | 'Theme5' |
 
     if (!tournament) {
       return (
-        <div style={{
-          width: '100%',
-          height: '100%',
-  
-          color: '#fff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '24px'
-        }}>
+        <div style={{ width: '100%', height: '100%', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>
           No tournament data found
         </div>
       );
     }
 
-    // Pass tournament data to the appropriate component
     switch (view) {
       case 'Lower':
         return <LowerComp tournament={tournament} round={round} match={match} totalMatches={matches.length} matches={matches} />;
@@ -670,71 +525,53 @@ const activeTheme = themes[theme as 'Theme1'  | 'Theme3' | 'Theme4' | 'Theme5' |
         return <MatchFragrsComp tournament={tournament} round={round} match={match} matchData={matchData} />;
       case 'WwcdSummary':
         return <WwcdSummaryComp tournament={tournament} round={round} match={match} matchData={matchData} />;
-        case 'WwcdStats':
-          return <WwcdStatsComp tournament={tournament} round={round} match={match} matchData={matchData} />
-        case 'OverAllData':
-          return <OverallDataComp tournament={tournament} round={round} match={match} matchData={matchData} overallData={overallData} matches={matches} matchDatas={matchDatas} />
-        case 'OverallFrags':
-        return <OverallFragsComp tournament={tournament} round={round} match={match} matchData={matchData} overallData={overallData} matches={matches} matchDatas={matchDatas} />
-        case 'Schedule':
-        return <ScheduleComp tournament={tournament} round={round} matches={matches} matchDatas={matchDatas} selectedScheduleMatches={selectedScheduleMatchIds} />
-        case 'CommingUpNext':
-        return <CommingUpNextComp tournament={tournament} round={round} match={match} />
-        case 'Champions':
-          return <ChampionsComp tournament={tournament} round={round} matchData={matchData} />
-        case '1stRunnerUp':
-          return <FirstRunnerUpComp tournament={tournament} round={round} overallData={overallData} />
-        case '2ndRunnerUp':
-          return <SecondRunnerUpComp tournament={tournament} round={round} overallData={overallData} />
-        case 'EventMvp':
-          return <EventMvpComp tournament={tournament} round={round} overallData={overallData} />
-        case 'MatchSummary':
-          return <MatchSummaryComp tournament={tournament} round={round} match={match}   matchData={matchData} />
-        case 'playerH2H':
-          return <PlayerH2HComp tournament={tournament} round={round} match={match} matchData={matchData} />
-        case 'TeamH2H':
-          return <TeamH2HComp tournament={tournament} round={round} match={match} matchData={matchData} />
-        case 'ZoneClose':
-          return <ZoneCloseComp tournament={tournament} round={round} match={match} />
-        case 'intro':
-          return <IntroComp tournament={tournament} round={round} match={match} matchData={matchData} />
-        case 'mapPreview':
-          return <MapPreviewComp tournament={tournament} round={round} match={match} matchData={matchData} />
-        case 'slots':
-          return <SlotsComp tournament={tournament} round={round} match={match} matchData={matchData} />
-        case 'mvp':
-          return <MvpComp tournament={tournament} round={round} match={match} matchData={matchData} backpackInfo={backpackInfo} />
-        case 'highlightPoints':
-          return <HighlightPointsComp tournament={tournament} round={round} match={match} matchData={matchData} overallData={overallData} matches={matches} matchDatas={matchDatas} />
-        case 'HighlightSchedule':
-          return <HighlightScheduleComp tournament={tournament} round={round} matches={matches} matchDatas={matchDatas} selectedScheduleMatches={selectedScheduleMatchIds}  />
-        case 'RosterShowCase':
-          return <RosterShowCaseComp tournament={tournament} round={round} match={match} matchData={matchData} />
-        case 'PlayerSwitch':
-          return PlayerSwitchComp ? <PlayerSwitchComp match={match} matchData={matchData} loading={loading} error={error} /> : null;
-          case 'Battlebar':
-  return (
-    <BattlebarComp
-      tournament={tournament}
-      round={round}
-      match={match}
-      matchData={matchData}
-      loading={loading}
-      error={error}
-    />
-  );
+      case 'WwcdStats':
+        return <WwcdStatsComp tournament={tournament} round={round} match={match} matchData={matchData} />;
+      case 'OverAllData':
+        return <OverallDataComp tournament={tournament} round={round} match={match} matchData={matchData} overallData={overallData} matches={matches} matchDatas={matchDatas} />;
+      case 'OverallFrags':
+        return <OverallFragsComp tournament={tournament} round={round} match={match} matchData={matchData} overallData={overallData} matches={matches} matchDatas={matchDatas} />;
+      case 'Schedule':
+        return <ScheduleComp tournament={tournament} round={round} matches={matches} matchDatas={matchDatas} selectedScheduleMatches={selectedScheduleMatchIds} />;
+      case 'CommingUpNext':
+        return <CommingUpNextComp tournament={tournament} round={round} match={match} />;
+      case 'Champions':
+        return <ChampionsComp tournament={tournament} round={round} matchData={matchData} />;
+      case '1stRunnerUp':
+        return <FirstRunnerUpComp tournament={tournament} round={round} overallData={overallData} />;
+      case '2ndRunnerUp':
+        return <SecondRunnerUpComp tournament={tournament} round={round} overallData={overallData} />;
+      case 'EventMvp':
+        return <EventMvpComp tournament={tournament} round={round} overallData={overallData} />;
+      case 'MatchSummary':
+        return <MatchSummaryComp tournament={tournament} round={round} match={match} matchData={matchData} />;
+      case 'playerH2H':
+        return <PlayerH2HComp tournament={tournament} round={round} match={match} matchData={matchData} />;
+      case 'TeamH2H':
+        return <TeamH2HComp tournament={tournament} round={round} match={match} matchData={matchData} />;
+      case 'ZoneClose':
+        return <ZoneCloseComp tournament={tournament} round={round} match={match} />;
+      case 'intro':
+        return <IntroComp tournament={tournament} round={round} match={match} matchData={matchData} />;
+      case 'mapPreview':
+        return <MapPreviewComp tournament={tournament} round={round} match={match} matchData={matchData} />;
+      case 'slots':
+        return <SlotsComp tournament={tournament} round={round} match={match} matchData={matchData} />;
+      case 'mvp':
+        return <MvpComp tournament={tournament} round={round} match={match} matchData={matchData} backpackInfo={backpackInfo} />;
+      case 'highlightPoints':
+        return <HighlightPointsComp tournament={tournament} round={round} match={match} matchData={matchData} overallData={overallData} matches={matches} matchDatas={matchDatas} />;
+      case 'HighlightSchedule':
+        return <HighlightScheduleComp tournament={tournament} round={round} matches={matches} matchDatas={matchDatas} selectedScheduleMatches={selectedScheduleMatchIds} />;
+      case 'RosterShowCase':
+        return <RosterShowCaseComp tournament={tournament} round={round} match={match} matchData={matchData} />;
+      case 'PlayerSwitch':
+        return PlayerSwitchComp ? <PlayerSwitchComp match={match} matchData={matchData} loading={loading} error={error} /> : null;
+      case 'Battlebar':
+        return <BattlebarComp tournament={tournament} round={round} match={match} matchData={matchData} loading={loading} error={error} />;
       default:
         return (
-          <div style={{
-            width: '100%',
-            height: '100%',
-
-            color: '#fff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '24px'
-          }}>
+          <div style={{ width: '100%', height: '100%', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>
             View "{view}" not implemented yet.
           </div>
         );
@@ -742,21 +579,10 @@ const activeTheme = themes[theme as 'Theme1'  | 'Theme3' | 'Theme4' | 'Theme5' |
   };
 
   return (
-    <div style={{
-      width: '1920px',
-      height: '1400px',
- 
-      top: 0,
-      left: 0,
-      margin: 0,
-      padding: 0,
-      overflow: 'hidden',
-  
-    }}>
+    <div style={{ width: '1920px', height: '1400px', top: 0, left: 0, margin: 0, padding: 0, overflow: 'hidden' }}>
       {renderView()}
     </div>
   );
 };
 
 export default PublicThemeRenderer;
-

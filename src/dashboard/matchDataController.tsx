@@ -39,6 +39,21 @@ import {
 //   never hand React a brand-new ref function on every render.
 // - The initial fetch uses AbortController so a fast route change can't let
 //   a stale response land after a newer one.
+//
+// FIX LOG (this pass):
+// - Place points is now a fixed +/- stepper (like kills) instead of a free
+//   text input. It commits on every click, so it no longer depends on a
+//   blur event firing — that was the reason edits sometimes never reached
+//   the API at all.
+// - The "recently updated" guards on kills / points / death-toggle used a
+//   200–500ms window that fully DISCARDED the click if it fell inside that
+//   window (not queued, not merged — just dropped). That meant two quick
+//   real clicks from a user could silently lose the second one. These are
+//   now 50ms, which is enough to swallow true duplicate synthetic events
+//   (e.g. touchend+click firing together on mobile) without eating
+//   legitimate fast clicks.
+// - pointsUpdateBatcher window trimmed from 4000ms to 2500ms to match the
+//   responsiveness of kills/death so points doesn't feel laggy by comparison.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const retryWithBackoff = async (fn: () => Promise<any>, maxRetries = 3, baseDelay = 1000) => {
@@ -191,6 +206,16 @@ const TeamCard = memo(function TeamCard({
   const totalKills = team.players.reduce((s, p) => s + (p.killNum ?? 0), 0);
   const totalPts = (team.placePoints ?? 0) + totalKills;
 
+  // Fixed-step change: always goes through both the local-state setter and
+  // the debounced commit together, on every click — so there's no path
+  // where a change only lands in local state and never reaches the API.
+  const stepPoints = (delta: number) => {
+    const next = Math.max(0, (team.placePoints ?? 0) + delta);
+    if (next === (team.placePoints ?? 0)) return;
+    onPointsChange(team._id, next);
+    onPointsCommit(team._id, next);
+  };
+
   return (
     <div ref={registerRef}>
       <Framed active={isHighlighted}>
@@ -240,24 +265,31 @@ const TeamCard = memo(function TeamCard({
 
           {/* Points */}
           <div className="flex items-center justify-between px-4 py-2.5 bg-[#0F1013] border-b border-[#24262B]">
-            <label className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <span className="font-mono text-[9px] tracking-wider text-[#55565C] uppercase">Place pts</span>
-              <input
-                type="number"
-                min={0}
-                inputMode="numeric"
-                value={team.placePoints ?? 0}
-                className="w-14 py-1 text-center font-mono text-[14px] font-bold bg-[#0B0C0E] border border-[#24262B] text-[#F4F2EE] outline-none focus-visible:border-[#E11D2E]"
-                onChange={e => {
-                  const v = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
-                  onPointsChange(team._id, isNaN(v) ? 0 : v);
-                }}
-                onBlur={e => {
-                  const v = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
-                  if (!isNaN(v)) onPointsCommit(team._id, v);
-                }}
-              />
-            </label>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label="Decrease place points"
+                  className="w-6 h-6 flex items-center justify-center bg-[#0B0C0E] border border-[#24262B] text-[#93959C] hover:border-[#E11D2E]/50 hover:text-[#E11D2E] leading-none disabled:opacity-30 disabled:cursor-not-allowed"
+                  disabled={(team.placePoints ?? 0) <= 0}
+                  onClick={() => stepPoints(-1)}
+                >
+                  −
+                </button>
+                <span className="font-mono text-[14px] font-bold text-[#F4F2EE] min-w-[24px] text-center tabular-nums">
+                  {team.placePoints ?? 0}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Increase place points"
+                  className="w-6 h-6 flex items-center justify-center bg-[#0B0C0E] border border-[#24262B] text-[#93959C] hover:border-[#E11D2E]/50 hover:text-[#E11D2E] leading-none"
+                  onClick={() => stepPoints(1)}
+                >
+                  +
+                </button>
+              </div>
+            </div>
 
             <div className="flex items-center gap-3">
               <div className="flex flex-col items-end">
@@ -355,8 +387,14 @@ const MatchDataViewer: React.FC = () => {
 
   const lastUpdateRef       = useRef<Record<string, number>>({});
   const killUpdateBatcher   = useRef(new UpdateBatcher<{ change: number }>(3000, (e, n) => ({ change: e.change + n.change })));
-  const pointsUpdateBatcher = useRef(new UpdateBatcher<{ points: number }>(4000));
+  const pointsUpdateBatcher = useRef(new UpdateBatcher<{ points: number }>(2500));
   const deathUpdateBatcher  = useRef(new UpdateBatcher<{ bHasDied: boolean }>(2500));
+
+  // How long to treat a repeat call on the same key as a duplicate event
+  // (e.g. a browser firing both touchend and click for one tap) rather than
+  // a second, genuine user action. Kept short on purpose — anything larger
+  // starts silently swallowing real rapid clicks (see FIX LOG at top).
+  const DUPLICATE_EVENT_WINDOW_MS = 50;
 
   const normalizeMatch = (data: any): MatchData => ({
     ...data,
@@ -384,10 +422,12 @@ const MatchDataViewer: React.FC = () => {
 
   useEffect(() => {
     let cancelFn: (() => void) | undefined;
-    if (tournamentId && roundId && matchId) {
-      fetchMatchData().then(fn => { cancelFn = fn; });
-    }
-    return () => { cancelFn?.(); };
+    let cancelled = false;
+    fetchMatchData().then(fn => {
+      if (cancelled) { fn?.(); return; }
+      cancelFn = fn;
+    });
+    return () => { cancelled = true; cancelFn?.(); };
   }, [tournamentId, roundId, matchId, fetchMatchData]);
 
   // ── Socket wiring ─────────────────────────────────────────────────────────
@@ -487,7 +527,7 @@ const MatchDataViewer: React.FC = () => {
   const updateKillCount = useCallback((teamId: string, playerId: string, change: number) => {
     const key = `${teamId}-${playerId}`;
     const now = Date.now();
-    if (lastUpdateRef.current[key] && now - lastUpdateRef.current[key] < 200) return;
+    if (lastUpdateRef.current[key] && now - lastUpdateRef.current[key] < DUPLICATE_EVENT_WINDOW_MS) return;
     lastUpdateRef.current[key] = now;
 
     const current = matchDataRef.current;
@@ -528,7 +568,7 @@ const MatchDataViewer: React.FC = () => {
   const commitPlacePoints = useCallback((teamId: string, value: number) => {
     const key = `${teamId}-points`;
     const now = Date.now();
-    if (lastUpdateRef.current[key] && now - lastUpdateRef.current[key] < 300) return;
+    if (lastUpdateRef.current[key] && now - lastUpdateRef.current[key] < DUPLICATE_EVENT_WINDOW_MS) return;
     lastUpdateRef.current[key] = now;
     const current = matchDataRef.current;
     if (!current) return;
@@ -543,7 +583,7 @@ const MatchDataViewer: React.FC = () => {
   const togglePlayerDeath = useCallback((teamId: string, playerId: string) => {
     const key = `${teamId}-${playerId}-death`;
     const now = Date.now();
-    if (lastUpdateRef.current[key] && now - lastUpdateRef.current[key] < 250) return;
+    if (lastUpdateRef.current[key] && now - lastUpdateRef.current[key] < DUPLICATE_EVENT_WINDOW_MS) return;
     lastUpdateRef.current[key] = now;
 
     const current = matchDataRef.current;
@@ -574,7 +614,7 @@ const MatchDataViewer: React.FC = () => {
   const toggleAllPlayersDeath = useCallback((teamId: string) => {
     const key = `team-${teamId}-all-death`;
     const now = Date.now();
-    if (lastUpdateRef.current[key] && now - lastUpdateRef.current[key] < 500) return;
+    if (lastUpdateRef.current[key] && now - lastUpdateRef.current[key] < DUPLICATE_EVENT_WINDOW_MS) return;
     lastUpdateRef.current[key] = now;
 
     const current = matchDataRef.current;

@@ -52,7 +52,7 @@ interface Team {
   totalKills?: number;
   totalScore?: number;
   rank?: number;
-  rankChange?: number;
+  rankChange?: number | null;
   totalPlacePoints?: number;
 }
 
@@ -79,103 +79,167 @@ interface OverAllDataProps {
   matchDatas?: MatchData[];
 }
 
-// Helper function to compute ranking from match data
-const computeRanking = (matches: MatchData[]) => {
-  const map = new Map<string, any>();
+interface AggregatedTeam {
+  teamId: string;
+  teamName: string;
+  teamTag: string;
+  teamLogo: string;
+  totalKills: number;
+  totalPlacePoints: number;
+  totalScore: number;
+  wwcd: number;
+}
 
-  matches.forEach(match => {
-    match.teams.forEach(team => {
+const sortByStandings = (a: AggregatedTeam, b: AggregatedTeam) => {
+  if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+  if (b.totalPlacePoints !== a.totalPlacePoints) return b.totalPlacePoints - a.totalPlacePoints;
+  if (b.totalKills !== a.totalKills) return b.totalKills - a.totalKills;
+  return b.wwcd - a.wwcd;
+};
+
+/**
+ * A match counts as "played" if at least one team has a recorded result.
+ * Matches that exist as placeholders (scheduled but not yet started) come
+ * back with every team at 0 kills / 0 placement — those must be skipped
+ * when picking the match to diff against, or "previous" collapses to be
+ * identical to "current" (subtracting a zero delta changes nothing).
+ */
+const isMatchPlayed = (match: MatchData) =>
+  match.teams.some((team) => {
+    const kills = team.players.reduce((s, p) => s + (p.killNum || 0), 0);
+    return kills > 0 || (team.placePoints || 0) > 0;
+  });
+
+/**
+ * Single-pass ranking builder.
+ *
+ * Instead of re-aggregating the whole match history twice (once for the
+ * "current" standings, once again for "standings before the last match"),
+ * this walks every match exactly once. While summing each team's running
+ * totals, it also records the *last played* match's per-team contribution
+ * (skipping any trailing scheduled-but-not-started matches). The
+ * "previous" standing is then derived by subtracting that one delta from
+ * the final totals — no second full aggregation needed.
+ */
+const buildStandings = (matches: MatchData[]) => {
+  const totals = new Map<string, AggregatedTeam>();
+  const lastMatchDelta = new Map<string, { kills: number; place: number; wwcd: number }>();
+
+  // Find the last match that actually has a result — not just the last
+  // element in the array, which may be an unplayed/scheduled match.
+  let lastPlayedIndex = -1;
+  let playedCount = 0;
+  for (let idx = 0; idx < matches.length; idx++) {
+    if (isMatchPlayed(matches[idx])) {
+      lastPlayedIndex = idx;
+      playedCount++;
+    }
+  }
+
+  for (let idx = 0; idx < matches.length; idx++) {
+    const match = matches[idx];
+    for (const team of match.teams) {
       const kills = team.players.reduce((s, p) => s + (p.killNum || 0), 0);
       const place = team.placePoints || 0;
-      const score = kills + place;
-      // Count WWCD if placePoints is 10 (indicates 1st place finish)
       const isWWCD = team.placePoints === 10 ? 1 : 0;
 
-      if (!map.has(team.teamId)) {
-        map.set(team.teamId, {
+      let t = totals.get(team.teamId);
+      if (!t) {
+        t = {
           teamId: team.teamId,
           teamName: team.teamName,
           teamTag: team.teamTag,
           teamLogo: team.teamLogo,
-          totalKills: kills,
-          totalPlacePoints: place,
-          totalScore: score,
-          wwcd: isWWCD,
-        });
-      } else {
-        const t = map.get(team.teamId);
-        t.totalKills += kills;
-        t.totalPlacePoints += place;
-        t.totalScore += score;
-        t.wwcd += isWWCD;
+          totalKills: 0,
+          totalPlacePoints: 0,
+          totalScore: 0,
+          wwcd: 0,
+        };
+        totals.set(team.teamId, t);
       }
-    });
-  });
+      t.totalKills += kills;
+      t.totalPlacePoints += place;
+      t.totalScore += kills + place;
+      t.wwcd += isWWCD;
 
-  const arr = Array.from(map.values());
+      if (idx === lastPlayedIndex) {
+        lastMatchDelta.set(team.teamId, { kills, place, wwcd: isWWCD });
+      }
+    }
+  }
 
-  arr.sort((a, b) => {
-    if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
-    if (b.totalPlacePoints !== a.totalPlacePoints) return b.totalPlacePoints - a.totalPlacePoints;
-    if (b.totalKills !== a.totalKills) return b.totalKills - a.totalKills;
-    return b.wwcd - a.wwcd;
-  });
+  const current = Array.from(totals.values()).sort(sortByStandings);
 
-  return arr;
+  // Only meaningful once at least 2 matches have actually been played —
+  // with just one completed match there is no "before" state to diff.
+  const previous =
+    playedCount > 1
+      ? current
+          .map((team) => {
+            const delta = lastMatchDelta.get(team.teamId);
+            if (!delta) return team; // team sat out the most recent match — no change to subtract
+            return {
+              ...team,
+              totalKills: team.totalKills - delta.kills,
+              totalPlacePoints: team.totalPlacePoints - delta.place,
+              totalScore: team.totalScore - (delta.kills + delta.place),
+              wwcd: team.wwcd - delta.wwcd,
+            };
+          })
+          .sort(sortByStandings)
+      : [];
+
+  return { current, previous, playedCount };
 };
 
-const OverAllData: React.FC<OverAllDataProps> = ({ 
-  tournament, 
-  round, 
+const OverAllData: React.FC<OverAllDataProps> = ({
+  tournament,
+  round,
   overallData,
   matchDatas = []
 }) => {
   const [page, setPage] = useState(1);
 
-  // Calculate team rankings with rank change
+  // Calculate team rankings with rank change (memoized — only recomputes
+  // when the underlying match/overall data actually changes).
   const teamRankings = useMemo(() => {
     if (matchDatas.length === 0 && !overallData) return [];
 
-    // If we have matchDatas, use the new ranking calculation
     if (matchDatas.length > 0) {
-      const sortedMatches = [...matchDatas];
-
-      // Ranking including all matches
-      const currentRanking = computeRanking(sortedMatches);
-
-      // Ranking without last match
-      const previousMatches = sortedMatches.slice(0, -1);
-      const previousRanking = previousMatches.length > 0 ? computeRanking(previousMatches) : [];
+      const { current, previous, playedCount } = buildStandings(matchDatas);
 
       const prevRankMap = new Map<string, number>();
-      previousRanking.forEach((team, index) => {
-        prevRankMap.set(team.teamId, index + 1);
-      });
+      previous.forEach((team, index) => prevRankMap.set(team.teamId, index + 1));
 
-      // Attach rank change
-      const result = currentRanking.map((team, index) => {
+      const hasPreviousData = playedCount > 1;
+
+      return current.map((team, index) => {
         const currentRank = index + 1;
-        const previousRank = prevRankMap.get(team.teamId) || currentRank;
+        const previousRank = prevRankMap.get(team.teamId);
+        // rankChange is null (unknown) when there's no prior *played* match
+        // to compare against — never silently reported as "0 change".
+        const rankChange = hasPreviousData && previousRank !== undefined
+          ? previousRank - currentRank
+          : null;
 
-        return {
-          ...team,
-          rank: currentRank,
-          rankChange: previousRank - currentRank
-        };
+        return { ...team, rank: currentRank, rankChange };
       });
-
-      return result;
     }
 
-    // Fallback to overallData if no matchDatas
+    // Fallback: only a single overall snapshot, no match-by-match history —
+    // there is genuinely nothing to diff against, so rankChange is null
+    // rather than a misleading 0.
     if (overallData?.teams) {
-      const teams = overallData.teams.map(team => ({
-        ...team,
-        totalKills: team.players?.reduce((sum, p) => sum + (p.killNum || 0), 0) || 0,
-        totalPlacePoints: team.placePoints || 0,
-        totalScore: (team.players?.reduce((sum, p) => sum + (p.killNum || 0), 0) || 0) + (team.placePoints || 0),
-        rankChange: 0
-      }));
+      const teams = overallData.teams.map((team) => {
+        const totalKills = team.players?.reduce((sum, p) => sum + (p.killNum || 0), 0) || 0;
+        return {
+          ...team,
+          totalKills,
+          totalPlacePoints: team.placePoints || 0,
+          totalScore: totalKills + (team.placePoints || 0),
+          rankChange: null as number | null,
+        };
+      });
 
       return teams.sort((a, b) => {
         if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
@@ -188,7 +252,7 @@ const OverAllData: React.FC<OverAllDataProps> = ({
     return [];
   }, [overallData, matchDatas]);
 
-  const pageSize = 8; // Show 8 rows per page
+  const pageSize = 10; // Show 8 rows per page
   const totalPages = Math.ceil(teamRankings.length / pageSize);
 
   useEffect(() => {
@@ -262,14 +326,17 @@ const OverAllData: React.FC<OverAllDataProps> = ({
             <div className="bg-[#000000d2] w-[1400px] h-[70px] flex items-center px-4 text-white font-[AGENCYB]">
               {/* Rank Change */}
               <div className="w-[60px] text-[1.8rem] font-bold ml-[10px]">
-                {team.rankChange > 0 && (
-                  <span className="text-green-400">+{team.rankChange}</span>
+                {team.rankChange === null && (
+                  <span className="text-gray-500">–</span>
+                )}
+                {team.rankChange !== null && team.rankChange > 0 && (
+                  <span className="text-green-400">▲{team.rankChange}</span>
                 )}
                 {team.rankChange === 0 && (
-                  <span className="text-gray-400">0</span>
+                  <span className="text-gray-400">–</span>
                 )}
-                {team.rankChange < 0 && (
-                  <span className="text-red-400">{team.rankChange}</span>
+                {team.rankChange !== null && team.rankChange < 0 && (
+                  <span className="text-red-400">▼{Math.abs(team.rankChange)}</span>
                 )}
               </div>
               {/* Rank */}
@@ -289,7 +356,7 @@ const OverAllData: React.FC<OverAllDataProps> = ({
               </div>
               <div className="absolute left-[850px] flex text-[2.5rem] font-bold">
                 <div className="w-[140px] text-center font-[AGENCYB]">{team.wwcd || 0}</div> {/* WWCD */}
-                <div className="w-[140px] text-center font-[AGENCYB]">{team.totalPlacePoints || team.placePoints || 0}</div> {/* Placement */}
+                <div className="w-[140px] text-center font-[AGENCYB]">{team.totalPlacePoints || 0}</div> {/* Placement */}
                 <div className="w-[140px] text-center font-[AGENCYB]">{team.totalKills || 0}</div> {/* Kills */}
                 <div className="w-[140px] text-center font-[AGENCYB]">{team.totalScore || 0}</div> {/* Total */}
               </div>
@@ -301,4 +368,4 @@ const OverAllData: React.FC<OverAllDataProps> = ({
   );
 };
 
-export default OverAllData;
+export default React.memo(OverAllData);

@@ -34,6 +34,11 @@ interface Player {
   health: number;
   healthMax: number;
   liveState: number;
+  // New stat fields used for additional milestones
+  killNumByGrenade?: number;
+  killNumInVehicle?: number;
+  damage?: number;
+  gotAirDropNum?: number;
 }
 
 interface Team {
@@ -70,6 +75,13 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
   const displayTimerRef = useRef<number | null>(null);
   const firstBloodTriggered = useRef(false);
   const previousDeadPlayersRef = useRef<Player[]>([]);
+
+  // Refs for new milestone tracking (grenade kills, vehicle kills, damage, airdrops)
+  const prevGrenadeKillsMap = useRef<{ [key: string]: number }>({});
+  const prevVehicleKillsMap = useRef<{ [key: string]: number }>({});
+  const prevDamageMap = useRef<{ [key: string]: number }>({});
+  const prevAirDropMap = useRef<{ [key: string]: number }>({});
+  const damageMilestoneTriggered = useRef<{ [key: string]: boolean }>({});
 
 
   // Handle socket updates with loop prevention
@@ -232,10 +244,129 @@ const handleSocketUpdate = useCallback((data: any) => {
         }
       }
 
+      // Check for grenade kills - fires whenever a player's grenade kill count increases
+      if (!triggered) {
+        for (let teamIndex = updatedMatchData.teams.length - 1; teamIndex >= 0; teamIndex--) {
+          const team = updatedMatchData.teams[teamIndex];
+          for (let playerIndex = team.players.length - 1; playerIndex >= 0; playerIndex--) {
+            const player = team.players[playerIndex];
+            const playerName = player.playerName;
+            const currentGrenadeKills = player.killNumByGrenade || 0;
+            const previousGrenadeKills = prevGrenadeKillsMap.current[playerName] || 0;
+
+            if (currentGrenadeKills > previousGrenadeKills) {
+              alertData = {
+                ...player,
+                teamTag: team.teamTag,
+                teamLogo: team.teamLogo,
+                milestone: 'GRENADE KILL'
+              };
+              alertReason = 'GRENADE KILL';
+              triggered = true;
+              break;
+            }
+          }
+          if (triggered) break;
+        }
+      }
+
+      // Check for vehicle kills - fires whenever a player's vehicle kill count increases
+      if (!triggered) {
+        for (let teamIndex = updatedMatchData.teams.length - 1; teamIndex >= 0; teamIndex--) {
+          const team = updatedMatchData.teams[teamIndex];
+          for (let playerIndex = team.players.length - 1; playerIndex >= 0; playerIndex--) {
+            const player = team.players[playerIndex];
+            const playerName = player.playerName;
+            const currentVehicleKills = player.killNumInVehicle || 0;
+            const previousVehicleKills = prevVehicleKillsMap.current[playerName] || 0;
+
+            if (currentVehicleKills > previousVehicleKills) {
+              alertData = {
+                ...player,
+                teamTag: team.teamTag,
+                teamLogo: team.teamLogo,
+                milestone: 'VEHICLE KILL'
+              };
+              alertReason = 'VEHICLE KILL';
+              triggered = true;
+              break;
+            }
+          }
+          if (triggered) break;
+        }
+      }
+
+      // Check for 500+ damage - fires once per player when damage crosses the 500 threshold
+      if (!triggered) {
+        for (let teamIndex = updatedMatchData.teams.length - 1; teamIndex >= 0; teamIndex--) {
+          const team = updatedMatchData.teams[teamIndex];
+          for (let playerIndex = team.players.length - 1; playerIndex >= 0; playerIndex--) {
+            const player = team.players[playerIndex];
+            const playerName = player.playerName;
+            const currentDamage = player.damage || 0;
+            const previousDamage = prevDamageMap.current[playerName] || 0;
+
+            if (
+              currentDamage >= 500 &&
+              previousDamage < 500 &&
+              !damageMilestoneTriggered.current[playerName]
+            ) {
+              alertData = {
+                ...player,
+                teamTag: team.teamTag,
+                teamLogo: team.teamLogo,
+                milestone: '500+ DAMAGE'
+              };
+              alertReason = '500+ DAMAGE';
+              triggered = true;
+              damageMilestoneTriggered.current[playerName] = true;
+              break;
+            }
+          }
+          if (triggered) break;
+        }
+      }
+
+      // Check for airdrop loot - fires whenever a player's airdrop count increases
+      if (!triggered) {
+        for (let teamIndex = updatedMatchData.teams.length - 1; teamIndex >= 0; teamIndex--) {
+          const team = updatedMatchData.teams[teamIndex];
+          for (let playerIndex = team.players.length - 1; playerIndex >= 0; playerIndex--) {
+            const player = team.players[playerIndex];
+            const playerName = player.playerName;
+            const currentAirDrops = player.gotAirDropNum || 0;
+            const previousAirDrops = prevAirDropMap.current[playerName] || 0;
+
+            if (currentAirDrops > previousAirDrops) {
+              alertData = {
+                ...player,
+                teamTag: team.teamTag,
+                teamLogo: team.teamLogo,
+                milestone: 'AIRDROP LOOTED'
+              };
+              alertReason = 'AIRDROP LOOTED';
+              triggered = true;
+              break;
+            }
+          }
+          if (triggered) break;
+        }
+      }
+
       // Update kills map
       updatedMatchData.teams.forEach(team => {
         team.players.forEach(player => {
           prevKillsMap.current[player.playerName] = player.killNum || 0;
+        });
+      });
+
+      // Update new stat maps (grenade kills, vehicle kills, damage, airdrops)
+      updatedMatchData.teams.forEach(team => {
+        team.players.forEach(player => {
+          prevGrenadeKillsMap.current[player.playerName] = player.killNumByGrenade || 0;
+          prevVehicleKillsMap.current[player.playerName] = player.killNumInVehicle || 0;
+          prevDamageMap.current[player.playerName] = player.damage || 0;
+          prevAirDropMap.current[player.playerName] = player.gotAirDropNum || 0;
         });
       });
 

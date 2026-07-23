@@ -274,7 +274,7 @@ const TeamRow = ({ team, index, round, rowHeight }: TeamRowProps) => {
               } else if (isAlive) {
                 const healthRatio = Math.max(0, Math.min(1, player.health / (player.healthMax || 100)));
                 barHeight = healthRatio * BASE_BAR_H;
-                barColor = '#ffffff';
+                barColor = '#07e63f';
               }
             } else {
               if (isDead) {
@@ -285,7 +285,7 @@ const TeamRow = ({ team, index, round, rowHeight }: TeamRowProps) => {
                 barColor = '#ef4444';
               } else if (isAlive) {
                 barHeight = BASE_BAR_H;
-                barColor = '#ffffff';
+                barColor = '#07e63f';
               }
             }
 
@@ -732,7 +732,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
     y="10"
     width="35"
     height="35"
-    fill="white"
+    fill="#07e63f"
   />
   <text
     x="106"

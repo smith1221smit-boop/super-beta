@@ -446,31 +446,41 @@ const PublicThemeRenderer: React.FC = () => {
     socket.emit('joinBulkRoom', { tournamentId, roundId });
 
     const handleBulkUpdate = (bulk: any) => {
-      // Room is scoped to tournamentId:roundId, not to a single match, so
-      // a push triggered by some other match in the round still lands
-      // here. Round-wide fields are always safe to refresh; match-scoped
-      // fields (match/matchData/backpack) only get applied if the pushed
-      // payload is actually about the match this client is showing —
-      // otherwise a Match 1 view would flash Match 3's data whenever
-      // Match 3 updates elsewhere in the round.
-      setTournament(bulk.tournamentData);
-      setRound(bulk.roundData);
-      setMatches(bulk.matchesData?.list ?? []);
-      setOverallData(bulk.overallData ?? null);
-      setMatchDatas(
-        (bulk.matchDatasData ?? [])
-          .map((entry: any) => entry.matchData)
-          .filter(Boolean)
-      );
+  setTournament(bulk.tournamentData);
+  setRound(bulk.roundData);
+  setMatches(bulk.matchesData?.list ?? []);
+  setOverallData(bulk.overallData ?? null);
+  setMatchDatas(
+    (bulk.matchDatasData ?? []).map((e: any) => e.matchData).filter(Boolean)
+  );
 
-      const pushedMatchId = bulk.matchesData?.effectiveMatchId || bulk.matchesData?.current?._id;
-      const isOurMatch = followSelected || !pushedMatchId || pushedMatchId === matchId;
-      if (isOurMatch) {
-        setMatch(bulk.matchesData?.current ?? null);
-        setMatchData(bulk.currentMatchData?.matchData ?? null);
-        refreshBackpackInfo(bulk);
-      }
-    };
+  const pushedMatchId = bulk.matchesData?.effectiveMatchId || bulk.matchesData?.current?._id;
+  const isOurMatch = followSelected || !pushedMatchId || pushedMatchId === matchId;
+
+  if (isOurMatch) {
+    setMatch(bulk.matchesData?.current ?? null);
+    const freshMatchData = bulk.currentMatchData?.matchData ?? null;
+    setMatchData(freshMatchData);
+    refreshBackpackInfo(bulk);
+
+    // --- BRIDGE ---
+    // Children (Alerts/Dom in every theme) still listen for the legacy
+    // 'liveMatchUpdate' socket event to detect eliminations. The backend
+    // now only emits 'bulkUpdate', so that legacy event never arrives.
+    // Replay it locally to whatever listeners are already registered on
+    // this socket instance — no network call, no changes needed in any
+    // of the theme components.
+    if (freshMatchData) {
+      socket.listeners('liveMatchUpdate').forEach((listener: any) => {
+        try {
+          listener(freshMatchData);
+        } catch (e) {
+          console.error('Error replaying liveMatchUpdate to listener', e);
+        }
+      });
+    }
+  }
+};
 
     socket.on('bulkUpdate', handleBulkUpdate);
 

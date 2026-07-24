@@ -1,5 +1,5 @@
 import React, {
-  useState, useEffect, ChangeEvent, FormEvent,
+  useState, useEffect, useRef, ChangeEvent, FormEvent,
   useCallback, useMemo, useTransition, memo
 } from 'react';
 import {
@@ -24,6 +24,11 @@ interface Team {
   teamFlag?: string;
   logo?: string;
   players: Player[];
+  // Provided by the list endpoint (getAllTeams), which does NOT send the
+  // full players array for perf reasons — just a count. Detail/edit fetches
+  // (getTeamById) return the real `players` array, which we also keep in
+  // sync here once loaded.
+  playersCount?: number;
 }
 
 interface TeamForm {
@@ -49,6 +54,18 @@ const EMPTY_PLAYER: Player = { playerName: '', playerId: '', photo: '' };
 //   blurred sticky element repaints its blur every scroll frame — solid bg
 //   is functionally identical here (nothing meaningful scrolls under it)
 //   and costs nothing.
+//
+// DATA NOTES (read before touching fetch/search logic again):
+// - The list endpoint (getAllTeams) intentionally returns `playersCount`
+//   instead of the full `players` array, for performance on big rosters.
+//   Any UI that needs to show "how many players" for a card in the LIST
+//   must read `playersCount`, not `players.length` — the list-loaded
+//   `players` array is always `[]` until that specific team's detail is
+//   fetched (via openDetail/openEdit).
+// - Search is server-side (backend already supports ?search=&page=&limit=).
+//   Do not filter `teams` client-side against a partially-loaded page —
+//   that's how teams outside the first page silently "go missing" from
+//   search results.
 const STYLES = `
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
@@ -117,10 +134,12 @@ const STYLES = `
 /* ── Buttons ── */
 .tm-btn-primary { display: inline-flex; align-items: center; gap: 8px; background: #E11D2E; color: #fff; border: 1px solid #E11D2E; font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 0.02em; padding: 12px 22px; cursor: pointer; }
 .tm-btn-primary:hover { background: #F4F2EE; color: #0B0C0E; border-color: #F4F2EE; }
+.tm-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .tm-btn-ghost { background: transparent; color: #93959C; border: 1px solid #24262B; font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 600; padding: 10px 18px; cursor: pointer; }
 .tm-btn-ghost:hover { border-color: #E11D2E; color: #F4F2EE; }
 .tm-btn-outline { background: transparent; color: #E11D2E; border: 1px solid rgba(225,29,46,0.35); font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; padding: 9px 16px; cursor: pointer; }
 .tm-btn-outline:hover { background: rgba(225,29,46,0.1); }
+.tm-btn-outline:disabled { opacity: 0.5; cursor: not-allowed; }
 .tm-icon-btn { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: #131418; border: 1px solid #24262B; color: #93959C; cursor: pointer; flex-shrink: 0; }
 .tm-icon-btn:hover { border-color: #F4F2EE; color: #F4F2EE; }
 .tm-icon-btn.danger:hover { border-color: #E11D2E; color: #E11D2E; }
@@ -277,6 +296,10 @@ const SearchInput = memo(({ onSearchChange }: { onSearchChange: (q: string) => v
 });
 
 // ── TeamCard ──────────────────────────────────────────────────────────────────
+// IMPORTANT: the list endpoint only sends `playersCount`, not a real
+// `players` array (that only exists once a team's detail has been fetched).
+// So the card must read `playersCount` first and only fall back to
+// `players.length` for teams whose detail happens to already be loaded.
 const TeamCard = memo(({
   team, onOpenDetail, onEdit, onDelete, isDeleting,
 }: {
@@ -285,42 +308,46 @@ const TeamCard = memo(({
   onEdit: (team: Team) => void;
   onDelete: (id: string) => void;
   isDeleting: boolean;
-}) => (
-  <div className="tm-card" onClick={() => onOpenDetail(team)}>
-    <div className="tm-card-actions" onClick={e => e.stopPropagation()}>
-      <button className="tm-icon-btn" onClick={() => onEdit(team)} aria-label="Edit team"><FaEdit size={12} /></button>
-      <button className="tm-icon-btn danger" onClick={() => onDelete(team._id)} disabled={isDeleting} aria-label="Delete team"><FaTrash size={12} /></button>
-    </div>
+}) => {
+  const playerCount = team.playersCount ?? team.players?.length ?? 0;
+  return (
+    <div className="tm-card" onClick={() => onOpenDetail(team)}>
+      <div className="tm-card-actions" onClick={e => e.stopPropagation()}>
+        <button className="tm-icon-btn" onClick={() => onEdit(team)} aria-label="Edit team"><FaEdit size={12} /></button>
+        <button className="tm-icon-btn danger" onClick={() => onDelete(team._id)} disabled={isDeleting} aria-label="Delete team"><FaTrash size={12} /></button>
+      </div>
 
-    <div className="tm-card-top">
-      {team.logo
-        ? <img src={team.logo} alt={team.teamFullName} className="tm-card-logo" width={48} height={48} loading="lazy" decoding="async" onError={e => e.currentTarget.src = './logo.png'} />
-        : <div className="tm-card-logo-ph"><FaUsers size={18} style={{ color: '#E11D2E', opacity: 0.5 }} /></div>}
-      <div style={{ minWidth: 0, paddingRight: 60 }}>
-        <div className="tm-card-tag">
-          [{team.teamTag}]
-          {team.teamFlag && <img src={team.teamFlag} alt="" className="tm-card-flag" width={18} height={13} loading="lazy" decoding="async" onError={e => e.currentTarget.style.display = 'none'} />}
+      <div className="tm-card-top">
+        {team.logo
+          ? <img src={team.logo} alt={team.teamFullName} className="tm-card-logo" width={48} height={48} loading="lazy" decoding="async" onError={e => e.currentTarget.src = './logo.png'} />
+          : <div className="tm-card-logo-ph"><FaUsers size={18} style={{ color: '#E11D2E', opacity: 0.5 }} /></div>}
+        <div style={{ minWidth: 0, paddingRight: 60 }}>
+          <div className="tm-card-tag">
+            [{team.teamTag}]
+            {team.teamFlag && <img src={team.teamFlag} alt="" className="tm-card-flag" width={18} height={13} loading="lazy" decoding="async" onError={e => e.currentTarget.style.display = 'none'} />}
+          </div>
+          <div className="tm-card-name">{team.teamFullName}</div>
         </div>
-        <div className="tm-card-name">{team.teamFullName}</div>
+      </div>
+
+      <div className="tm-card-foot">
+        <span className="tm-card-count"><FaUsers size={10} /> {playerCount} player{playerCount === 1 ? '' : 's'}</span>
+        <span className="tm-card-view">View roster →</span>
       </div>
     </div>
-
-    <div className="tm-card-foot">
-      <span className="tm-card-count"><FaUsers size={10} /> {team.players.length} player{team.players.length === 1 ? '' : 's'}</span>
-      <span className="tm-card-view">View roster →</span>
-    </div>
-  </div>
-));
+  );
+});
 
 // ── Detail modal: view + prune roster ───────────────────────────────────────
 const DetailModal: React.FC<{
   team: Team;
+  loading: boolean;
   onClose: () => void;
   onEdit: (team: Team) => void;
   onDeletePlayer: (teamId: string, playerId: string) => Promise<void>;
   onDeleteSelectedPlayers: (teamId: string, playerIds: string[]) => Promise<void>;
   deletingPlayerIds: Set<string>;
-}> = ({ team, onClose, onEdit, onDeletePlayer, onDeleteSelectedPlayers, deletingPlayerIds }) => {
+}> = ({ team, loading, onClose, onEdit, onDeletePlayer, onDeleteSelectedPlayers, deletingPlayerIds }) => {
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const toggle = (id: string) => setSelected(prev => {
@@ -355,7 +382,9 @@ const DetailModal: React.FC<{
 
         <div className="tm-modal-body">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
-            <span className="tm-mono" style={{ fontSize: 9, color: '#55565C', letterSpacing: '2px' }}>ROSTER — {team.players.length}</span>
+            <span className="tm-mono" style={{ fontSize: 9, color: '#55565C', letterSpacing: '2px' }}>
+              ROSTER — {loading ? '…' : team.players.length}
+            </span>
             <div style={{ display: 'flex', gap: 8 }}>
               {selected.size > 0 && (
                 <button className="tm-btn-outline" style={{ fontSize: 11, padding: '6px 12px' }} onClick={handleDeleteSelected}>
@@ -368,10 +397,12 @@ const DetailModal: React.FC<{
             </div>
           </div>
 
-          {team.players.length === 0 ? (
+          {loading ? (
+            <p className="tm-mono" style={{ color: '#55565C', fontSize: 12, padding: '20px 0', letterSpacing: 1, textAlign: 'center' }}>LOADING ROSTER…</p>
+          ) : (team.players?.length ?? 0) === 0 ? (
             <p className="tm-mono" style={{ color: '#55565C', fontSize: 12, padding: '20px 0', letterSpacing: 1, textAlign: 'center' }}>NO PLAYERS ADDED YET</p>
           ) : (
-            team.players.map(player => {
+           (team.players ?? []).map(player => {
               const initials = player.playerName?.slice(0, 2).toUpperCase() || '??';
               const isSelected = !!player._id && selected.has(player._id);
               return (
@@ -406,7 +437,7 @@ const FormFields = memo(({
   form, playersForm, editingTeamId,
   handleTeamInputChange, handlePlayerChange,
   addPlayerInput, removePlayerInput,
-  handleSubmit, onCancel,
+  handleSubmit, onCancel, submitting,
   handleLogoUpload, handleFlagUpload, handlePlayerPhotoUpload,
 }: {
   form: TeamForm;
@@ -418,6 +449,7 @@ const FormFields = memo(({
   removePlayerInput: (index: number) => void;
   handleSubmit: (e: FormEvent) => void;
   onCancel: () => void;
+  submitting: boolean;
   handleLogoUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   handleFlagUpload: (e: ChangeEvent<HTMLInputElement>) => void;
   handlePlayerPhotoUpload: (index: number, e: ChangeEvent<HTMLInputElement>) => void;
@@ -462,7 +494,7 @@ const FormFields = memo(({
             value={player.playerName} onChange={e => handlePlayerChange(index, e)} required
             className="tm-input" style={{ flex: '1 1 150px', width: 'auto' }} />
           <input type="text" name="playerId" placeholder="ID / IGN"
-            value={player.playerId} onChange={e => handlePlayerChange(index, e)}
+            value={player.playerId ?? ''} onChange={e => handlePlayerChange(index, e)}
             className="tm-input" style={{ flex: '0 0 100px', width: 100 }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <label htmlFor={`${idPrefix}-photo-${index}`} className="tm-input" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', width: 'auto', padding: '10px 12px', whiteSpace: 'nowrap' }}>
@@ -484,18 +516,25 @@ const FormFields = memo(({
 
       <div style={{ display: 'flex', gap: 10, paddingTop: 6, borderTop: '1px solid #24262B', marginTop: 2 }}>
         <button type="button" onClick={onCancel} className="tm-btn-ghost">Cancel</button>
-        <button type="submit" className="tm-btn-primary">{editingTeamId ? 'SAVE CHANGES' : 'CREATE TEAM'}</button>
+        <button type="submit" className="tm-btn-primary" disabled={submitting}>
+          {submitting ? 'SAVING…' : editingTeamId ? 'SAVE CHANGES' : 'CREATE TEAM'}
+        </button>
       </div>
     </form>
   );
 });
 
 // ── Create/Edit modal ────────────────────────────────────────────────────────
+// `onSaved` reports the fully-saved team (with real players + playersCount)
+// back up to the parent so the list, card, and any open detail view all stay
+// in sync — this is what prevents the "edit wiped the roster" bug: we only
+// ever submit players we actually loaded via getTeamById, never a stale
+// empty array from the list endpoint.
 const FormModal: React.FC<{
   editingTeam: Team | null;
   onClose: () => void;
-  setTeams: React.Dispatch<React.SetStateAction<Team[]>>;
-}> = ({ editingTeam, onClose, setTeams }) => {
+  onSaved: (team: Team, isNew: boolean) => void;
+}> = ({ editingTeam, onClose, onSaved }) => {
   const [form, setForm] = useState<TeamForm>(editingTeam ? {
     teamFullName: editingTeam.teamFullName,
     teamTag: editingTeam.teamTag,
@@ -503,8 +542,9 @@ const FormModal: React.FC<{
     teamFlag: editingTeam.teamFlag || '',
   } : EMPTY_FORM);
   const [playersForm, setPlayersForm] = useState<Player[]>(
-    editingTeam && editingTeam.players.length ? editingTeam.players : [{ ...EMPTY_PLAYER }]
+    editingTeam && editingTeam.players?.length ? editingTeam.players : [{ ...EMPTY_PLAYER }]
   );
+  const [submitting, setSubmitting] = useState(false);
 
   const handleTeamInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -541,19 +581,25 @@ const FormModal: React.FC<{
 
   const handleSubmit = useCallback(async (e: FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     if (playersForm.some(p => p.playerName.trim() === '')) { alert('Fill in all player names'); return; }
+    setSubmitting(true);
     try {
       const payload = { ...form, players: playersForm };
       if (editingTeam) {
         const res = await api.put(`/teams/${editingTeam._id}`, payload);
-        setTeams(prev => prev.map(t => t._id === editingTeam._id ? res.data : t));
+        onSaved({ ...res.data, playersCount: res.data.players?.length ?? 0 }, false);
       } else {
         const res = await api.post('/teams', payload);
-        setTeams(prev => [...prev, res.data]);
+        onSaved({ ...res.data, playersCount: res.data.players?.length ?? 0 }, true);
       }
       onClose();
-    } catch { alert('Failed to save team'); }
-  }, [form, playersForm, editingTeam, setTeams, onClose]);
+    } catch (err: any) {
+      alert(err?.response?.data?.error || 'Failed to save team');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [form, playersForm, editingTeam, onSaved, onClose, submitting]);
 
   return (
     <div className="tm-modal-overlay" onClick={onClose}>
@@ -574,7 +620,7 @@ const FormModal: React.FC<{
             form={form} playersForm={playersForm} editingTeamId={editingTeam?._id ?? null}
             handleTeamInputChange={handleTeamInputChange} handlePlayerChange={handlePlayerChange}
             addPlayerInput={addPlayerInput} removePlayerInput={removePlayerInput}
-            handleSubmit={handleSubmit} onCancel={onClose}
+            handleSubmit={handleSubmit} onCancel={onClose} submitting={submitting}
             handleLogoUpload={handleLogoUpload} handleFlagUpload={handleFlagUpload}
             handlePlayerPhotoUpload={handlePlayerPhotoUpload}
           />
@@ -588,65 +634,89 @@ const FormModal: React.FC<{
 const Teams: React.FC = () => {
   const { t } = useTranslation();
   const [teams, setTeams] = useState<Team[]>([]);
+  const [totalTeams, setTotalTeams] = useState(0);
   const [user, setUser] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   const [formTeam, setFormTeam] = useState<Team | 'new' | null>(null);
   const [viewingTeamId, setViewingTeamId] = useState<string | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const [deletingTeamIds, setDeletingTeamIds] = useState<Set<string>>(new Set());
   const [deletingPlayerIds, setDeletingPlayerIds] = useState<Set<string>>(new Set());
-  const deletingTeamIdsRef = React.useRef(deletingTeamIds);
-  const deletingPlayerIdsRef = React.useRef(deletingPlayerIds);
+  const deletingTeamIdsRef = useRef(deletingTeamIds);
+  const deletingPlayerIdsRef = useRef(deletingPlayerIds);
   useEffect(() => { deletingTeamIdsRef.current = deletingTeamIds; }, [deletingTeamIds]);
   useEffect(() => { deletingPlayerIdsRef.current = deletingPlayerIds; }, [deletingPlayerIds]);
 
-  const fetchTeams = useCallback(async () => {
-    try { const res = await api.get<Team[]>('/teams'); setTeams(res.data); }
-    catch (err) { console.error('Fetch teams failed:', err); }
+  // Single source of truth for loading the list. Always goes through the
+  // backend's own search/limit support so results aren't silently clipped
+  // to whatever happened to be on the first page.
+  const fetchTeams = useCallback(async (search: string) => {
+    try {
+      const res = await api.get('/teams', { params: { search, limit: 100 } });
+      const normalized: Team[] = res.data.teams.map((team: any) => ({
+        ...team,
+        players: Array.isArray(team.players) ? team.players : [],
+        playersCount: team.playersCount ?? (Array.isArray(team.players) ? team.players.length : 0),
+      }));
+      setTeams(normalized);
+      setTotalTeams(res.data.total ?? normalized.length);
+    } catch (err) {
+      console.error(err);
+    }
   }, []);
 
+  // Initial load (user + unfiltered team list)
   useEffect(() => {
     api.get('/users/me').then(({ data }) => setUser(data)).catch(() => {});
-    fetchTeams();
-  }, [fetchTeams]);
+    fetchTeams('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const visibleTeams = useMemo(() => {
-    if (!searchQuery) return teams;
-    const q = searchQuery.toLowerCase();
-    return teams.filter(t => t.teamFullName.toLowerCase().includes(q) || t.teamTag.toLowerCase().includes(q));
-  }, [teams, searchQuery]);
+  // Refetch (debounced) whenever the search query changes, skipping the
+  // redundant call on first mount (already handled above).
+  const isFirstSearchRun = useRef(true);
+  useEffect(() => {
+    if (isFirstSearchRun.current) { isFirstSearchRun.current = false; return; }
+    const id = setTimeout(() => { fetchTeams(searchQuery); }, 280);
+    return () => clearTimeout(id);
+  }, [searchQuery, fetchTeams]);
 
   const viewingTeam = useMemo(() => teams.find(t => t._id === viewingTeamId) || null, [teams, viewingTeamId]);
 
-  // Stats used to be recomputed inline in JSX on every render of the whole
-  // page (including on every keystroke in search). Memoized so they only
-  // recompute when `teams` actually changes.
+  // Stats reflect the currently loaded (possibly search-filtered) set.
+  // totalTeams comes straight from the backend's total count for that
+  // filter; totalPlayers/avgSize are computed from playersCount so they're
+  // accurate even though most list rows don't carry a full `players` array.
   const teamStats = useMemo(() => {
-    const totalPlayers = teams.reduce((s, t) => s + t.players.length, 0);
+    const totalPlayers = teams.reduce((s, t) => s + (t.playersCount ?? t.players?.length ?? 0), 0);
     return {
-      totalTeams: teams.length,
+      totalTeams,
       totalPlayers,
       avgSize: teams.length ? (totalPlayers / teams.length).toFixed(1) : '—',
     };
-  }, [teams]);
+  }, [teams, totalTeams]);
 
   const deleteTeam = useCallback(async (id: string) => {
     if (!window.confirm('Delete this team?')) return;
     if (deletingTeamIdsRef.current.has(id)) return;
     setDeletingTeamIds(prev => new Set(prev).add(id));
     setTeams(prev => prev.filter(t => t._id !== id));
+    setTotalTeams(prev => Math.max(0, prev - 1));
     try { await api.delete(`/teams/${id}`); }
-    catch { alert('Failed to delete team'); fetchTeams(); }
+    catch { alert('Failed to delete team'); fetchTeams(searchQuery); }
     finally { setDeletingTeamIds(prev => { const c = new Set(prev); c.delete(id); return c; }); }
-  }, [fetchTeams]);
+  }, [fetchTeams, searchQuery]);
 
   const deletePlayer = useCallback(async (teamId: string, playerId: string) => {
     if (deletingPlayerIdsRef.current.has(playerId)) return;
     setDeletingPlayerIds(prev => new Set(prev).add(playerId));
     try {
       await api.delete(`/teams/${teamId}/players/${playerId}`);
-      setTeams(prev => prev.map(t => t._id === teamId ? { ...t, players: t.players.filter(p => p._id !== playerId) } : t));
+      setTeams(prev => prev.map(t => t._id === teamId
+        ? { ...t, players: t.players.filter(p => p._id !== playerId), playersCount: (t.playersCount ?? t.players.length) - 1 }
+        : t));
     } catch { alert('Failed to delete player'); }
     finally { setDeletingPlayerIds(prev => { const c = new Set(prev); c.delete(playerId); return c; }); }
   }, []);
@@ -654,15 +724,51 @@ const Teams: React.FC = () => {
   const deleteSelectedPlayers = useCallback(async (teamId: string, playerIds: string[]) => {
     try {
       await api.delete(`/teams/${teamId}/players`, { data: { playerIds } });
-      setTeams(prev => prev.map(t => t._id === teamId ? { ...t, players: t.players.filter(p => !playerIds.includes(p._id!)) } : t));
+      setTeams(prev => prev.map(t => t._id === teamId
+        ? { ...t, players: t.players.filter(p => !playerIds.includes(p._id!)), playersCount: (t.playersCount ?? t.players.length) - playerIds.length }
+        : t));
     } catch { alert('Failed to delete selected players'); throw new Error('delete failed'); }
   }, []);
 
   const openNewForm = useCallback(() => setFormTeam('new'), []);
   const closeForm = useCallback(() => setFormTeam(null), []);
   const closeDetail = useCallback(() => setViewingTeamId(null), []);
-  const openDetail = useCallback((t2: Team) => setViewingTeamId(t2._id), []);
-  const openEdit = useCallback((t2: Team) => setFormTeam(t2), []);
+
+  // Both detail view and edit need the REAL players array, which the list
+  // endpoint never sends. Fetch it on demand and merge it into `teams` so
+  // every consumer (card, detail modal, edit form) sees the same data.
+  const openDetail = useCallback(async (t2: Team) => {
+    setViewingTeamId(t2._id);
+    setDetailLoading(true);
+    try {
+      const { data } = await api.get(`/teams/${t2._id}`);
+      setTeams(prev => prev.map(t => t._id === data._id ? { ...t, ...data, playersCount: data.players?.length ?? 0 } : t));
+    } catch {
+      alert('Failed to load team roster');
+      setViewingTeamId(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  const openEdit = useCallback(async (t2: Team) => {
+    try {
+      const { data } = await api.get(`/teams/${t2._id}`);
+      const fullTeam: Team = { ...data, playersCount: data.players?.length ?? 0 };
+      setTeams(prev => prev.map(t => t._id === fullTeam._id ? { ...t, ...fullTeam } : t));
+      setFormTeam(fullTeam);
+    } catch {
+      alert('Failed to load team for editing');
+    }
+  }, []);
+
+  const handleSaved = useCallback((saved: Team, isNew: boolean) => {
+    setTeams(prev => {
+      if (isNew) return [saved, ...prev];
+      return prev.map(t => t._id === saved._id ? saved : t);
+    });
+    if (isNew) setTotalTeams(prev => prev + 1);
+  }, []);
 
   return (
     <div className="tm-root" style={{ minHeight: '100vh', background: '#0B0C0E' }}>
@@ -689,7 +795,7 @@ const Teams: React.FC = () => {
 
         <div className="tm-toolbar">
           <SearchInput onSearchChange={setSearchQuery} />
-          <span className="tm-mono" style={{ fontSize: 11, color: '#55565C' }}>{visibleTeams.length} / {teams.length} shown</span>
+          <span className="tm-mono" style={{ fontSize: 11, color: '#55565C' }}>{teams.length} / {totalTeams} shown</span>
           <div className="tm-stats">
             <div className="tm-stat">
               <span className="tm-orb" style={{ fontSize: 15, fontWeight: 800, color: '#E11D2E' }}>{teamStats.totalTeams}</span>
@@ -706,16 +812,16 @@ const Teams: React.FC = () => {
           </div>
         </div>
 
-        {visibleTeams.length === 0 ? (
+        {teams.length === 0 ? (
           <div className="tm-empty">
             <div className="tm-empty-icon-wrap"><FaUsers size={26} style={{ color: '#E11D2E', opacity: 0.7 }} /></div>
             <h3 className="tm-orb" style={{ fontSize: 16, color: '#F4F2EE', marginBottom: 8, textTransform: 'uppercase' }}>
-              {teams.length === 0 ? t('teams.messages.noTeams') : 'No teams match your search'}
+              {totalTeams === 0 && !searchQuery ? t('teams.messages.noTeams') : 'No teams match your search'}
             </h3>
             <p style={{ color: '#93959C', marginBottom: 24, fontSize: 14 }}>
-              {teams.length === 0 ? t('teams.messages.createFirst') : 'Try a different name or tag.'}
+              {totalTeams === 0 && !searchQuery ? t('teams.messages.createFirst') : 'Try a different name or tag.'}
             </p>
-            {teams.length === 0 && (
+            {totalTeams === 0 && !searchQuery && (
               <button className="tm-btn-primary" style={{ margin: '0 auto' }} onClick={openNewForm}>
                 <FaPlus size={12} /> CREATE TEAM
               </button>
@@ -723,7 +829,7 @@ const Teams: React.FC = () => {
           </div>
         ) : (
           <div className="tm-grid">
-            {visibleTeams.map(team => (
+            {teams.map(team => (
               <TeamCard
                 key={team._id}
                 team={team}
@@ -741,13 +847,14 @@ const Teams: React.FC = () => {
         <FormModal
           editingTeam={formTeam === 'new' ? null : formTeam}
           onClose={closeForm}
-          setTeams={setTeams}
+          onSaved={handleSaved}
         />
       )}
 
       {viewingTeam && (
         <DetailModal
           team={viewingTeam}
+          loading={detailLoading}
           onClose={closeDetail}
           onEdit={openEdit}
           onDeletePlayer={deletePlayer}

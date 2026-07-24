@@ -392,7 +392,10 @@ const PublicThemeRenderer: React.FC = () => {
         // Views keep reading the exact same state vars/props as
         // before — only where those vars get filled from changes.
         // ------------------------------------------------------------
-        const query = followSelected ? '?followSelected=true' : '';
+      const params = new URLSearchParams();
+params.set('view', view);
+if (followSelected) params.set('followSelected', 'true');
+const query = `?${params.toString()}`;
         const bulkRes = await cachedGet(
           `public/bulk/${tournamentId}/${roundId}/${matchId}${query}`,
           controller.signal,

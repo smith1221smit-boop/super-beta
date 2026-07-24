@@ -45,9 +45,19 @@ export interface GroupRef {
 //   content immediately (stale-while-revalidate), then replaced once the
 //   network response lands. Both teams and groups are cached now (only
 //   groups were cached before).
+// - TEAM SEARCH IS SERVER-SIDE. The backend caps /teams at limit=100 per
+//   request (see teams.controller.js), so preloading "all" teams and
+//   filtering them in memory silently hid any team outside the first 100
+//   (sorted newest-first). Typing in the search box now debounces and hits
+//   GET /teams?search=... the same way the working standalone call does,
+//   so results aren't limited to whatever happened to load on mount.
+// - Because search results can now change the `teams` array out from under
+//   already-selected teams, a small selectedTeamsCache keeps a copy of any
+//   team the user has picked (or is editing into a group) so chips/slot
+//   rows never go blank just because a later search replaced the grid.
 // - Every network call carries an AbortController signal and is cancelled
 //   on unmount / tournament change, so a slow response from a previous
-//   tournament can never clobber the current one.
+//   tournament (or a stale keystroke) can never clobber the current one.
 // - Team cards, slot rows and group cards are extracted into their own
 //   React.memo'd components. Selecting one team previously re-rendered the
 //   entire grid; now only the affected card re-renders.
@@ -197,6 +207,7 @@ const STYLES = `
 .gx-search::placeholder { color: var(--gx-text-dim); }
 .gx-search:focus { border-color: var(--gx-red); }
 .gx-search-ic { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--gx-text-dim); font-size: 12px; pointer-events: none; }
+.gx-search-spin { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--gx-red); font-size: 11px; }
 
 /* ── Step 1: Team grid ── */
 .gx-team-grid-wrap { flex: 1; overflow-y: auto; padding: 16px 20px; scrollbar-width: thin; scrollbar-color: rgba(225,29,46,0.2) transparent; }
@@ -390,9 +401,9 @@ const STYLES = `
 
 const TeamCard = React.memo(function TeamCard({
   team, isSelected, slot, onToggle,
-}: { team: Team; isSelected: boolean; slot: number | null | undefined; onToggle: (id: string) => void }) {
+}: { team: Team; isSelected: boolean; slot: number | null | undefined; onToggle: (team: Team) => void }) {
   return (
-    <div className={`gx-team-card${isSelected ? ' selected' : ''}`} onClick={() => onToggle(team._id)}>
+    <div className={`gx-team-card${isSelected ? ' selected' : ''}`} onClick={() => onToggle(team)}>
       {isSelected && (
         <div className="gx-card-check">
           <FaCheck size={8} color="#fff" />
@@ -492,7 +503,7 @@ const GroupCard = React.memo(function GroupCard({
 // ── Main Component ─────────────────────────────────────────────────────────────
 const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref) => {
   const { tournamentId } = useParams<{ tournamentId: string }>();
-const [groupName, setGroupName] = useState("");
+  const [groupName, setGroupName] = useState("");
   const [showForm, setShowForm]       = useState(false);
   const [teams, setTeams]             = useState<Team[]>([]);
   const [selectedTeams, setSelectedTeams] = useState<SelectedTeam[]>([]);
@@ -500,14 +511,37 @@ const [groupName, setGroupName] = useState("");
   const [groups, setGroups]           = useState<Group[]>([]);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm]   = useState("");
+  const [teamSearchLoading, setTeamSearchLoading] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [activeStep, setActiveStep]   = useState<1 | 2 | 3>(1);
   const [mobileShowGroups, setMobileShowGroups] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submittingRef = useRef(false); // synchronous guard, closes the double-click race that state alone can't
-
+  const [groupSearchTerm, setGroupSearchTerm] = useState("");
   const GROUPS_CACHE_KEY = `groups_cache_${tournamentId}`;
   const TEAMS_CACHE_KEY = `teams_cache`;
+
+  // Cache of every team object the user has ever selected (or is editing
+  // into a group), keyed by _id. Server-side search means `teams` only
+  // holds the *current* page of results — without this cache, typing a
+  // new search term after selecting a team would make that team's chip /
+  // slot row render blank (team lookup by id would miss).
+  const [selectedTeamsCache, setSelectedTeamsCache] = useState<Map<string, Team>>(new Map());
+  const resolveTeam = useCallback(
+    (id: string) => teams.find(t => t._id === id) || selectedTeamsCache.get(id),
+    [teams, selectedTeamsCache]
+  );
+
+  const filteredGroups = useMemo(() => {
+    const q = groupSearchTerm.toLowerCase();
+    return groups.filter(group =>
+      group.groupName.toLowerCase().includes(q) ||
+      group.slots?.some(slot =>
+        slot.team?.teamTag?.toLowerCase().includes(q) ||
+        slot.team?.teamFullName?.toLowerCase().includes(q)
+      )
+    );
+  }, [groups, groupSearchTerm]);
 
   React.useImperativeHandle(ref, () => ({
     openForm: () => {
@@ -521,6 +555,11 @@ const [groupName, setGroupName] = useState("");
   const isCanceled = (err: any) => err?.name === 'CanceledError' || err?.name === 'AbortError' || err?.code === 'ERR_CANCELED';
 
   // Fetch teams + groups together, in parallel, so opening the panel never waits.
+  // NOTE: limit is 100 to match the backend's hard cap (Math.min(limit, 100)
+  // in getAllTeams) — asking for more just wasted a param, the server was
+  // silently truncating to 100 anyway. This initial load only seeds the
+  // "no search yet" view of the grid; searching (below) re-queries the
+  // server so results aren't limited to this initial page.
   const loadInitialData = useCallback(async (signal: AbortSignal, forceRefresh = false) => {
     if (!forceRefresh) {
       const cachedGroups = sessionStorage.getItem(GROUPS_CACHE_KEY);
@@ -531,12 +570,20 @@ const [groupName, setGroupName] = useState("");
     try {
       const [groupsRes, teamsRes] = await Promise.all([
         api.get(`/tournaments/${tournamentId}/groups`, { signal }),
-        api.get("/teams", { signal }),
+        api.get("/teams", { signal, params: { limit: 100 } }),
       ]);
+
       setGroups(groupsRes.data);
-      setTeams(teamsRes.data);
       sessionStorage.setItem(GROUPS_CACHE_KEY, JSON.stringify(groupsRes.data));
-      sessionStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify(teamsRes.data));
+
+      const teamList = (teamsRes.data.teams || []).map((team: any) => ({
+        _id: team._id,
+        teamFullName: team.teamFullName,
+        teamTag: team.teamTag,
+        logo: team.logo,
+      }));
+      setTeams(teamList);
+      sessionStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify(teamList));
     } catch (err: any) {
       if (isCanceled(err)) return;
       console.error("Failed to load groups/teams:", err);
@@ -550,8 +597,43 @@ const [groupName, setGroupName] = useState("");
     return () => controller.abort();
   }, [loadInitialData]);
 
+  // Server-side team search. Debounced so we don't fire a request per
+  // keystroke. This is what actually fixes "search finds it via /api/teams
+  // directly but not in the group panel" — the panel now hits the exact
+  // same search endpoint instead of filtering whatever 100 teams happened
+  // to load on mount.
+  useEffect(() => {
+    const controller = new AbortController();
+    const q = searchTerm.trim();
+
+    const handle = setTimeout(async () => {
+      setTeamSearchLoading(true);
+      try {
+        const res = await api.get("/teams", {
+          signal: controller.signal,
+          params: { search: q || undefined, limit: 100 },
+        });
+        const list = (res.data.teams || []).map((t: any) => ({
+          _id: t._id,
+          teamFullName: t.teamFullName,
+          teamTag: t.teamTag,
+          logo: t.logo,
+        }));
+        setTeams(list);
+        if (!q) sessionStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify(list));
+      } catch (err: any) {
+        if (!isCanceled(err)) console.error("Team search failed:", err);
+      } finally {
+        setTeamSearchLoading(false);
+      }
+    }, 250);
+
+    return () => { clearTimeout(handle); controller.abort(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm]);
+
   const clearForm = () => {
-   setGroupName("");
+    setGroupName("");
     setSelectedTeams([]);
     setEditingGroupId(null);
     setSearchTerm("");
@@ -559,14 +641,29 @@ const [groupName, setGroupName] = useState("");
   };
 
   // Auto-increment: newly selected teams get the next free slot number.
-  const toggleTeam = useCallback((teamId: string) => {
+  const toggleTeam = useCallback((team: Team) => {
+    setSelectedTeamsCache(prev => {
+      if (prev.has(team._id)) return prev;
+      const next = new Map(prev);
+      next.set(team._id, team);
+      return next;
+    });
     setSelectedTeams(prev => {
-      const exists = prev.find(t => t.teamId === teamId);
-      if (exists) return prev.filter(t => t.teamId !== teamId);
+      const exists = prev.find(t => t.teamId === team._id);
+      if (exists) return prev.filter(t => t.teamId !== team._id);
       const nextSlot = prev.length > 0 ? Math.max(...prev.map(t => t.slot || 0)) + 1 : 1;
-      return [...prev, { teamId, slot: nextSlot }];
+      return [...prev, { teamId: team._id, slot: nextSlot }];
     });
   }, []);
+
+  // toggleTeam by id only — used where we already know the team isn't in
+  // hand (e.g. removing from the slot list / chip bar), so fall back to
+  // resolveTeam to find the object.
+  const toggleTeamById = useCallback((teamId: string) => {
+    const team = resolveTeam(teamId);
+    if (team) toggleTeam(team);
+    else setSelectedTeams(prev => prev.filter(t => t.teamId !== teamId)); // safety net
+  }, [resolveTeam, toggleTeam]);
 
   const handleSlotChange = useCallback((teamId: string, val: string) => {
     const slotNum = val === "" ? null : parseInt(val, 10);
@@ -574,8 +671,14 @@ const [groupName, setGroupName] = useState("");
   }, []);
 
   const openFormForEditGroup = useCallback((group: Group) => {
-   setGroupName(group.groupName);
-    setSelectedTeams((group.slots || []).filter((s): s is Slot & { team: Team } => !!s.team).map(s => ({ teamId: s.team._id, slot: s.slot })));
+    setGroupName(group.groupName);
+    const slots = (group.slots || []).filter((s): s is Slot & { team: Team } => !!s.team);
+    setSelectedTeams(slots.map(s => ({ teamId: s.team._id, slot: s.slot })));
+    setSelectedTeamsCache(prev => {
+      const next = new Map(prev);
+      slots.forEach(s => next.set(s.team._id, s.team));
+      return next;
+    });
     setEditingGroupId(group._id);
     setActiveStep(1);
     setShowForm(true);
@@ -584,13 +687,13 @@ const [groupName, setGroupName] = useState("");
 
   const handleSubmit = async () => {
     if (submittingRef.current) return; // hard stop against rapid double-clicks
- const name = groupName;
+    const name = groupName;
     if (!name.trim()) { setActiveStep(2); alert("Group name is required."); return; }
     if (selectedTeams.length === 0) { alert("Select at least one team."); return; }
     for (const t of selectedTeams) {
       if (t.slot === null || isNaN(t.slot as number)) { alert("Please assign a valid slot for all teams."); return; }
     }
-    const invalid = selectedTeams.filter(st => !teams.find(t => t._id === st.teamId));
+    const invalid = selectedTeams.filter(st => !resolveTeam(st.teamId));
     if (invalid.length > 0) {
       alert("Some teams no longer exist. Refresh and try again.");
       const controller = new AbortController();
@@ -650,11 +753,9 @@ const [groupName, setGroupName] = useState("");
     if (onSelectionChange) onSelectionChange(groups.map(g => g._id));
   }, [groups, onSelectionChange]);
 
-  const filteredTeams = useMemo(() => {
-    const q = searchTerm.toLowerCase();
-    if (!q) return teams;
-    return teams.filter(t => t.teamFullName.toLowerCase().includes(q) || t.teamTag.toLowerCase().includes(q));
-  }, [teams, searchTerm]);
+  // Search is now server-side (see the debounced effect above), so the
+  // team grid just renders whatever `teams` currently holds.
+  const filteredTeams = teams;
 
   const selectedMap = useMemo(() => {
     const m = new Map<string, number | null>();
@@ -669,20 +770,50 @@ const [groupName, setGroupName] = useState("");
     <>
       <div className="gx-panel-hdr">
         <div className="gx-panel-label">Existing groups</div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ color: '#93959C', fontSize: 13, fontWeight: 500 }}>
-            {groups.length} group{groups.length !== 1 ? 's' : ''} created
+
+        <div className="gx-search-wrap" style={{ marginBottom: 12 }}>
+          <FaSearch className="gx-search-ic" />
+          <input
+            type="text"
+            value={groupSearchTerm}
+            onChange={(e) => setGroupSearchTerm(e.target.value)}
+            placeholder="Search groups or teams..."
+            className="gx-search"
+          />
+        </div>
+
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between"
+        }}>
+          <span style={{
+            color: "#93959C",
+            fontSize: 13,
+            fontWeight: 500
+          }}>
+            {filteredGroups.length} group{filteredGroups.length !== 1 ? "s" : ""}
           </span>
-          <span className="gx-mono" style={{ color: '#E11D2E', fontSize: 13, fontWeight: 800 }}>{groups.length}</span>
+
+          <span
+            className="gx-mono"
+            style={{
+              color: "#E11D2E",
+              fontSize: 13,
+              fontWeight: 800
+            }}
+          >
+            {filteredGroups.length}
+          </span>
         </div>
       </div>
       <div className="gx-groups-scroll">
-        {groups.length === 0 ? (
+        {filteredGroups.length === 0 ? (
           <div className="gx-empty">
             <div className="gx-empty-icon"><FaLayerGroup /></div>
             No groups yet
           </div>
-        ) : groups.map(group => (
+        ) : filteredGroups.map(group => (
           <GroupCard
             key={group._id}
             group={group}
@@ -759,6 +890,7 @@ const [groupName, setGroupName] = useState("");
                       placeholder="Search by name or tag…"
                       className="gx-search"
                     />
+                    {teamSearchLoading && <FaSpinner className="gx-search-spin gx-spin" size={11} />}
                   </div>
                 </div>
 
@@ -789,9 +921,9 @@ const [groupName, setGroupName] = useState("");
                   </span>
                   <div className="gx-sel-chips">
                     {selectedTeams.map(sel => {
-                      const team = teams.find(t => t._id === sel.teamId);
+                      const team = resolveTeam(sel.teamId);
                       return (
-                        <span key={sel.teamId} className="gx-sel-chip gx-mono" onClick={() => toggleTeam(sel.teamId)}>
+                        <span key={sel.teamId} className="gx-sel-chip gx-mono" onClick={() => toggleTeamById(sel.teamId)}>
                           {team?.teamTag || '?'}
                           <span className="gx-sel-chip-x">✕</span>
                         </span>
@@ -807,13 +939,13 @@ const [groupName, setGroupName] = useState("");
               <div className="gx-panel">
                 <div className="gx-panel-hdr">
                   <div className="gx-panel-label">Name &amp; assign slots</div>
-                 <input
-    type="text"
-    value={groupName}
-    onChange={(e) => setGroupName(e.target.value)}
-    placeholder="Group name…"
-    className="gx-group-name-input"
-/>
+                  <input
+                    type="text"
+                    value={groupName}
+                    onChange={(e) => setGroupName(e.target.value)}
+                    placeholder="Group name…"
+                    className="gx-group-name-input"
+                  />
                 </div>
 
                 <div className="gx-slots-wrap">
@@ -828,10 +960,10 @@ const [groupName, setGroupName] = useState("");
                       .map(sel => (
                         <SlotRow
                           key={sel.teamId}
-                          team={teams.find(t => t._id === sel.teamId)}
+                          team={resolveTeam(sel.teamId)}
                           slot={sel.slot}
                           onSlotChange={handleSlotChange}
-                          onRemove={toggleTeam}
+                          onRemove={toggleTeamById}
                         />
                       ))
                   )}

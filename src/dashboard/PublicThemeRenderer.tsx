@@ -188,6 +188,7 @@ interface MatchData {
    matchId: string;
    userId: string;
    teams: any[];
+   deadTeamList?: DeadTeamListEntry[];
 }
 
 interface OverallData {
@@ -207,6 +208,19 @@ interface BackpackInfo {
     teambackpackinfo: {
         TeamBackPackList: any[];
     };
+}
+
+// Shape of each entry the backend's updateDeadTeamList() computes and
+// attaches at matchData.deadTeamList — see Bulkpublic.controller.js.
+// Kept as its own interface (rather than `any[]`) so AlertsComp/DomComp
+// get a typed prop instead of having to reach into matchData themselves.
+interface DeadTeamListEntry {
+  teamId: string;
+  teamTag: string;
+  teamName: string;
+  teamLogo: string;
+  placePoints: number;
+  totalKills: number;
 }
 
 /* --------------------------------------------------------------------
@@ -325,6 +339,15 @@ const PublicThemeRenderer: React.FC = () => {
   const [round, setRound] = useState<Round | null>(null);
   const [match, setMatch] = useState<Match | null>(null);
   const [matchData, setMatchData] = useState<MatchData | null>(null);
+  // Extracted from matchData.deadTeamList (see Bulkpublic.controller.js's
+  // updateDeadTeamList) into its own bit of state, kept in sync with
+  // matchData everywhere matchData itself gets set — REST fetch,
+  // followSelected refresh, and the live 'bulkUpdate' socket push. This
+  // gives AlertsComp a dedicated, typed prop instead of every theme's
+  // Alerts.tsx needing to reach into matchData.deadTeamList itself, and
+  // means the backend's already-computed everAlive-guarded elimination
+  // list is what themes render, not a client-side re-derivation of it.
+  const [deadTeamList, setDeadTeamList] = useState<DeadTeamListEntry[]>([]);
   const [overallData, setOverallData] = useState<OverallData | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [matchDatas, setMatchDatas] = useState<MatchData[]>([]);
@@ -340,6 +363,7 @@ const PublicThemeRenderer: React.FC = () => {
     setMatch(bulk.matchesData?.current ?? null);
     setMatches(bulk.matchesData?.list ?? []);
     setMatchData(bulk.currentMatchData?.matchData ?? null);
+    setDeadTeamList(bulk.currentMatchData?.matchData?.deadTeamList ?? []);
     setOverallData(bulk.overallData ?? null);
     setMatchDatas(
       (bulk.matchDatasData ?? [])
@@ -435,10 +459,10 @@ const query = `?${params.toString()}`;
   // join that room once per tournament/round; round-wide fields
   // (tournament/round/matches/matchDatas/overallData) get re-applied
   // on every push, while match-scoped fields (match/matchData/
-  // backpack) only get re-applied when the push is actually about
-  // the match this client is showing — see the guard below. Every
-  // child component just sees new props either way, same as a
-  // re-fetch, just pushed instead of pulled.
+  // deadTeamList/backpack) only get re-applied when the push is
+  // actually about the match this client is showing — see the guard
+  // below. Every child component just sees new props either way, same
+  // as a re-fetch, just pushed instead of pulled.
   // ----------------------------------------------------------------
   useEffect(() => {
     if (!tournamentId || !roundId) return;
@@ -464,6 +488,7 @@ const query = `?${params.toString()}`;
     setMatch(bulk.matchesData?.current ?? null);
     const freshMatchData = bulk.currentMatchData?.matchData ?? null;
     setMatchData(freshMatchData);
+    setDeadTeamList(freshMatchData?.deadTeamList ?? []);
     refreshBackpackInfo(bulk);
 
     // --- BRIDGE ---
@@ -527,7 +552,7 @@ const query = `?${params.toString()}`;
       case 'Achive':
         return <AchiveComp tournament={tournament} round={round} match={match} matchData={matchData} />;
       case 'Alerts':
-        return <AlertsComp tournament={tournament} round={round} match={match} matchData={matchData} />;
+        return <AlertsComp tournament={tournament} round={round} match={match} matchData={matchData} deadTeamList={deadTeamList} />;
       case 'LiveStats':
         return <LiveStatsComp tournament={tournament} round={round} match={match} matchData={matchData} overallData={overallData} />;
       case 'LiveFrags':

@@ -1,0 +1,119 @@
+import { useMemo } from 'react';
+
+// Exported so every theme's LiveStats/Alerts/battlebar imports THESE types
+// instead of redeclaring their own local Player/Team/MatchData interfaces.
+// Two interfaces with the same name but different shapes (e.g. a required
+// vs optional isOutsideBlueCircle) are NOT the same type to TypeScript —
+// that mismatch is what caused TS2345. Import from here, don't duplicate.
+export interface Player {
+  _id: string;
+  playerName: string;
+  killNum: number;
+  bHasDied: boolean;
+  health: number;
+  healthMax: number;
+  liveState: number;
+  rank?: number;
+  isOutsideBlueCircle?: boolean;
+  isFiring?: boolean;
+  picUrl?: string;
+  [key: string]: any;
+}
+
+export interface Team {
+  _id: string;
+  teamId?: string;
+  teamTag: string;
+  teamName?: string;
+  placePoints: number;
+  players: Player[];
+  teamLogo: string;
+}
+
+export interface MatchData {
+  _id: string;
+  teams: Team[];
+}
+
+export interface OverallData {
+  teams: Array<{
+    _id?: string;
+    teamId?: string;
+    placePoints?: number;
+    players?: Array<{ killNum?: number }>;
+  }>;
+}
+
+// Shape returned by useSortedTeams — a Team plus the derived fields.
+// Import this where a component needs to type a sorted-team item
+// (e.g. the .map() callback over topTeam.players).
+export interface SortedTeam extends Team {
+  totalKills: number;
+  aliveCount: number;
+  isAllDead: boolean;
+  hasOutsideBlueCircle: boolean;
+  teamRank: number;
+  totalPoints: number;
+}
+
+// One implementation of "sort teams by points/kills, derive totals" for every
+// theme instead of five near-identical copies (LiveStats.tsx, battlebar.tsx,
+// Alerts.tsx, Upper.tsx all had their own version of this).
+//
+// sortBy:
+//  - 'live'    → placePoints then kills (LiveStats/battlebar in-match ranking)
+//  - 'overall' → cumulative points across the event, from overallData (used
+//                by LiveStats' "top team" hero panel when overall standings matter)
+export function useSortedTeams(
+  matchData: MatchData | null | undefined,
+  overallData?: OverallData | null,
+  sortBy: 'live' | 'overall' = 'live'
+) {
+  const overallMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!overallData?.teams) return map;
+    for (const t of overallData.teams) {
+      const placePoints = t.placePoints ?? 0;
+      const overallKills = Array.isArray(t.players)
+        ? t.players.reduce((sum, p) => sum + (p.killNum || 0), 0)
+        : 0;
+      const total = placePoints + overallKills;
+      if (t.teamId) map.set(t.teamId.toString(), total);
+      if (t._id) map.set(t._id.toString(), total);
+    }
+    return map;
+  }, [overallData]);
+
+  return useMemo(() => {
+    if (!matchData) return [];
+
+    const withDerived = matchData.teams.map(team => {
+      const teamKey = (team.teamId ?? team._id)?.toString();
+      const totalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
+      const aliveCount = team.players.filter(p => p.liveState !== 5 && !p.bHasDied).length;
+      // NOTE: deliberately NOT checking health === 0 here. A player who
+      // hasn't received their first live-stat tick yet also sits at
+      // default health 0 — that's "no data yet," not "dead." Using it as
+      // a death signal caused false "team eliminated" alerts for teams
+      // that simply hadn't started reporting live data, right around the
+      // moment ANY team's first kill came in. liveState === 5 / bHasDied
+      // are the only signals the backend sets specifically to mean death.
+      const isAllDead =
+        team.players.length > 0 &&
+        team.players.every(p => p.liveState === 5 || p.bHasDied);
+      const hasOutsideBlueCircle = team.players.some(p => p.isOutsideBlueCircle === true);
+      const teamRank = team.players[0]?.rank || 0;
+      const totalPoints = overallMap.get(teamKey ?? '') ?? 0;
+
+      return { ...team, totalKills, aliveCount, isAllDead, hasOutsideBlueCircle, teamRank, totalPoints };
+    });
+
+    if (sortBy === 'overall') {
+      return withDerived.sort((a, b) => b.totalPoints - a.totalPoints);
+    }
+
+    return withDerived.sort((a, b) =>
+      b.placePoints !== a.placePoints ? b.placePoints - a.placePoints : b.totalKills - a.totalKills
+    );
+  }, [matchData, overallMap, sortBy]);
+}

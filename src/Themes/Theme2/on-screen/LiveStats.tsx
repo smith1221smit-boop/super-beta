@@ -1,673 +1,536 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { useParams, useSearchParams } from "react-router-dom";
-import api from "../../../login/api.tsx";
-import { decode } from "@msgpack/msgpack";
-import { getCache, setCache, removeCache } from "../../../dashboard/cache.tsx";
-import SocketManager from "../../../dashboard/socketManager.tsx";
+import React, {
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+  memo,
+} from 'react';
+import { useSortedTeams, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+// NOTE: SocketManager import removed — this component no longer opens its
+// own socket subscription. PublicThemeRenderer owns the single socket
+// connection, listens to 'bulkUpdate', and passes the freshly-merged
+// matchData / overallData down as props on every change. That prop update
+// is what re-renders this component now — see useSortedTeams below.
+//
+// NOTE: Player / Team / MatchData are imported from useSortedTeams, NOT
+// redeclared here. Two same-named-but-different-shaped interfaces (e.g. a
+// required vs optional field) are unrelated types to TypeScript even with
+// an identical name — that's what caused the TS2345 error. Every theme
+// should import these types from the shared hook instead of copy-pasting
+// its own version.
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// TYPES — live-slim
-// ═══════════════════════════════════════════════════════════════════════════════
-
-interface TournamentApi {
-  _id: string; tournamentName: string; torLogo: string;
-  primaryColor: string; secondaryColor: string; overlayBg: string;
-}
-interface RoundApi { _id: string; roundName: string; apiEnable: boolean; }
-interface MatchApi { _id: string; matchName: string; matchNo: number; map: string; }
-interface LivePlayerApi {
-  _id: string; uId: string; playerName: string; picUrl: string;
-  health: number; liveState: number; killNum: number; rank: number;
-  isOutsideBlueCircle: boolean; bHasDied: boolean; isFiring: boolean;
-}
-interface LiveTeamApi {
-  _id: string; teamId: string; teamName: string; teamTag: string;
-  teamLogo: string; slot: number; placePoints: number; players: LivePlayerApi[];
-}
-interface MatchDataApi { _id: string; teams: LiveTeamApi[]; }
-interface LiveSlimData {
-  tournament: TournamentApi; round: RoundApi; match: MatchApi; matchData: MatchDataApi;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// TYPES — overall-slim
-// ═══════════════════════════════════════════════════════════════════════════════
-
-interface OverallPlayerApi {
-  uId: string; playerName: string; picUrl: string;
-  killNum: number; damage: number; assists: number; knockouts: number;
-  [key: string]: any;
-}
-interface OverallTeamApi {
-  teamId: string; teamName: string; teamTag: string; teamLogo: string;
-  slot: number; matchCount: number; totalPlacePoints: number;
-  totalKills: number; totalPoints: number; players: OverallPlayerApi[];
-}
-interface OverallSlimData {
-  tournament: TournamentApi; round: RoundApi; matchCount: number; teams: OverallTeamApi[];
+// ─────────────────────────────────────────────
+// Interfaces
+// ─────────────────────────────────────────────
+interface Tournament {
+  _id: string;
+  tournamentName: string;
+  torLogo?: string;
+  day?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  overlayBg?: string;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// DERIVED TYPES
-// ═══════════════════════════════════════════════════════════════════════════════
-
-interface LiveTeamDerived extends LiveTeamApi {
-  totalKills: number; alive: number; totalPoints: number; isAllDead: boolean;
+interface Round {
+  _id: string;
+  roundName: string;
+  apiEnable?: boolean;
 }
-interface OverallTeamDerived extends OverallTeamApi { liveRank: number | null; }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ID NORMALISER
-// ═══════════════════════════════════════════════════════════════════════════════
+interface Match {
+  _id: string;
+  matchName?: string;
+  matchNo?: number;
+  _matchNo?: number;
+  map?: string;
+}
 
-const sid = (val: any): string => {
-  if (!val) return '';
-  if (typeof val === 'string') return val;
-  if (val.$oid && typeof val.$oid === 'string') return val.$oid;
-  if (val.buffer instanceof Uint8Array && val.buffer.length === 12)
-    return Array.from(val.buffer).map((b: any) => b.toString(16).padStart(2, '0')).join('');
-  if (val.id instanceof Uint8Array && val.id.length === 12)
-    return Array.from(val.id).map((b: any) => b.toString(16).padStart(2, '0')).join('');
-  if (val instanceof Uint8Array && val.length === 12)
-    return Array.from(val).map((b: any) => b.toString(16).padStart(2, '0')).join('');
-  try { const s = val.toString(); if (s !== '[object Object]') return s; } catch (_) {}
-  console.warn('[LiveStats] sid() could not stringify:', val);
-  return '';
-};
+interface LiveStatsProps {
+  tournament: Tournament;
+  round?: Round | null;
+  match?: Match | null;
+  matchData?: MatchData | null;
+  overallData?: any;
+}
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// SMART DECODE
-// ═══════════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────
+// EliminatedOverlay
+// ─────────────────────────────────────────────
+interface EliminatedOverlayProps {
+  gradientStyle: React.CSSProperties;
+  rowHeight: number;
+  onDone: () => void;
+}
 
-const smartDecode = (data: any, contentType = ''): any => {
-  if (
-    data !== null && typeof data === 'object' &&
-    !(data instanceof ArrayBuffer) && !(data instanceof Uint8Array) &&
-    !(data?.type === 'Buffer' && Array.isArray(data.data))
-  ) return data;
+const EliminatedOverlay = memo(
+  ({ gradientStyle, rowHeight, onDone }: EliminatedOverlayProps) => {
+    const [phase, setPhase] = useState<'in' | 'out'>('in');
+    const [expanded, setExpanded] = useState(false);
 
-  const bytes = (() => {
-    if (data instanceof Uint8Array) return data;
-    if (data instanceof ArrayBuffer) return new Uint8Array(data);
-    if (data?.type === 'Buffer' && Array.isArray(data.data)) return new Uint8Array(data.data);
-    return new Uint8Array(data);
-  })();
+    useEffect(() => {
+      const rafId = requestAnimationFrame(() => setExpanded(true));
+      const outTimer = setTimeout(() => setPhase('out'), 2500);
+      const doneTimer = setTimeout(() => onDone(), 3300);
+      return () => {
+        cancelAnimationFrame(rafId);
+        clearTimeout(outTimer);
+        clearTimeout(doneTimer);
+      };
+    }, [onDone]);
 
-  if (contentType.includes('application/x-msgpack') || contentType.includes('application/msgpack'))
-    return decode(bytes);
+    const isExpanded = phase === 'in' && expanded;
 
-  try { return JSON.parse(new TextDecoder().decode(bytes)); }
-  catch {
-    try { return decode(bytes); }
-    catch (e) { console.error('[LiveStats] smartDecode failed:', e); return null; }
+    return (
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          height: `${rowHeight}px`,
+          zIndex: 20,
+          overflow: 'hidden',
+          pointerEvents: 'none',
+        }}
+      >
+        <div
+          style={{
+            ...gradientStyle,
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            height: '100%',
+            width: isExpanded ? 'calc(100% - 5px)' : '0%',
+            transition:
+              phase === 'in'
+                ? 'width 1.5s cubic-bezier(0.22, 1, 0.36, 1)'
+                : 'width 0.6s cubic-bezier(0.55, 0, 1, 0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+          }}
+        >
+          <span
+            style={{
+              fontFamily: 'AGENCYB, sans-serif',
+              fontSize: '1.4rem',
+              fontWeight: 'bold',
+              color: '#ffffff',
+              letterSpacing: '0.25em',
+              textShadow: '0 1px 6px rgba(0,0,0,0.6)',
+              opacity: phase === 'in' && expanded ? 1 : 0,
+              transition:
+                phase === 'in' ? 'opacity 0.4s ease 0.8s' : 'opacity 0.3s ease',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            ELIMINATED
+          </span>
+        </div>
+      </div>
+    );
   }
-};
+);
+EliminatedOverlay.displayName = 'EliminatedOverlay';
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// NORMALISERS  ← deep field logging lives here so we catch the problem at source
-// ═══════════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────
+// PlayerHealthBar
+// ─────────────────────────────────────────────
+interface HealthBarProps {
+  player: Player;
+  apiEnabled: boolean;
+  baseHealthBar: number;
+}
 
-const normaliseLiveTeams = (teams: any[]): LiveTeamApi[] =>
-  (teams || []).map((t) => ({
-    ...t,
-    _id:    sid(t._id),
-    teamId: sid(t.teamId),
-    players: (t.players || []).map((p: any) => ({ ...p, _id: sid(p._id) })),
-  }));
+const PlayerHealthBar = memo(
+  ({ player, apiEnabled, baseHealthBar }: HealthBarProps) => {
+    const isDead = player.liveState === 5 || player.bHasDied;
+    const isKnocked = player.liveState === 4;
 
-const normaliseLivePayload = (raw: any): LiveSlimData => ({
-  tournament: { ...raw.tournament, _id: sid(raw.tournament?._id) },
-  round:      { ...raw.round,      _id: sid(raw.round?._id) },
-  match:      { ...raw.match,      _id: sid(raw.match?._id) },
-  matchData:  { ...raw.matchData,  _id: sid(raw.matchData?._id), teams: normaliseLiveTeams(raw.matchData?.teams) },
-});
+    let barHeight = 0;
+    let barColor = '';
 
-const normaliseOverallTeams = (teams: any[]): OverallTeamApi[] => {
-  if (!teams?.length) {
-    console.warn('[LiveStats][normalise] overall teams array empty/missing:', teams);
-    return [];
-  }
-  return teams.map((t, i) => {
-    // ── FULL RAW FIELD DUMP — tells us the exact key names the server sends ──
-    console.log(`[LiveStats][normalise] overall raw[${i}] teamTag="${t.teamTag}" allKeys:`, Object.keys(t));
-    console.log(`[LiveStats][normalise] overall raw[${i}] points candidates:`,
-      { totalPoints: t.totalPoints, total_points: t.total_points },
-      '| kills candidates:', { totalKills: t.totalKills, total_kills: t.total_kills },
-      '| matchCount candidates:', { matchCount: t.matchCount, match_count: t.match_count });
-
-    const totalPoints      = t.totalPoints      ?? t.total_points       ?? 0;
-    const totalKills       = t.totalKills       ?? t.total_kills        ?? 0;
-    const totalPlacePoints = t.totalPlacePoints ?? t.total_place_points ?? 0;
-    const matchCount       = t.matchCount       ?? t.match_count        ?? 0;
-
-    console.log(`[LiveStats][normalise] overall resolved[${i}] "${t.teamTag}" → pts=${totalPoints} kills=${totalKills} matchCount=${matchCount}`);
-
-    return {
-      ...t,
-      teamId: sid(t.teamId),
-      totalPoints, totalKills, totalPlacePoints, matchCount,
-      players: (t.players || []).map((p: any) => ({ ...p })),
-    };
-  });
-};
-
-const normaliseOverallPayload = (raw: any): OverallSlimData => {
-  console.log('[LiveStats][normalise] overall payload top-level keys:', Object.keys(raw));
-  console.log('[LiveStats][normalise] overall payload matchCount raw:', raw.matchCount,
-    '| match_count:', raw.match_count, '| teams count:', raw.teams?.length);
-  if (raw.teams?.[0])
-    console.log('[LiveStats][normalise] overall teams[0] raw (first 500 chars):',
-      JSON.stringify(raw.teams[0]).slice(0, 500));
-
-  return {
-    tournament: { ...raw.tournament, _id: sid(raw.tournament?._id) },
-    round:      { ...raw.round,      _id: sid(raw.round?._id) },
-    matchCount: raw.matchCount ?? raw.match_count ?? 0,
-    teams:      normaliseOverallTeams(raw.teams),
-  };
-};
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// HELPERS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const toUint8 = (d: any): Uint8Array => {
-  if (d instanceof Uint8Array) return d;
-  if (d instanceof ArrayBuffer) return new Uint8Array(d);
-  if (d?.type === 'Buffer' && Array.isArray(d.data)) return new Uint8Array(d.data);
-  return new Uint8Array(d);
-};
-
-const shallowEqualTeams = (a: any[], b: any[]): boolean => {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    const ta = a[i]; const tb = b[i];
-    if (ta._id !== tb._id || ta.placePoints !== tb.placePoints || ta.players?.length !== tb.players?.length) return false;
-    for (let j = 0; j < (ta.players?.length ?? 0); j++) {
-      const pa = ta.players[j]; const pb = tb.players[j];
-      if (pa._id !== pb._id || pa.killNum !== pb.killNum || pa.liveState !== pb.liveState || pa.bHasDied !== pb.bHasDied) return false;
+    if (!isDead) {
+      barHeight = apiEnabled
+        ? Math.max(0, Math.min(1, player.health / (player.healthMax || 100))) * baseHealthBar
+        : baseHealthBar;
+      barColor = isKnocked ? 'bg-red-500' : 'bg-[#0dd10d]';
     }
-  }
-  return true;
-};
 
-const EMPTY_TOURNAMENT: TournamentApi = {
-  _id: '', tournamentName: '', torLogo: '', primaryColor: '#dbb983', secondaryColor: '#583907', overlayBg: '',
-};
+    return (
+      <div
+        className="relative w-[10px] bg-gray-600"
+        style={{ height: `${baseHealthBar}px` }}
+      >
+        <div
+          className={`absolute bottom-0 w-full transition-all duration-300 ${barColor}`}
+          style={{ height: `${barHeight}px` }}
+        />
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.player.health === next.player.health &&
+    prev.player.healthMax === next.player.healthMax &&
+    prev.player.liveState === next.player.liveState &&
+    prev.player.bHasDied === next.player.bHasDied &&
+    prev.apiEnabled === next.apiEnabled &&
+    prev.baseHealthBar === next.baseHealthBar
+);
+PlayerHealthBar.displayName = 'PlayerHealthBar';
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// COMPONENT
-// ═══════════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────
+// AnimatedTeamRow
+// No memo — index changes must always re-render
+// so `top` and rank number update on re-sort
+// ─────────────────────────────────────────────
+interface AnimatedTeamRowProps {
+  team: any;
+  index: number;
+  gradientStyle: React.CSSProperties;
+  apiEnabled: boolean;
+  baseRowHeight: number;
+  baseHealthBar: number;
+  transitionReady: boolean;
+}
 
-const LiveStats: React.FC = () => {
-  const { tournamentId, roundId, matchId } = useParams<{
-    tournamentId: string; roundId: string; matchId: string;
-  }>();
-  const [searchParams] = useSearchParams();
-  const followSelected = (searchParams.get('followSelected') || 'false').toLowerCase() === 'true';
+const AnimatedTeamRow = ({
+  team,
+  index,
+  gradientStyle,
+  apiEnabled,
+  baseRowHeight,
+  baseHealthBar,
+  transitionReady,
+}: AnimatedTeamRowProps) => {
+  const wasEliminatedRef = useRef(team.isAllDead);
+  const overlayKeyRef = useRef(0);
+  const [overlayKey, setOverlayKey] = useState(0);
+  const [showOverlay, setShowOverlay] = useState(false);
 
-  const [liveData,    setLiveData]    = useState<LiveSlimData    | null>(null);
-  const [overallData, setOverallData] = useState<OverallSlimData | null>(null);
-
-  const matchIdRef     = useRef('');
-  const matchDataIdRef = useRef('');
+  const handleOverlayDone = useCallback(() => setShowOverlay(false), []);
 
   useEffect(() => {
-    const nextMatch     = liveData?.match?._id     || '';
-    const nextMatchData = liveData?.matchData?._id || '';
-    if (matchIdRef.current !== nextMatch || matchDataIdRef.current !== nextMatchData) {
-      matchIdRef.current     = nextMatch;
-      matchDataIdRef.current = nextMatchData;
-      console.log('[LiveStats] Refs updated → match:', nextMatch, '| matchData:', nextMatchData);
+    if (team.isAllDead && !wasEliminatedRef.current) {
+      overlayKeyRef.current += 1;
+      setOverlayKey(overlayKeyRef.current);
+      setShowOverlay(true);
     }
-  }, [liveData]);
+    if (!team.isAllDead && wasEliminatedRef.current) {
+      setShowOverlay(false);
+    }
+    wasEliminatedRef.current = team.isAllDead;
+  }, [team.isAllDead]);
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // FETCH
-  // ═══════════════════════════════════════════════════════════════════════════
+    return (
+      <div
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: `${index * baseRowHeight}px`,
+          height: `${baseRowHeight}px`,
+          transition: transitionReady ? 'top 0.7s cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
+          opacity: team.isAllDead ? 0.7 : 1,
+          zIndex: 1,
+        }}
+      >
+        <style>{`@keyframes pulseBlue {
+  0% {
+    box-shadow: inset 0 0 10px rgba(59,130,246,0.4);
+  }
+  50% {
+    box-shadow: inset 0 0 25px rgba(59,130,246,1);
+  }
+  100% {
+    box-shadow: inset 0 0 10px rgba(59,130,246,0.4);
+  }
+}`}</style>
+        <div
+          className="w-full relative flex items-center text-black font-bold border-b-[#000000] border-b-[1px] font-[AGENCYB] text-[2rem]"
+          style={{ height: `${baseRowHeight}px` }}
+        >
+          {team.hasOutsideBlueCircle && !team.isAllDead && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                background: 'rgba(59, 130, 246, 0.15)',
+                boxShadow: 'inset 0 0 20px rgba(59,130,246,0.8)',
+                animation: 'pulseBlue 1.2s infinite',
+                pointerEvents: 'none',
+                zIndex: 2,
+              }}
+            />
+          )}
+
+        {/* Rank */}
+  {/* Rank */}
+<div
+  className="w-[80px] flex items-center justify-center text-white"
+  style={{ height: `${baseRowHeight}px`, ...gradientStyle }}
+>
+  {team.players.some((p: Player) => p.isFiring) ? (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 500 500"
+      className="w-[44px] h-[44px] animate-pulse"
+      style={{
+        transform: "rotate(90deg)", // points right
+        filter: "drop-shadow(0 0 18px red) drop-shadow(0 0 30px red)",
+        transition: "all 0.2s ease-in-out",
+      }}
+    >
+      {/* Solid white bullet */}
+      <g fill="white" stroke="red" strokeWidth="2">
+        <polygon points="285.374,191.068 285.374,151.082 218.227,151.082 218.227,191.068 204.646,218.23 298.955,218.23" />
+        <rect x="201.441" y="235.015" width="100.721" height="184.656"/>
+        <path d="M270.558,41.682L259.84,5.985C258.774,2.434,255.509,0,251.799,0c-3.702,0-6.975,2.434-8.041,5.984l-10.71,35.697
+          c-9.031,30.107-13.765,61.23-14.512,92.613h66.535C284.323,102.912,279.589,71.789,270.558,41.682z"/>
+      </g>
+      <path
+        d="M294.703,458.164c0.26-0.688,0.537-1.368,0.713-2.09l4.902-19.615h-97.037l4.893,19.615
+        c0.185,0.722,0.453,1.402,0.722,2.09c-4.516,3.794-7.453,9.417-7.453,15.763v8.998c0,11.407,9.275,20.681,20.681,20.681h59.358
+        c11.398,0,20.681-9.275,20.681-20.681v-8.998C302.165,467.581,299.228,461.957,294.703,458.164z"
+        fill="white"
+        stroke="red"
+        strokeWidth="2"
+      />
+    </svg>
+  ) : (
+    index + 1
+  )}
+</div>
+        {/* Tag */}
+        <div className="h-full w-[230px] flex items-center justify-start gap-2 pl-[10px] text-black bg-white">
+          <img
+            src={team.teamLogo || '/def_logo.png'}
+            alt=""
+            className="w-[30px] h-[30px] object-contain"
+          />
+          <span className="text-left">{team.teamTag.toUpperCase()}</span>
+        </div>
+
+        {/* Stats */}
+        <div className="h-full flex items-center text-white w-[300px] bg-[#000000d7]">
+          {/* Health bars — all fields real-time */}
+          <div
+            className="flex gap-[2px] items-center justify-center flex-1"
+            style={{ height: `${baseHealthBar}px` }}
+          >
+            {team.players.length === 0 ? (
+              <div className="text-white text-[20px] font-bold">MISS</div>
+            ) : (
+              team.players.map((player: Player) => (
+                <PlayerHealthBar
+                  key={player._id}
+                  player={player}
+                  apiEnabled={apiEnabled}
+                  baseHealthBar={baseHealthBar}
+                />
+              ))
+            )}
+          </div>
+
+          {/* Total Points — static from overallData */}
+          <div className="w-[60px] flex items-center justify-center text-center">
+            {team.totalPoints}
+          </div>
+
+<div className="w-[0px] flex items-center justify-center text-center">
+
+          </div>
+          {/* Live Kills — real-time */}
+          <div className="w-[60px] flex items-center justify-center text-white text-center">
+           {team.totalKills}
+          </div>
+        </div>
+
+        {showOverlay && (
+          <EliminatedOverlay
+            key={overlayKey}
+            gradientStyle={gradientStyle}
+            rowHeight={baseRowHeight}
+            onDone={handleOverlayDone}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────
+// AnimatedTeamList
+// ─────────────────────────────────────────────
+interface AnimatedTeamListProps {
+  teams: any[];
+  gradientStyle: React.CSSProperties;
+  apiEnabled: boolean;
+  baseRowHeight: number;
+  baseHealthBar: number;
+}
+
+const AnimatedTeamList = ({
+  teams,
+  gradientStyle,
+  apiEnabled,
+  baseRowHeight,
+  baseHealthBar,
+}: AnimatedTeamListProps) => {
+  const [transitionReady, setTransitionReady] = useState(false);
+
   useEffect(() => {
-    if (!tournamentId || !roundId) return;
-
-    const fetchBoth = async () => {
-      let effectiveMatchId = matchId;
-      if (followSelected) {
-        try {
-          const sel = await api.get(`public/tournaments/${tournamentId}/rounds/${roundId}/selected-match`);
-          if (sel.data?.matchId) effectiveMatchId = sel.data.matchId;
-        } catch { console.warn('[LiveStats] selected-match lookup failed'); }
-      }
-      console.log('[LiveStats] fetchBoth →', { tournamentId, roundId, effectiveMatchId });
-
-      // overall first — no dependency on live data
-      const fetchOverall = (async () => {
-        const key    = `overallSlimData-${tournamentId}-${roundId}`;
-        const cached = getCache(key, 30_000) as OverallSlimData | null;
-        if (cached) {
-          console.log('[LiveStats] overall CACHE HIT teams:', cached.teams.length,
-            'matchCount:', cached.matchCount, 'top pts:', cached.teams[0]?.totalPoints);
-          setOverallData(cached);
-        }
-
-        try {
-          const res = await api.get(
-            `overallData/tournament/${tournamentId}/round/${roundId}/overall-slim`,
-            { responseType: 'arraybuffer' }
-          );
-
-          // ── raw HTTP inspection ────────────────────────────────────────────
-          console.log('[LiveStats] overall HTTP status:', res.status,
-            '| content-type:', res.headers?.['content-type'],
-            '| data type:', typeof res.data,
-            res.data instanceof ArrayBuffer ? '(ArrayBuffer)' :
-            res.data instanceof Uint8Array  ? '(Uint8Array)'  : '(other)');
-
-          const raw = smartDecode(res.data, res.headers?.['content-type'] || '');
-          if (!raw) { console.error('[LiveStats] overall smartDecode → null'); return; }
-
-          // ── raw decoded inspection ─────────────────────────────────────────
-          console.log('[LiveStats] overall RAW type:', typeof raw,
-            '| top keys:', Object.keys(raw),
-            '| matchCount:', raw.matchCount, '| match_count:', raw.match_count,
-            '| teams.length:', raw.teams?.length);
-          if (raw.teams?.[0])
-            console.log('[LiveStats] overall RAW teams[0]:', JSON.stringify(raw.teams[0]).slice(0, 500));
-
-          const newData = normaliseOverallPayload(raw);
-          console.log('[LiveStats] overall NORMALISED teams:', newData.teams.length,
-            '| matchCount:', newData.matchCount,
-            '| top team:', newData.teams[0]?.teamTag,
-            '| top pts:', newData.teams[0]?.totalPoints,
-            '| top kills:', newData.teams[0]?.totalKills);
-
-          const sameCount = cached?.teams?.length === newData.teams.length;
-          const samePts   = cached?.teams?.[0]?.totalPoints === newData.teams[0]?.totalPoints;
-          if (!cached || !sameCount || !samePts) {
-            removeCache(key); setCache(key, newData);
-            setOverallData(newData);
-            console.log('[LiveStats] overall setState called');
-          } else {
-            console.log('[LiveStats] overall unchanged vs cache — skipping setState');
-          }
-        } catch (err) { console.error('[LiveStats] overall fetch failed:', err); }
-      })();
-
-      // live-slim
-      const fetchLive = effectiveMatchId
-        ? (async () => {
-            const key    = `liveSlimData-${tournamentId}-${roundId}-${effectiveMatchId}`;
-            const cached = getCache(key, 30_000) as LiveSlimData | null;
-            if (cached) { console.log('[LiveStats] live CACHE HIT matchId:', cached.match._id); setLiveData(cached); }
-
-            try {
-              const res = await api.get(
-                `liveData/tournament/${tournamentId}/round/${roundId}/match/${effectiveMatchId}/live-slim`,
-                { responseType: 'arraybuffer' }
-              );
-              const raw = smartDecode(res.data, res.headers?.['content-type'] || '');
-              if (!raw) { console.error('[LiveStats] live smartDecode → null'); return; }
-
-              const newData = normaliseLivePayload(raw);
-              console.log('[LiveStats] live fetched matchId:', newData.match._id,
-                '| matchDataId:', newData.matchData._id, '| teams:', newData.matchData.teams.length);
-
-              const changed = !cached || cached.matchData._id !== newData.matchData._id
-                || !shallowEqualTeams(cached.matchData.teams, newData.matchData.teams);
-              if (changed) { removeCache(key); setCache(key, newData); setLiveData(newData); }
-            } catch (err) { console.error('[LiveStats] live fetch failed:', err); }
-          })()
-        : Promise.resolve();
-
-      await Promise.all([fetchOverall, fetchLive]);
-    };
-
-    fetchBoth();
-  }, [tournamentId, roundId, matchId, followSelected]);
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // SOCKET
-  // ═══════════════════════════════════════════════════════════════════════════
-  useEffect(() => {
-    const socketManager = SocketManager.getInstance();
-    const socket        = socketManager.connect();
-    console.log('[LiveStats] Socket mounted. connected:', socket.connected);
-    socket.onAny((ev: string, ...args: any[]) => console.log(`[LiveStats] Socket: "${ev}"`, args));
-
-    const handleOverallSlimUpdate = (enc: any) => {
-      try {
-        const decoded = normaliseOverallPayload(smartDecode(toUint8(enc)));
-        console.log('[LiveStats] socket overallSlimUpdate teams:', decoded.teams.length, 'matchCount:', decoded.matchCount);
-        setOverallData(decoded);  
-      } catch (e) { console.error('[LiveStats] overallSlimUpdate error:', e); }
-    };
-
-    const handleLiveSlimUpdate = (enc: any) => {
-      try {
-        const decoded = normaliseLivePayload(smartDecode(toUint8(enc)));
-        console.log('[LiveStats] socket liveSlimUpdate matchId:', decoded.match._id);
-        setLiveData(decoded);
-      } catch (e) { console.error('[LiveStats] liveSlimUpdate error:', e); }
-    };
-
-    const handleLiveUpdate = (incoming: any) => {
-      if (!matchIdRef.current || sid(incoming.matchId) !== matchIdRef.current) return;
-      setLiveData((prev) => prev ? { ...prev, matchData: incoming } : prev);
-    };
-
-    const handleMatchDataUpdate = (incoming: any) => {
-      if (!matchDataIdRef.current || sid(incoming.matchDataId) !== matchDataIdRef.current) return;
-      setLiveData((prev) => {
-        if (!prev) return prev;
-        return { ...prev, matchData: { ...prev.matchData, teams: prev.matchData.teams.map((team) => {
-          if (team._id !== sid(incoming.teamId) && team.teamId !== sid(incoming.teamId)) return team;
-          const changes = incoming.changes || {};
-          const next: any = { ...team, ...changes };
-          if (Array.isArray(changes.players)) {
-            const byId = new Map(changes.players.map((p: any) => [sid(p._id), p]));
-            next.players = team.players.map((p) => { const u = byId.get(p._id); return u ? { ...p, ...u } : p; });
-          }
-          return next;
-        })}};
-      });
-    };
-
-    const handlePlayerUpdate = (incoming: any) => {
-      if (!matchDataIdRef.current || sid(incoming.matchDataId) !== matchDataIdRef.current) return;
-      setLiveData((prev) => {
-        if (!prev) return prev;
-        return { ...prev, matchData: { ...prev.matchData, teams: prev.matchData.teams.map((team) => {
-          if (team._id !== sid(incoming.teamId) && team.teamId !== sid(incoming.teamId)) return team;
-          return { ...team, players: team.players.map((p) => p._id === sid(incoming.playerId) ? { ...p, ...incoming.updates } : p) };
-        })}};
-      });
-    };
-
-    const handleTeamPointsUpdate = (incoming: any) => {
-      if (!matchDataIdRef.current || sid(incoming.matchDataId) !== matchDataIdRef.current) return;
-      setLiveData((prev) => {
-        if (!prev) return prev;
-        return { ...prev, matchData: { ...prev.matchData, teams: prev.matchData.teams.map((team) => {
-          if (team._id !== sid(incoming.teamId) && team.teamId !== sid(incoming.teamId)) return team;
-          return { ...team, placePoints: incoming.changes?.placePoints ?? team.placePoints };
-        })}};
-      });
-    };
-
-    const handleTeamStatsUpdate = (incoming: any) => {
-      if (!matchDataIdRef.current || sid(incoming.matchDataId) !== matchDataIdRef.current) return;
-      setLiveData((prev) => {
-        if (!prev) return prev;
-        return { ...prev, matchData: { ...prev.matchData, teams: prev.matchData.teams.map((team) => {
-          if (team._id !== sid(incoming.teamId) && team.teamId !== sid(incoming.teamId)) return team;
-          const updatedPlayers = incoming.players
-            ? team.players.map((p) => { const u = incoming.players.find((x: any) => sid(x._id) === p._id); return u ? { ...p, killNum: u.killNum } : p; })
-            : team.players;
-          return { ...team, players: updatedPlayers };
-        })}};
-      });
-    };
-
-    const handleBulkTeamUpdate = (incoming: any) => {
-      if (!matchDataIdRef.current || sid(incoming.matchDataId) !== matchDataIdRef.current) return;
-      if (!incoming.changes?.players) return;
-      setLiveData((prev) => {
-        if (!prev) return prev;
-        return { ...prev, matchData: { ...prev.matchData, teams: prev.matchData.teams.map((team) => {
-          if (team._id !== sid(incoming.teamId) && team.teamId !== sid(incoming.teamId)) return team;
-          const byId = new Map(incoming.changes.players.map((p: any) => [sid(p._id), p]));
-          return { ...team, players: team.players.map((p) => { const u = byId.get(p._id); return u ? { ...p, ...u } : p; }) };
-        })}};
-      });
-    };
-
-    socket.on('overallSlimUpdate',  handleOverallSlimUpdate);
-    socket.on('liveSlimUpdate',     handleLiveSlimUpdate);
-    socket.on('liveMatchUpdate',    handleLiveUpdate);
-    socket.on('matchDataUpdated',   handleMatchDataUpdate);
-    socket.on('playerStatsUpdated', handlePlayerUpdate);
-    socket.on('teamPointsUpdated',  handleTeamPointsUpdate);
-    socket.on('teamStatsUpdated',   handleTeamStatsUpdate);
-    socket.on('bulkTeamUpdate',     handleBulkTeamUpdate);
-
-    return () => {
-      console.log('[LiveStats] Socket cleanup');
-      socket.offAny();
-      ['overallSlimUpdate','liveSlimUpdate','liveMatchUpdate','matchDataUpdated',
-       'playerStatsUpdated','teamPointsUpdated','teamStatsUpdated','bulkTeamUpdate']
-        .forEach(e => socket.off(e));
-      socketManager.disconnect();
-    };
+    const raf = requestAnimationFrame(() => setTransitionReady(true));
+    return () => cancelAnimationFrame(raf);
   }, []);
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // MEMOS
-  // ═══════════════════════════════════════════════════════════════════════════
+  const containerHeight = teams.length * baseRowHeight;
 
-  const sortedLiveTeams = useMemo((): LiveTeamDerived[] => {
-    const teams = liveData?.matchData?.teams;
-    if (!teams?.length) return [];
-    return teams
-      .map((team) => {
-        const totalKills  = team.players.reduce((s, p) => s + (p.killNum || 0), 0);
-        const totalPoints = (team.placePoints || 0) + totalKills;
-        return { ...team, totalKills, alive: team.players.filter((p) => p.liveState !== 5).length,
-          totalPoints, isAllDead: team.players.every((p) => p.liveState === 5 || p.bHasDied) };
-      })
-      .sort((a, b) => b.totalPoints !== a.totalPoints ? b.totalPoints - a.totalPoints : b.totalKills - a.totalKills);
-  }, [liveData]);
+  return (
+    <div style={{ position: 'relative', height: `${containerHeight}px`, width: '100%' }}>
+      {teams.map((team, index) => (
+        <AnimatedTeamRow
+          key={team._id}
+          team={team}
+          index={index}
+          gradientStyle={gradientStyle}
+          apiEnabled={apiEnabled}
+          baseRowHeight={baseRowHeight}
+          baseHealthBar={baseHealthBar}
+          transitionReady={transitionReady}
+        />
+      ))}
+    </div>
+  );
+};
 
-  // slot→rank and slot→stats from live panel (independent memo)
-  const liveSlotMaps = useMemo(() => {
-    const rankBySlot  = new Map<number, number>();
-    const statsBySlot = new Map<number, { kills: number; points: number }>();
-    sortedLiveTeams.forEach((t, i) => {
-      rankBySlot.set(t.slot, i + 1);
-      statsBySlot.set(t.slot, { kills: t.totalKills, points: t.totalPoints });
-    });
-    return { rankBySlot, statsBySlot };
-  }, [sortedLiveTeams]);
+// ─────────────────────────────────────────────
+// LiveStats (main component)
+//
+// No socket subscription anymore. PublicThemeRenderer owns the single
+// socket connection for the page, listens to 'bulkUpdate', and re-renders
+// this component with fresh `matchData` / `overallData` props whenever
+// the backend pushes a change. useSortedTeams (shared across every theme's
+// Alerts/LiveStats/battlebar) does all the derived-stat work that used to
+// live in mergeMatchPatch + six separate socket handlers here.
+// ─────────────────────────────────────────────
+const LiveStats: React.FC<LiveStatsProps> = ({
+  tournament,
+  round,
+  match,
+  matchData,
+  overallData,
+}) => {
+  // 'overall' sortBy = cumulative event standings (placePoints + kills from
+  // overallData), which is what this hero panel has always shown — matches
+  // the old sort (b.totalPoints - a.totalPoints) exactly.
+  const sortedTeams: SortedTeam[] = useSortedTeams(matchData, overallData, 'overall');
 
-  // overall panel — runs independently when overallData arrives, no live dep
-  const sortedOverallTeams = useMemo((): OverallTeamDerived[] => {
-    const teams = overallData?.teams;
-    if (!teams?.length) {
-      console.log('[LiveStats][memo] no overall teams. overallData=', overallData);
-      return [];
-    }
+  // ── Layout constants ──────────────────────────
+  const { baseRowHeight, baseHealthBar, scaleY } = useMemo(() => {
+    const listTopOffset = 250;
+    const canvasHeight = 1080;
+    const availableHeight = Math.max(0, canvasHeight - listTopOffset);
+    const rowsCount = Math.max(1, sortedTeams.length);
+    const baseRowHeight = 50;
+    const baseHealthBar = 40;
+    const totalNeeded = rowsCount * baseRowHeight;
+    const scaleY = totalNeeded > 0 ? Math.min(1, availableHeight / totalNeeded) : 1;
+    return { baseRowHeight, baseHealthBar, scaleY };
+  }, [sortedTeams.length]);
 
-    const { rankBySlot, statsBySlot } = liveSlotMaps;
-    console.log('[LiveStats][memo] sortedOverallTeams → teams:', teams.length,
-      '| matchCount:', overallData!.matchCount,
-      '| live slots available:', rankBySlot.size,
-      '| teams[0] storedPts:', teams[0]?.totalPoints,
-      '| teams[0] storedKills:', teams[0]?.totalKills);
-
-    return [...teams]
-      .map((team) => {
-        const liveStats   = statsBySlot.get(team.slot);
-        const useLiveSeed = overallData!.matchCount === 0 && !!liveStats;
-        const effectiveKills  = useLiveSeed ? liveStats!.kills  : team.totalKills;
-        const effectivePoints = useLiveSeed ? liveStats!.points : team.totalPoints;
-
-        console.log(`[LiveStats][memo] team "${team.teamTag}" slot=${team.slot}`,
-          `matchCount=${overallData!.matchCount} useLiveSeed=${useLiveSeed}`,
-          `stored pts=${team.totalPoints} → effective pts=${effectivePoints}`);
-
-        return { ...team, totalKills: effectiveKills, totalPoints: effectivePoints,
-          liveRank: rankBySlot.get(team.slot) ?? null };
-      })
-      .sort((a, b) => b.totalPoints !== a.totalPoints ? b.totalPoints - a.totalPoints : b.totalKills - a.totalKills);
-  }, [overallData, liveSlotMaps]);
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // LAYOUT HELPERS
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  const tournament = liveData?.tournament ?? overallData?.tournament ?? EMPTY_TOURNAMENT;
-  const gradientBg = useMemo(
-    () => `linear-gradient(135deg, ${tournament.primaryColor || '#dbb983'}, ${tournament.secondaryColor || '#583907'})`,
+  // ── Gradient ──────────────────────────────────
+  const gradientStyle = useMemo<React.CSSProperties>(
+    () => ({
+      background: `linear-gradient(135deg, ${tournament.primaryColor || '#000'}, ${tournament.secondaryColor || '#333'})`,
+    }),
     [tournament.primaryColor, tournament.secondaryColor]
   );
 
-  const liveTopTeam      = sortedLiveTeams[0]   ?? null;
-  const liveRemaining    = sortedLiveTeams.slice(1);
-  const liveBaseRowH     = 50;
-  const liveScaleY       = useMemo(
-    () => Math.min(1, (1080 - 250) / (Math.max(1, liveRemaining.length) * liveBaseRowH)),
-    [liveRemaining.length]
-  );
+  const apiEnabled = round?.apiEnable === true;
+  const topTeam = sortedTeams[0];
 
-  const overallTopTeam   = sortedOverallTeams[0] ?? null;
-  const overallRemaining = sortedOverallTeams.slice(1);
-  const overallBaseRowH  = 50;
-  const overallScaleY    = useMemo(
-    () => Math.min(1, (1080 - 250) / (Math.max(1, overallRemaining.length) * overallBaseRowH)),
-    [overallRemaining.length]
-  );
+  if (!matchData) {
+    return (
+      <svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <text x="1600" y="350" fontFamily="Arial" fontSize="24" fill="white">No match data</text>
+      </svg>
+    );
+  }
 
-  const matchCount = overallData?.matchCount ?? 0;
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // RENDER
-  // ═══════════════════════════════════════════════════════════════════════════
   return (
     <div className="w-[1920px] h-[1080px] flex justify-end relative top-[0px]">
-
-      {/* ── LIVE PANEL ───────────────────────────────────────────────────── */}
-      <div className="relative w-[400px] h-[1080px] flex flex-col">
-        <div className="w-[400px] h-[220px] relative overflow-hidden flex-shrink-0" style={{ background: gradientBg }}>
-          <div className="absolute top-[6px] left-[10px] z-30 text-white/50 font-[righteous] text-[0.65rem] tracking-widest uppercase">
-            Match Live
-          </div>
-          {liveTopTeam?.players.map((player, idx) => (
-            <div key={`lt-${player._id}-${idx}`} className="absolute w-[200px] h-[200px]"
-              style={{ left: `${-25 + idx * 85}px`, top: '50%', transform: 'translateY(-50%)', zIndex: 1, opacity: liveTopTeam.isAllDead ? 0.4 : 1 }}>
-              <img src={player.picUrl || '/def_char.png'} alt={player.playerName} className="w-full h-full object-cover" />
-            </div>
-          ))}
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/70 to-black z-10 h-[100px] top-[120px]" />
-          {liveTopTeam && (
-            <div className="absolute w-full h-[40px] top-[180px] z-20 font-[righteous] text-[1.5rem] flex items-center">
-              <div className="text-white relative left-[20px] w-[30px]">1</div>
-              <div className="w-[40px] relative left-[20px]">
-                <img src={liveTopTeam.teamLogo} alt={liveTopTeam.teamTag} className="w-full h-full" />
-              </div>
-              <div className="w-[1px] h-[90%] bg-white relative left-[22px]" />
-              <div className="relative left-[30px] flex-1 text-white">{liveTopTeam.teamTag}</div>
-              <div className="text-white relative left-[-2px] w-[40px] text-center">{liveTopTeam.totalPoints}</div>
-              <div className="text-white relative left-[12px] w-[40px] text-center mr-[20px]">{liveTopTeam.totalKills}</div>
-            </div>
-          )}
-        </div>
-
-        <div className="w-[400px] h-[30px] text-[1.1rem] font-[Righteous] flex items-center justify-between px-4 font-bold text-black text-sm flex-shrink-0"
-          style={{ background: 'linear-gradient(to right, #FFD700, #FFA500, #FFD700)' }}>
-          <span>#</span><span>TEAM NAME</span>
-          <span className="relative left-[50px]">ALIVE</span>
-          <span className="relative left-[28px]">PTS</span>
+      {/* ── Top team hero card ── */}
+      <div
+        className="w-[400px] h-[190px] top-[70px] right-0 relative"
+        style={gradientStyle}
+      >
+        <div
+          className="absolute top-[150px] right-0 w-[400px] h-[40px] text-[1.1rem] font-[Righteous]
+                     flex items-center justify-between px-4 font-bold text-white text-sm z-50"
+          style={{
+            background: `linear-gradient(to right, rgba(0,0,0,0) 40%, ${tournament.primaryColor} 80%)`,
+          }}
+        >
+          <span className="relative left-[50px]">TEAM</span>
+          <span className="relative left-[90px]">ALIVE</span>
+          <span className="relative left-[50px]">PTS</span>
           <span className="relative left-[4px]">KILLS</span>
         </div>
 
-        <div className="flex-1 overflow-hidden w-[400px]">
-          <div style={{ transform: `scaleY(${liveScaleY})`, transformOrigin: 'top right' }}>
-            {liveRemaining.map((team, idx) => (
-              <div key={`lr-${team._id}-${idx}`}
-                className="w-full relative flex items-center text-black font-bold border-b border-b-black overflow-visible"
-                style={{ height: `${liveBaseRowH}px`, opacity: team.isAllDead ? 0.7 : 1 }}>
-                <div className="absolute w-[40px] flex items-center justify-center text-white text-[1.5rem]"
-                  style={{ height: `${liveBaseRowH}px`, background: gradientBg }}>{idx + 2}</div>
-                <div className="w-[80px] relative left-[4px] h-full ml-[40px] bg-white">
-                  <img src={team.teamLogo} alt={team.teamTag} className="w-full h-full object-contain" />
-                </div>
-                <div className="h-full w-[260px] flex items-center text-black text-[1.5rem] pl-[10px] bg-white">{team.teamTag}</div>
-                <div className="h-full flex text-white" style={{ background: gradientBg }}>
-                  <div className="w-[60px] flex items-center justify-center text-[1.5rem] relative left-[7px]">{team.totalPoints}</div>
-                  <div className="w-[60px] flex items-center justify-center text-[1.5rem] text-yellow-200">{team.totalKills}</div>
-                </div>
-              </div>
-            ))}
-            <div className="w-full h-[30px] font-[Righteous] flex justify-center items-center text-black font-bold"
-              style={{ background: 'linear-gradient(to right, #FFD700, #FFA500, #FFD700)' }}>
-              {tournament.tournamentName}
+        {topTeam?.players.map((player: Player, index: number) => (
+          <div
+            key={player._id}
+            className="absolute w-[180px] h-[190px] z-0"
+            style={{
+              left: `${-5 + index * 80}px`,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              zIndex: 1,
+            }}
+          >
+            <img
+              src={player.picUrl || '/def_char.png'}
+              alt={player.playerName}
+              className="w-full h-full"
+              onError={e => { (e.target as HTMLImageElement).src = '/def_char.png'; }}
+            />
+          </div>
+        ))}
+
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/70 to-black h-[100px] top-[90px] z-10" />
+      </div>
+
+      {/* ── Animated team rows ── */}
+      <div className="absolute right-0 top-[260px] w-[400px]">
+        <div style={{ transform: `scaleY(${scaleY})`, transformOrigin: 'top right' }}>
+          <AnimatedTeamList
+            teams={sortedTeams}
+            gradientStyle={gradientStyle}
+            apiEnabled={apiEnabled}
+            baseRowHeight={baseRowHeight}
+            baseHealthBar={baseHealthBar}
+          />
+
+          <div
+
+            className="w-full h-[30px] font-[AGENCYB] bg-[#282828] flex justify-center items-center text-white font-bold"
+          >
+            ALIVE{' '}
+            <span className="bg-green-500 w-[20px] h-[20px] ml-[5px] border border-black" />
+          <div className="flex items-center ml-[20px]">
+              KNOCK{' '}
+              <span className="bg-red-500 w-[20px] h-[20px] ml-[5px] border border-white" />
             </div>
+            <div className="flex items-center ml-[20px]">
+              DEAD{' '}
+              <span className="bg-[#282828] w-[20px] h-[20px] ml-[5px] border border-white" />
+            </div>
+
           </div>
         </div>
       </div>
-
-      {/* ── OVERALL PANEL ────────────────────────────────────────────────── */}
-      <div className="relative w-[400px] h-[1080px] flex flex-col">
-        <div className="w-[400px] h-[220px] relative overflow-hidden flex-shrink-0" style={{ background: gradientBg }}>
-          <div className="absolute top-[6px] left-[10px] z-30 text-white/50 font-[righteous] text-[0.65rem] tracking-widest uppercase">
-            Overall · {matchCount} {matchCount === 1 ? 'Match' : 'Matches'}
-          </div>
-          {overallTopTeam?.players.slice(0, 4).map((player, idx) => (
-            <div key={`ot-${player.uId}-${idx}`} className="absolute w-[200px] h-[200px]"
-              style={{ left: `${-25 + idx * 85}px`, top: '50%', transform: 'translateY(-50%)', zIndex: 1 }}>
-              <img src={player.picUrl || '/def_char.png'} alt={player.playerName} className="w-full h-full object-cover" />
-            </div>
-          ))}
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/70 to-black z-10 h-[100px] top-[120px]" />
-          {overallTopTeam && (
-            <div className="absolute w-full h-[40px] top-[180px] z-20 font-[righteous] text-[1.5rem] flex items-center">
-              <div className="text-white relative left-[20px] w-[30px]">1</div>
-              <div className="w-[40px] relative left-[20px]">
-                <img src={overallTopTeam.teamLogo} alt={overallTopTeam.teamTag} className="w-full h-full" />
-              </div>
-              <div className="w-[1px] h-[90%] bg-white relative left-[22px]" />
-              <div className="relative left-[30px] flex-1 text-white">{overallTopTeam.teamTag}</div>
-              <div className="text-white relative left-[-2px] w-[40px] text-center">{overallTopTeam.totalPoints}</div>
-              <div className="text-white relative left-[12px] w-[40px] text-center mr-[20px]">{overallTopTeam.totalKills}</div>
-            </div>
-          )}
-        </div>
-
-        <div className="w-[400px] h-[30px] text-[1.1rem] font-[Righteous] flex items-center justify-between px-4 font-bold text-black text-sm flex-shrink-0"
-          style={{ background: 'linear-gradient(to right, #FFD700, #FFA500, #FFD700)' }}>
-          <span>#</span><span>TEAM NAME</span>
-          <span className="relative left-[28px]">NOW</span>
-          <span className="relative left-[20px]">PTS</span>
-          <span className="relative left-[4px]">KILLS</span>
-        </div>
-
-        <div className="flex-1 overflow-hidden w-[400px]">
-          <div style={{ transform: `scaleY(${overallScaleY})`, transformOrigin: 'top right' }}>
-            {overallRemaining.map((team, idx) => {
-              const overallRank = idx + 2;
-              const liveBetter  = team.liveRank !== null && team.liveRank <= overallRank;
-              return (
-                <div key={`or-${team.teamId}-${idx}`}
-                  className="w-full relative flex items-center text-black font-bold border-b border-b-black overflow-visible"
-                  style={{ height: `${overallBaseRowH}px` }}>
-                  <div className="absolute w-[40px] flex items-center justify-center text-white text-[1.5rem]"
-                    style={{ height: `${overallBaseRowH}px`, background: gradientBg }}>{overallRank}</div>
-                  <div className="w-[80px] relative left-[4px] h-full ml-[40px] bg-white">
-                    <img src={team.teamLogo} alt={team.teamTag} className="w-full h-full object-contain" />
-                  </div>
-                  <div className="h-full w-[200px] flex items-center text-black text-[1.5rem] pl-[10px] bg-white">{team.teamTag}</div>
-                  <div className="h-full w-[60px] flex items-center justify-center bg-white">
-                    {team.liveRank !== null ? (
-                      <span className="text-[1rem] font-[righteous] px-[5px] py-[1px] rounded"
-                        style={{ background: gradientBg, color: '#fff', outline: `2px solid ${liveBetter ? '#4ade80' : '#f87171'}` }}>
-                        #{team.liveRank}
-                      </span>
-                    ) : (
-                      <span className="text-gray-300 text-[1.1rem]">—</span>
-                    )}
-                  </div>
-                  <div className="h-full flex text-white" style={{ background: gradientBg }}>
-                    <div className="w-[50px] flex items-center justify-center text-[1.5rem]">{team.totalPoints}</div>
-                    <div className="w-[50px] flex items-center justify-center text-[1.5rem] text-yellow-200">{team.totalKills}</div>
-                  </div>
-                </div>
-              );
-            })}
-            <div className="w-full h-[30px] font-[Righteous] flex justify-center items-center text-black font-bold"
-              style={{ background: 'linear-gradient(to right, #FFD700, #FFA500, #FFD700)' }}>
-              {overallData?.round?.roundName ?? tournament.tournamentName}
-            </div>
-          </div>
-        </div>
-      </div>
-
     </div>
   );
 };

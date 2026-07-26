@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import api from "../login/api";
 import SocketManager from "./socketManager";
 
@@ -16,80 +16,35 @@ interface Selection {
   isPollingActive: boolean;
 }
 
-const PollingManager: React.FC = () => {
+interface PollingManagerProps {
+  // Optional context from DisplayHud — when provided, PollingManager shows
+  // the polling/live-data status for THIS tournament+round (whatever the
+  // operator currently has open in the HUD), instead of falling back to
+  // "whichever match happens to be flagged isSelected somewhere". Because
+  // these come from DisplayHud's own React state, changing the dropdown
+  // there re-renders this component with fresh props immediately — no
+  // page refresh needed.
+  tournamentId?: string;
+  roundId?: string;
+  // Optional label (e.g. "Match 3") so the status pill can say what it's
+  // actually reporting on.
+  matchLabel?: string;
+}
+
+const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, matchLabel }) => {
   const [selections, setSelections] = useState<Selection[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
-  const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
-  const [buttonState, setButtonState] = useState(false);
 
-  // --- Socket setup ---
-  useEffect(() => {
-    const socketManager = SocketManager.getInstance();
-    const socket = socketManager.connect();
+  // Live-data-arrival tracking — separate from "is polling toggled on".
+  // This answers "is real match data actually flowing right now", which is
+  // what an operator staring at this for hours actually needs to know.
+  const [lastDataAt, setLastDataAt] = useState<number | null>(null);
+  const [pulsing, setPulsing] = useState(false);
+  const pulseTimeoutRef = useRef<number | null>(null);
+  const [, forceTick] = useState(0); // re-render once/sec to keep "Xs ago" fresh
 
-    socket.on("pollingStatusUpdated", (updated: Selection) => {
-      setSelections((prev) => {
-        const newSelections = prev.map((s) =>
-          s._id === updated._id
-            ? { ...s, isPollingActive: updated.isPollingActive }
-            : s
-        );
-
-        if (updated._id === activeMatchId) {
-          const activeSelection = newSelections.find(s => s._id === activeMatchId);
-          const hasApiEnabled = activeSelection?.roundId && typeof activeSelection.roundId === 'object' ? activeSelection.roundId.apiEnable : false;
-          const newButtonState = updated.isPollingActive && hasApiEnabled;
-          setButtonState(newButtonState);
-        }
-
-        return newSelections;
-      });
-    });
-
-    socket.on("matchSelected", ({ selected }: { selected: Selection }) => {
-      setSelections((prev) => {
-        const updatedPrev = prev.map(s => ({ ...s, isSelected: false }));
-        const index = updatedPrev.findIndex((s) => s._id === selected._id);
-        if (index !== -1) {
-          updatedPrev[index] = { ...selected, isSelected: true };
-          return updatedPrev;
-        } else {
-          return [...updatedPrev, { ...selected, isSelected: true }];
-        }
-      });
-
-      setActiveMatchId(selected._id);
-      const hasApiEnabled = selected.roundId && typeof selected.roundId === 'object' ? selected.roundId.apiEnable : false;
-      setButtonState(selected.isPollingActive && hasApiEnabled);
-    });
-
-    socket.on("matchDeselected", ({ matchId }: { matchId: string }) => {
-      setSelections((prev) =>
-        prev.map((s) =>
-          s._id === matchId ? { ...s, isSelected: false, isPollingActive: false } : s
-        )
-      );
-
-      if (activeMatchId === matchId) {
-        setActiveMatchId(null);
-      }
-    });
-
-    socket.on("matchDeleted", ({ matchId }: { matchId: string }) => {
-      setSelections((prev) => prev.filter((s) => s._id !== matchId));
-
-      if (activeMatchId === matchId) {
-        setActiveMatchId(null);
-      }
-    });
-
-    return () => {
-      socketManager.disconnect();
-    };
-  }, [activeMatchId]);
-
-  // --- Fetch initial selections ---
+  // --- Fetch initial selections (unchanged) ---
   useEffect(() => {
     api
       .get<Selection[]>("/matchSelection/selected")
@@ -98,58 +53,174 @@ const PollingManager: React.FC = () => {
           new Map(res.data.map((item) => [item._id, item])).values()
         );
         setSelections(uniqueSelections);
-        if (uniqueSelections.length > 0) {
-          const apiEnabledSelections = uniqueSelections.filter(s =>
-            s.roundId && typeof s.roundId === 'object' && s.roundId.apiEnable
-          );
-          const firstSelected = apiEnabledSelections.length > 0
-            ? (apiEnabledSelections.find(s => s.isSelected) || apiEnabledSelections[0])
-            : (uniqueSelections.find(s => s.isSelected) || uniqueSelections[0]);
-
-          setActiveMatchId(firstSelected._id);
-          const hasApiEnabled = firstSelected.roundId && typeof firstSelected.roundId === 'object' ? firstSelected.roundId.apiEnable : false;
-          setButtonState(firstSelected.isPollingActive && hasApiEnabled);
-        }
       })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
 
-  // --- Reset button state when active match changes ---
+  // --- Socket setup for selection/polling-toggle events ---
+  // FIX: this now runs ONCE (mount-only deps), and cleans up its own
+  // listeners with socket.off(...) before the shared socket could ever
+  // accumulate duplicates. Previously this effect depended on
+  // [activeMatchId] and re-subscribed on every change without ever
+  // removing the old handlers — each stale handler kept firing forever
+  // on the shared singleton socket.
   useEffect(() => {
-    setButtonState(false);
-  }, [activeMatchId]);
+    const socketManager = SocketManager.getInstance();
+    const socket = socketManager.connect();
 
-  // --- Toggle polling for current active match ---
+    const handlePollingStatusUpdated = (updated: Selection) => {
+      setSelections((prev) =>
+        prev.map((s) =>
+          s._id === updated._id ? { ...s, isPollingActive: updated.isPollingActive } : s
+        )
+      );
+    };
+
+    const handleMatchSelected = ({ selected }: { selected: Selection }) => {
+      setSelections((prev) => {
+        const updatedPrev = prev.map((s) => ({ ...s, isSelected: false }));
+        const index = updatedPrev.findIndex((s) => s._id === selected._id);
+        if (index !== -1) {
+          updatedPrev[index] = { ...selected, isSelected: true };
+          return updatedPrev;
+        }
+        return [...updatedPrev, { ...selected, isSelected: true }];
+      });
+    };
+
+    const handleMatchDeselected = ({ matchId }: { matchId: string }) => {
+      setSelections((prev) =>
+        prev.map((s) =>
+          s._id === matchId ? { ...s, isSelected: false, isPollingActive: false } : s
+        )
+      );
+    };
+
+    const handleMatchDeleted = ({ matchId }: { matchId: string }) => {
+      setSelections((prev) => prev.filter((s) => s._id !== matchId));
+    };
+
+    socket.on("pollingStatusUpdated", handlePollingStatusUpdated);
+    socket.on("matchSelected", handleMatchSelected);
+    socket.on("matchDeselected", handleMatchDeselected);
+    socket.on("matchDeleted", handleMatchDeleted);
+
+    return () => {
+      socket.off("pollingStatusUpdated", handlePollingStatusUpdated);
+      socket.off("matchSelected", handleMatchSelected);
+      socket.off("matchDeselected", handleMatchDeselected);
+      socket.off("matchDeleted", handleMatchDeleted);
+      socketManager.disconnect(); // no-op, shared socket stays alive — kept for parity
+    };
+  }, []);
+
+  // --- Which selection is "active"? ---
+  // If DisplayHud told us the current tournament+round via props, prefer
+  // the selection that actually matches it — this is what makes the panel
+  // track whatever the operator is looking at right now, instead of an
+  // arbitrary "first selected match" guess.
+  const activeSelection = useMemo(() => {
+    if (tournamentId && roundId) {
+      const match = selections.find((s) => {
+        const sRoundId = typeof s.roundId === "object" ? s.roundId._id : s.roundId;
+        return s.tournamentId === tournamentId && sRoundId === roundId;
+      });
+      if (match) return match;
+    }
+
+    const apiEnabledSelections = selections.filter(
+      (s) => s.roundId && typeof s.roundId === "object" && s.roundId.apiEnable
+    );
+    if (apiEnabledSelections.length > 0) {
+      return apiEnabledSelections.find((s) => s.isSelected) || apiEnabledSelections[0];
+    }
+    return selections.find((s) => s.isSelected) || selections[0] || null;
+  }, [selections, tournamentId, roundId]);
+
+  const hasApiEnabled =
+    !!activeSelection?.roundId &&
+    typeof activeSelection.roundId === "object" &&
+    activeSelection.roundId.apiEnable;
+
+  // Derived, not separately-tracked state — this is what used to go stale
+  // across the three places the old code manually mirrored it.
+  const buttonState = !!(activeSelection?.isPollingActive && hasApiEnabled);
+
+  const activeTournamentId = activeSelection?.tournamentId;
+  const activeRoundId =
+    activeSelection?.roundId && typeof activeSelection.roundId === "object"
+      ? activeSelection.roundId._id
+      : (activeSelection?.roundId as unknown as string | undefined);
+
+  // Reset the "last data" indicator whenever the active round changes, so
+  // stale freshness from a previous match can't linger on screen.
+  useEffect(() => {
+    setLastDataAt(null);
+    setPulsing(false);
+  }, [activeTournamentId, activeRoundId]);
+
+  // --- Live data confirmation ---
+  // Joins the same bulk room PublicThemeRenderer uses and listens for the
+  // actual 'bulkUpdate' event. Every time one arrives while polling is on,
+  // this flashes the indicator and updates "last data Xs ago" — a real
+  // confirmation that match data is flowing, not just that the toggle is
+  // switched on.
+  useEffect(() => {
+    if (!activeTournamentId || !activeRoundId || !buttonState) return;
+
+    const socketManager = SocketManager.getInstance();
+    const socket = socketManager.connect();
+    socket.emit("joinBulkRoom", { tournamentId: activeTournamentId, roundId: activeRoundId });
+
+    const handleBulkUpdate = () => {
+      setLastDataAt(Date.now());
+      setPulsing(true);
+      if (pulseTimeoutRef.current) clearTimeout(pulseTimeoutRef.current);
+      pulseTimeoutRef.current = window.setTimeout(() => setPulsing(false), 900);
+    };
+
+    socket.on("bulkUpdate", handleBulkUpdate);
+
+    return () => {
+      socket.off("bulkUpdate", handleBulkUpdate);
+      socket.emit("leaveBulkRoom", { tournamentId: activeTournamentId, roundId: activeRoundId });
+      if (pulseTimeoutRef.current) clearTimeout(pulseTimeoutRef.current);
+    };
+  }, [activeTournamentId, activeRoundId, buttonState]);
+
+  // Tick once a second so "Xs ago" stays live without needing new data.
+  useEffect(() => {
+    if (!buttonState) return;
+    const id = setInterval(() => forceTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [buttonState]);
+
+  const secondsSinceData = lastDataAt !== null ? Math.max(0, Math.floor((Date.now() - lastDataAt) / 1000)) : null;
+
+  // --- Toggle polling for the active match ---
   const handleTogglePollingForActive = async () => {
-    if (!activeMatchId) return;
-
-    const match = selections.find((s) => s._id === activeMatchId);
-    if (!match) return;
-
-    const hasApiEnabled = match.roundId && typeof match.roundId === 'object' ? match.roundId.apiEnable : false;
+    if (!activeSelection) return;
     if (!hasApiEnabled) return;
 
-    const currentMatch = selections.find((s) => s._id === activeMatchId);
-    const newState = !currentMatch?.isPollingActive;
-    setButtonState(newState);
+    const newState = !activeSelection.isPollingActive;
+    const prevSelections = selections;
+
+    // Optimistic update — buttonState is derived, so this alone flips the UI.
+    setSelections((prev) =>
+      prev.map((s) => (s._id === activeSelection._id ? { ...s, isPollingActive: newState } : s))
+    );
 
     setUpdating(true);
     try {
-      const roundId = typeof match.roundId === 'object' ? match.roundId._id : match.roundId;
+      const roundIdStr = typeof activeSelection.roundId === "object" ? activeSelection.roundId._id : activeSelection.roundId;
       await api.patch(
-        `/matchSelection/${match.tournamentId}/${roundId}/${match.matchId}/polling`,
+        `/matchSelection/${activeSelection.tournamentId}/${roundIdStr}/${activeSelection.matchId}/polling`,
         { isPollingActive: newState }
-      );
-
-      setSelections((prev) =>
-        prev.map((s) =>
-          s._id === activeMatchId ? { ...s, isPollingActive: newState } : s
-        )
       );
     } catch (err) {
       console.error("Failed to update polling:", err);
-      setButtonState(!newState);
+      setSelections(prevSelections); // roll back optimistic update
     } finally {
       setUpdating(false);
     }
@@ -164,25 +235,51 @@ const PollingManager: React.FC = () => {
     );
   }
 
-  if (!activeMatchId) return null;
+  if (!activeSelection) return null;
 
-  const activeSelection = selections.find(s => s._id === activeMatchId);
-  const hasApiEnabled = activeSelection && activeSelection.roundId && typeof activeSelection.roundId === 'object' ? activeSelection.roundId.apiEnable : false;
+  // Three distinct states now, instead of just LIVE/PAUSED:
+  //  - PAUSED: polling toggled off
+  //  - LIVE (waiting): polling is on, but no bulkUpdate has arrived yet
+  //  - LIVE (Xs ago): polling is on AND data is confirmed flowing
+  const statusLabel = !buttonState
+    ? "PAUSED"
+    : secondsSinceData === null
+      ? "LIVE — waiting for data"
+      : `LIVE • data ${secondsSinceData}s ago`;
+
+  const statusColor = !buttonState ? "gray" : secondsSinceData === null ? "amber" : "green";
 
   return (
     <div className="flex items-center gap-3">
+      {matchLabel && (
+        <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">{matchLabel}</span>
+      )}
+
       {/* Status Indicator */}
-      <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${buttonState
-          ? 'bg-green-900/20 border-green-500/30'
-          : 'bg-gray-800/50 border-gray-700'
-        }`}>
-        <div className={`w-2 h-2 rounded-full ${buttonState
-            ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)] animate-pulse'
-            : 'bg-gray-500'
-          }`}></div>
-        <span className={`text-xs font-medium uppercase tracking-wider ${buttonState ? 'text-green-400' : 'text-gray-500'
-          }`}>
-          {buttonState ? 'LIVE' : 'PAUSED'}
+      <div
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-shadow duration-300 ${
+          statusColor === "green"
+            ? "bg-green-900/20 border-green-500/30"
+            : statusColor === "amber"
+              ? "bg-amber-900/20 border-amber-500/30"
+              : "bg-gray-800/50 border-gray-700"
+        } ${pulsing ? "shadow-[0_0_14px_rgba(34,197,94,0.55)]" : ""}`}
+      >
+        <div
+          className={`w-2 h-2 rounded-full ${
+            statusColor === "green"
+              ? `bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)] ${pulsing ? "" : "animate-pulse"}`
+              : statusColor === "amber"
+                ? "bg-amber-500 animate-pulse shadow-[0_0_6px_rgba(245,158,11,0.6)]"
+                : "bg-gray-500"
+          }`}
+        ></div>
+        <span
+          className={`text-xs font-medium uppercase tracking-wider ${
+            statusColor === "green" ? "text-green-400" : statusColor === "amber" ? "text-amber-400" : "text-gray-500"
+          }`}
+        >
+          {statusLabel}
         </span>
       </div>
 
@@ -208,13 +305,9 @@ const PollingManager: React.FC = () => {
             <span>Updating...</span>
           </>
         ) : (
-          <>
-            {/* Toggle Icon */}
-            <div className={`relative w-10 h-5 rounded-full transition-colors ${buttonState ? 'bg-green-400' : 'bg-gray-600'}`}>
-              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${buttonState ? 'left-5' : 'left-0.5'}`}></div>
-            </div>
-         
-          </>
+          <div className={`relative w-10 h-5 rounded-full transition-colors ${buttonState ? 'bg-green-400' : 'bg-gray-600'}`}>
+            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${buttonState ? 'left-5' : 'left-0.5'}`}></div>
+          </div>
         )}
       </button>
 

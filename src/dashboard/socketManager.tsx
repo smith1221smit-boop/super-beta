@@ -19,16 +19,34 @@ class SocketManager {
   }
 
   /**
-   * Returns the shared socket, creating it if it doesn't exist yet or if it
-   * has actually dropped. Safe to call from as many components as you like —
-   * they all share the same underlying connection.
+   * Returns the shared socket, creating it only the very first time it's
+   * needed. Safe to call from as many components as you like — they all
+   * share the same underlying connection.
    *
-   * IMPORTANT: there is no "connection count" here anymore. Components must
-   * NOT call disconnect() when they unmount — see disconnect() below. This
+   * IMPORTANT FIX: the previous version re-created the socket whenever
+   * `this.socket.disconnected` was true. But a freshly-created socket.io
+   * client is `disconnected === true` for the brief async gap between
+   * `io(...)` being called and the `'connect'` event actually firing. Any
+   * component calling `connect()` during that gap (e.g. two components
+   * mounting close together, or React StrictMode double-invoking effects
+   * in dev) would see `disconnected === true` and spin up a SECOND socket,
+   * silently orphaning the first — each orphan still finishes connecting
+   * on its own, leaking a real connection to the server. That's why you'd
+   * see "Creating new socket connection" / "Socket connected" logged
+   * multiple times for what should be a single shared connection.
+   *
+   * Fix: only create a socket if one has never been created (`this.socket
+   * === null`). Once it exists, `reconnection: true` (already configured
+   * below) is responsible for bringing it back after any drop — we no
+   * longer tear down and replace it just because it's momentarily
+   * disconnected.
+   *
+   * There is still no "connection count" here — components must NOT call
+   * disconnect() when they unmount (see disconnect() below). This
    * connection is meant to live for the lifetime of the browser tab.
    */
   connect(): Socket {
-    if (!this.socket || this.socket.disconnected) {
+    if (!this.socket) {
       console.log("SocketManager: Creating new socket connection");
 
       this.socket = io(SOCKET_URL, {
@@ -51,9 +69,10 @@ class SocketManager {
       this.socket.on("disconnect", (reason) => {
         console.log("SocketManager: Socket disconnected:", reason);
         // socket.io's own `reconnection: true` already handles reconnecting
-        // for us in almost every case. This manual fallback only exists as
-        // a belt-and-braces safety net for reasons socket.io itself won't
-        // auto-retry.
+        // the SAME socket instance for us in almost every case. This manual
+        // fallback only exists as a belt-and-braces safety net for reasons
+        // socket.io itself won't auto-retry (e.g. the server explicitly
+        // disconnected the client).
         if (reason === "io server disconnect") {
           this.scheduleReconnect();
         }
@@ -91,6 +110,8 @@ class SocketManager {
   /**
    * Use this only for an actual full teardown, e.g. on logout or when the
    * whole app is shutting down — never from a single component's cleanup.
+   * This is the only place that should ever set this.socket back to null,
+   * so a subsequent connect() correctly creates a fresh instance.
    */
   forceDisconnect(): void {
     if (this.socket) {
@@ -111,7 +132,10 @@ class SocketManager {
 
     this.reconnectTimer = setTimeout(() => {
       console.log("SocketManager: Attempting to reconnect");
-      this.connect();
+      // this.socket already exists at this point (it was only ever set to
+      // null by forceDisconnect()), so this just nudges socket.io's own
+      // reconnection logic rather than creating another instance.
+      this.socket?.connect();
       this.reconnectTimer = null;
     }, 3000);
   }

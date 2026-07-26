@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo, useTransition, memo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef, useTransition, memo } from 'react';
 import api from '../login/api.tsx';
 import PollingManager from './isPolling.tsx';
 import {
@@ -10,8 +10,17 @@ interface Tournament { _id: string; tournamentName: string; }
 interface Round       { _id: string; roundName: string; }
 interface Match       { _id: string; matchName?: string; matchNo?: number; _matchNo?: number; }
 
+// PublicThemeRenderer's component registry is auto-discovered from
+// Themes/ThemeN folders, so Theme2 works the moment that folder has
+// matching on-screen/off-screen files — no renderer changes needed here.
+// Any view Theme2 doesn't implement yet will show the "not available"
+// placeholder instead of crashing, same as any other theme.
 const THEMES = ['Theme1', 'Theme2', 'Theme3', 'Theme4', 'Theme5', 'Theme6'];
 
+// `themes` on a view restricts which themes show that tile at all. Omit it
+// and the view is assumed universal. This is what stops an operator from
+// generating a link PublicThemeRenderer has no component for (e.g. Player
+// Summary / Live Data only exist on Theme6).
 const VIEW_GROUPS = [
   {
     id: 'match', label: 'On-air', hint: 'Live match overlays', requires: 'live',
@@ -23,7 +32,8 @@ const VIEW_GROUPS = [
       { key: 'intro', label: 'Intro' },
       { key: 'LiveStats', label: 'Live Stats' },
       { key: 'LiveFrags', label: 'Live Frags' },
-      { key: 'Battlebar', label: 'Battle Bar' },
+      { key: 'LiveData', label: 'Live Data', themes: ['Theme6'] },
+      { key: 'Recall', label: 'Recall', themes: ['Theme6'] },
     ]
   },
   {
@@ -37,7 +47,7 @@ const VIEW_GROUPS = [
     id: 'h2h', label: 'Post match — this match', hint: 'Results for the selected match', requires: 'live',
     views: [
       { key: 'mvp', label: 'MVP' },
-      { key: 'Achive', label: 'Player Summary' },
+      { key: 'Achive', label: 'Player Summary', themes: ['Theme6'] },
       { key: 'WwcdStats', label: 'WWCD Stats' },
       { key: 'WwcdSummary', label: 'WWCD Summary' },
       { key: 'MatchSummary', label: 'Match Summary' },
@@ -63,7 +73,7 @@ const VIEW_GROUPS = [
       { key: 'highlightPoints', label: 'Highlight Points' },
       { key: 'slots', label: 'Slots' },
       { key: 'RosterShowCase', label: 'Roster Showcase' },
-      { key: 'PlayerSwitch', label: 'Player Switch' },
+      { key: 'PlayerSwitch', label: 'Player Switch', themes: ['Theme4', 'Theme5', 'Theme6'] },
     ]
   },
   {
@@ -76,12 +86,6 @@ const VIEW_GROUPS = [
 ];
 
 // ── Design system ────────────────────────────────────────────────────────────
-// Same visual identity as the Team Ops screen: dark control-room void, one red
-// tally accent, Space Grotesk / Inter / JetBrains Mono. The old page packed a
-// tournament tree, a match bar, and six overlay groups onto one screen at
-// once — this version turns that into four numbered steps so a new operator
-// always knows exactly what to click next, and later steps simply stay dim
-// and unclickable until the step above them is done.
 const STYLES = `
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
@@ -99,7 +103,6 @@ const STYLES = `
 .hd-dot { animation: hd-pulse 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .hd-dot { animation: none; } }
 
-/* ── Top navbar (matches Team Ops) ── */
 .hd-nav { position: sticky; top: 0; z-index: 60; background: rgba(11,12,14,0.92); backdrop-filter: blur(16px); border-bottom: 1px solid #24262B; }
 .hd-nav-inner { max-width: 1280px; margin: 0 auto; padding: 0 20px; display: flex; align-items: center; height: 64px; gap: 18px; }
 .hd-nav-brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
@@ -131,7 +134,6 @@ const STYLES = `
 .hd-status { display: flex; align-items: center; gap: 7px; background: #131418; border: 1px solid #24262B; padding: 8px 14px; }
 .hd-status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 
-/* ── Step cards ── */
 .hd-step { display: flex; gap: 16px; margin-bottom: 14px; }
 .hd-step-num-wrap { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; width: 34px; }
 .hd-step-num { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; border: 1px solid #24262B; background: #131418; color: #55565C; flex-shrink: 0; }
@@ -143,7 +145,6 @@ const STYLES = `
 .hd-step-title { font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700; color: #F4F2EE; text-transform: uppercase; letter-spacing: 0.01em; }
 .hd-step-sub { font-size: 13px; color: #93959C; margin-top: 3px; }
 
-/* ── Search ── */
 .hd-search-wrap { position: relative; margin-top: 14px; max-width: 320px; }
 .hd-search-ic { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #55565C; font-size: 12px; pointer-events: none; }
 .hd-search-input { width: 100%; padding: 10px 13px 10px 34px; background: #0B0C0E; border: 1px solid #24262B; color: #F4F2EE; font-family: 'Inter', sans-serif; font-size: 13px; outline: none; transition: border-color .15s ease; }
@@ -151,15 +152,13 @@ const STYLES = `
 .hd-search-input:focus { border-color: #E11D2E; }
 .hd-search-count { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #55565C; margin-top: 6px; }
 
-/* ── Selects ── */
 .hd-select-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
 @media (max-width: 560px) { .hd-select-row { grid-template-columns: 1fr; } }
-.hd-field-label { display: block; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #55565C; letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 6px; }
+.hd-field-label { display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #55565C; letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 6px; }
 .hd-select { width: 100%; padding: 11px 13px; background: #0B0C0E; border: 1px solid #24262B; color: #F4F2EE; font-family: 'Inter', sans-serif; font-size: 14px; outline: none; cursor: pointer; transition: border-color .15s ease; appearance: none; }
 .hd-select:focus { border-color: #E11D2E; }
 .hd-select:disabled { color: #55565C; cursor: not-allowed; }
 
-/* ── Match chips ── */
 .hd-chip-group { margin-top: 14px; }
 .hd-chip-hdr { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
 .hd-chip-hdr-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
@@ -170,13 +169,11 @@ const STYLES = `
 .hd-chip.on-live { background: rgba(74,222,128,0.1); border-color: #4ADE80; color: #4ADE80; }
 .hd-chip.on-sched { background: rgba(225,29,46,0.1); border-color: #E11D2E; color: #E11D2E; }
 
-/* ── Theme picker ── */
 .hd-theme-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
 .hd-theme-btn { padding: 9px 16px; border: 1px solid #24262B; background: #0B0C0E; color: #93959C; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; cursor: pointer; transition: all .12s ease; }
 .hd-theme-btn:hover { color: #F4F2EE; border-color: rgba(225,29,46,0.4); }
 .hd-theme-btn.on { background: rgba(225,29,46,0.1); border-color: #E11D2E; color: #E11D2E; }
 
-/* ── Overlay groups ── */
 .hd-group { margin-bottom: 18px; }
 .hd-group:last-child { margin-bottom: 0; }
 .hd-group-hdr { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
@@ -190,16 +187,30 @@ const STYLES = `
 .hd-tile-ic { color: #55565C; font-size: 10px; }
 .hd-tile:hover .hd-tile-ic { color: #E11D2E; }
 
-/* ── Empty / locked notices ── */
 .hd-note { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px 13px; background: rgba(225,29,46,0.06); border: 1px solid rgba(225,29,46,0.2); font-size: 12px; color: #93959C; }
 .hd-empty { text-align: center; padding: 56px 20px; border: 1px dashed #24262B; }
+
+.hd-spinner { width: 11px; height: 11px; border-radius: 50%; border: 2px solid #24262B; border-top-color: #E11D2E; animation: hd-spin 0.7s linear infinite; }
+@keyframes hd-spin { to { transform: rotate(360deg); } }
 `;
 
-// ── Top navigation (identical identity to Team Ops) ─────────────────────────
-// Memoized: user rarely changes, but the page re-renders on every search
-// keystroke and chip click — without this the nav (and its polling manager)
-// would rebuild on each of those for no reason.
-const TopNav = memo(({ user }: { user: any }) => {
+// NOTE: TopNav now accepts pollTournamentId/pollRoundId/pollMatchLabel and
+// forwards them to PollingManager as tournamentId/roundId/matchLabel. This
+// is the fix for the "Cannot find name 'tournamentId'" etc. TS errors —
+// tournamentId, roundId, and liveMatchObj are DisplayHud's own state, not
+// TopNav's, so they can't be referenced directly from inside TopNav. They
+// have to be threaded through as props like this.
+const TopNav = memo(({
+  user,
+  pollTournamentId,
+  pollRoundId,
+  pollMatchLabel,
+}: {
+  user: any;
+  pollTournamentId?: string;
+  pollRoundId?: string;
+  pollMatchLabel?: string;
+}) => {
   const [open, setOpen] = useState(false);
 
   const links = [
@@ -228,7 +239,11 @@ const TopNav = memo(({ user }: { user: any }) => {
         <div className="hd-nav-right">
           <div className="hd-nav-poll">
             <span className="hd-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: '#E11D2E' }} />
-            <PollingManager />
+            <PollingManager
+              tournamentId={pollTournamentId}
+              roundId={pollRoundId}
+              matchLabel={pollMatchLabel}
+            />
           </div>
           {user && (
             <div className="hd-nav-user">
@@ -258,10 +273,6 @@ const TopNav = memo(({ user }: { user: any }) => {
   );
 });
 
-// ── Tournament search box ────────────────────────────────────────────────────
-// Local state + a debounce keeps every keystroke instant even with a large
-// tournament list — the (potentially expensive) filter only runs 200ms after
-// typing stops, via useTransition so it never blocks the input itself.
 const TournamentSearch = memo(({ onQueryChange }: { onQueryChange: (q: string) => void }) => {
   const [localQuery, setLocalQuery] = useState('');
   const [, startTransition] = useTransition();
@@ -287,12 +298,8 @@ const TournamentSearch = memo(({ onQueryChange }: { onQueryChange: (q: string) =
   );
 });
 
-// ── Overlay tile group ───────────────────────────────────────────────────────
-// Memoized so the six overlay groups (up to ~30 tiles) only re-render when
-// their own click handler or enabled state actually changes — not on every
-// keystroke in the search box or every unrelated chip toggle.
 const OverlayGroup = memo(({ group, onTileClick }: {
-  group: typeof VIEW_GROUPS[number];
+  group: { id: string; label: string; hint: string; views: { key: string; label: string }[] };
   onTileClick: (groupId: string, viewKey: string) => void;
 }) => (
   <div className="hd-group">
@@ -311,6 +318,8 @@ const OverlayGroup = memo(({ group, onTileClick }: {
   </div>
 ));
 
+const isCanceled = (err: any) => err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED';
+
 const DisplayHud: React.FC = () => {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
@@ -328,11 +337,29 @@ const DisplayHud: React.FC = () => {
     try { const s = localStorage.getItem('selectedThemeMap'); return s ? JSON.parse(s) : {}; } catch { return {}; }
   });
 
+  // ── Rounds/matches caching + in-flight cancellation ──────────────────────
+  // Rounds and matches rarely change mid-broadcast, so once fetched for a
+  // given tournament/round they're kept for the rest of the session —
+  // switching back to a tournament you already looked at is instant instead
+  // of re-hitting the API. Each fetch also cancels whatever fetch of the
+  // same kind was still in flight, so rapid clicking through tournaments
+  // can't have a slow, stale response land after a faster, newer one.
+  const roundsCacheRef = useRef<Map<string, Round[]>>(new Map());
+  const matchesCacheRef = useRef<Map<string, Match[]>>(new Map());
+  const roundsAbortRef = useRef<AbortController | null>(null);
+  const matchesAbortRef = useRef<AbortController | null>(null);
+
+  const [roundsLoading, setRoundsLoading] = useState(false);
+  const [matchesLoading, setMatchesLoading] = useState(false);
+
+  useEffect(() => () => {
+    roundsAbortRef.current?.abort();
+    matchesAbortRef.current?.abort();
+  }, []);
+
   const filteredTournaments = useMemo(() => {
     const q = tournamentQuery.trim().toLowerCase();
     const base = q ? tournaments.filter(t => t.tournamentName.toLowerCase().includes(q)) : tournaments;
-    // Keep the currently selected tournament in the list even if it no
-    // longer matches the search, so the <select> doesn't lose its label.
     if (tournamentId && !base.some(t => t._id === tournamentId)) {
       const current = tournaments.find(t => t._id === tournamentId);
       if (current) return [current, ...base];
@@ -369,16 +396,51 @@ const DisplayHud: React.FC = () => {
     setRounds([]);
     setMatches([]);
     if (!id) return;
-    api.get(`/tournaments/${id}/rounds`).then(r => setRounds(r.data)).catch(() => setRounds([]));
+
+    const cached = roundsCacheRef.current.get(id);
+    if (cached) {
+      setRounds(cached);
+      return;
+    }
+
+    roundsAbortRef.current?.abort();
+    const controller = new AbortController();
+    roundsAbortRef.current = controller;
+
+    setRoundsLoading(true);
+    api.get(`/tournaments/${id}/rounds`, { signal: controller.signal })
+      .then(r => {
+        roundsCacheRef.current.set(id, r.data);
+        setRounds(r.data);
+      })
+      .catch(err => { if (!isCanceled(err)) setRounds([]); })
+      .finally(() => { if (!controller.signal.aborted) setRoundsLoading(false); });
   }, []);
 
   const handleRoundChange = useCallback((id: string) => {
     setRoundId(id);
     setMatches([]);
     if (!id || !tournamentId) return;
-    api.get(`/tournaments/${tournamentId}/rounds/${id}/matches`)
-      .then(r => setMatches(r.data))
-      .catch(() => setMatches([]));
+
+    const cacheKey = `${tournamentId}_${id}`;
+    const cached = matchesCacheRef.current.get(cacheKey);
+    if (cached) {
+      setMatches(cached);
+      return;
+    }
+
+    matchesAbortRef.current?.abort();
+    const controller = new AbortController();
+    matchesAbortRef.current = controller;
+
+    setMatchesLoading(true);
+    api.get(`/tournaments/${tournamentId}/rounds/${id}/matches`, { signal: controller.signal })
+      .then(r => {
+        matchesCacheRef.current.set(cacheKey, r.data);
+        setMatches(r.data);
+      })
+      .catch(err => { if (!isCanceled(err)) setMatches([]); })
+      .finally(() => { if (!controller.signal.aborted) setMatchesLoading(false); });
   }, [tournamentId]);
 
   const toggleLiveMatch = useCallback(async (mId: string, checked: boolean) => {
@@ -426,9 +488,22 @@ const DisplayHud: React.FC = () => {
   const step1Done = !!tournamentId && !!roundId;
   const step2Done = !!liveMatchId || schedMatchIds.length > 0;
 
+  // Overlay tiles are filtered to whatever the *currently selected theme*
+  // actually implements — this is what stops "Player Summary" / "Live
+  // Data" (Theme6-only components) from ever being clickable, and
+  // therefore ever generating a link PublicThemeRenderer can't render, for
+  // any other theme. A group disappears entirely if none of its views
+  // survive the filter.
   const visibleGroups = useMemo(
-    () => VIEW_GROUPS.filter(g => (g.requires === 'schedule' ? schedMatchIds.length > 0 : !!liveMatchId)),
-    [liveMatchId, schedMatchIds]
+    () =>
+      VIEW_GROUPS
+        .filter(g => (g.requires === 'schedule' ? schedMatchIds.length > 0 : !!liveMatchId))
+        .map(g => ({
+          ...g,
+          views: g.views.filter(v => !v.themes || v.themes.includes(theme)),
+        }))
+        .filter(g => g.views.length > 0),
+    [liveMatchId, schedMatchIds, theme]
   );
 
   const selectedTournamentName = useMemo(
@@ -441,7 +516,12 @@ const DisplayHud: React.FC = () => {
       <style>{STYLES}</style>
       <div className="hd-glow" />
 
-      <TopNav user={user} />
+      <TopNav
+        user={user}
+        pollTournamentId={tournamentId}
+        pollRoundId={roundId}
+        pollMatchLabel={liveMatchObj ? `Match ${liveMatchObj.matchNo ?? liveMatchObj._matchNo ?? '?'}` : undefined}
+      />
 
       <div className="hd-page">
         <div className="hd-header-row">
@@ -508,9 +588,13 @@ const DisplayHud: React.FC = () => {
                       </select>
                     </div>
                     <div>
-                      <label className="hd-field-label" htmlFor="hd-round">Round</label>
-                      <select id="hd-round" className="hd-select" value={roundId} disabled={!tournamentId} onChange={e => handleRoundChange(e.target.value)}>
-                        <option value="">{tournamentId ? 'Select a round…' : 'Choose a tournament first'}</option>
+                      <label className="hd-field-label" htmlFor="hd-round">
+                        Round {roundsLoading && <span className="hd-spinner" />}
+                      </label>
+                      <select id="hd-round" className="hd-select" value={roundId} disabled={!tournamentId || roundsLoading} onChange={e => handleRoundChange(e.target.value)}>
+                        <option value="">
+                          {!tournamentId ? 'Choose a tournament first' : roundsLoading ? 'Loading rounds…' : 'Select a round…'}
+                        </option>
                         {rounds.map(r => <option key={r._id} value={r._id}>{r.roundName}</option>)}
                       </select>
                     </div>
@@ -529,12 +613,14 @@ const DisplayHud: React.FC = () => {
                 <div className={`hd-step-card ${step1Done ? '' : 'locked'}`}>
                   <div className="hd-step-title">Choose a match</div>
                   <div className="hd-step-sub">
-                    {step1Done
-                      ? `${matches.length} match${matches.length === 1 ? '' : 'es'} in ${selectedTournamentName}`
-                      : 'Finish step 1 first.'}
+                    {!step1Done
+                      ? 'Finish step 1 first.'
+                      : matchesLoading
+                        ? 'Loading matches…'
+                        : `${matches.length} match${matches.length === 1 ? '' : 'es'} in ${selectedTournamentName}`}
                   </div>
 
-                  {step1Done && matches.length === 0 && (
+                  {step1Done && !matchesLoading && matches.length === 0 && (
                     <div className="hd-note">This round has no matches yet.</div>
                   )}
 

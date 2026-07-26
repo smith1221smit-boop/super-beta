@@ -6,8 +6,20 @@ import React, {
   useRef,
   memo,
 } from 'react';
-import SocketManager from '../../../dashboard/socketManager.tsx';
-import { FaChevronRight } from 'react-icons/fa';
+import { useSortedTeams, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+// NOTE: SocketManager import removed — this component no longer opens its
+// own socket subscription. PublicThemeRenderer owns the single socket
+// connection, listens to 'bulkUpdate', and passes the freshly-merged
+// matchData / overallData down as props on every change. That prop update
+// is what re-renders this component now — see useSortedTeams below.
+//
+// NOTE: Player / Team / MatchData are imported from useSortedTeams, NOT
+// redeclared here. Two same-named-but-different-shaped interfaces (e.g. a
+// required vs optional field) are unrelated types to TypeScript even with
+// an identical name — that's what caused the TS2345 error. Every theme
+// should import these types from the shared hook instead of copy-pasting
+// its own version.
+
 // ─────────────────────────────────────────────
 // Interfaces
 // ─────────────────────────────────────────────
@@ -35,208 +47,12 @@ interface Match {
   map?: string;
 }
 
-interface Player {
-  _id: string;
-  playerName: string;
-  killNum: number;
-  isFiring?: boolean; // for firing indicator
-  bHasDied: boolean;
-  picUrl?: string;
-  health: number;
-  healthMax: number;
-  liveState: number;
-  isOutsideBlueCircle: boolean;
-}
-
-interface Team {
-  _id: string;
-  teamId?: string;
-  teamTag: string;
-  slot?: number;
-  placePoints: number;
-  totalKills?: number;
-  players: Player[];
-  teamLogo: string;
-}
-
-interface MatchData {
-  _id: string;
-  teams: Team[];
-}
-
 interface LiveStatsProps {
   tournament: Tournament;
   round?: Round | null;
   match?: Match | null;
   matchData?: MatchData | null;
   overallData?: any;
-}
-
-// ─────────────────────────────────────────────
-// mergePlayers
-// Merges ALL fields: liveState, bHasDied, health,
-// healthMax, killNum from patch into existing players
-// ─────────────────────────────────────────────
-function mergePlayers(existingPlayers: Player[], updates: any[]): Player[] {
-  if (!updates?.length) return existingPlayers;
-  const map = new Map(
-    updates.map((p: any) => [p._id?.toString?.() ?? p._id, p])
-  );
-  return existingPlayers.map(p => {
-    const upd = map.get(p._id?.toString?.() ?? p._id);
-    return upd ? { ...p, ...upd } : p;
-  });
-}
-
-// ─────────────────────────────────────────────
-// mergeMatchPatch
-//
-// Handles every socket event shape from both the
-// old and new server implementations:
-//
-// Shape 1 — liveMatchUpdate:
-//   { _id, teams: [...] }  full replacement
-//
-// Shape 2 — matchDataUpdated:
-//   { matchDataId, teamId, changes: { players?, placePoints?, ... } }
-//
-// Shape 3 — playerStatsUpdated:
-//   { matchDataId, teamId, playerId, updates: { liveState, bHasDied, health, healthMax, killNum, ... } }
-//
-// Shape 4 — teamStatsUpdated:
-//   { matchDataId, teamId, players: [{ _id, killNum, liveState, ... }] }
-//
-// Shape 5 — teamPointsUpdated:
-//   { matchDataId, teamId, changes: { placePoints } }
-//
-// Shape 6 — bulkTeamUpdate:
-//   { matchDataId, teamId, changes: { players: [...] } }
-//
-// Shape 7 — simple arrays (legacy):
-//   { teamId, players: [...] }  or  { players: [...] }
-// ─────────────────────────────────────────────
-function mergeMatchPatch(
-  prev: MatchData | null,
-  patch: any,
-  matchDataId: string | null
-): MatchData | null {
-  if (!prev) return null;
-
-  // ── Shape 1: full teams replacement (liveMatchUpdate) ──
-  if (patch.teams) {
-    // Only apply if the update is for the current matchData
-    if (patch._id && matchDataId && patch._id.toString() !== matchDataId) return prev;
-    return { ...prev, teams: patch.teams };
-  }
-
-  // All other shapes require matchDataId filtering
-  if (patch.matchDataId && matchDataId && patch.matchDataId !== matchDataId) {
-    return prev;
-  }
-
-  const next: MatchData = { ...prev, teams: [...prev.teams] };
-
-  const findTeam = (id: string) =>
-    next.teams.findIndex(t => t._id === id || t.teamId === id);
-
-  // ── Shape 3: playerStatsUpdated — single player field update ──
-  // { matchDataId, teamId, playerId, updates: { liveState, bHasDied, health, ... } }
-  if (patch.playerId && patch.updates) {
-    const idx = findTeam(patch.teamId);
-    if (idx !== -1) {
-      next.teams[idx] = {
-        ...next.teams[idx],
-        players: next.teams[idx].players.map(p =>
-          p._id === patch.playerId || p._id?.toString() === patch.playerId?.toString()
-            ? { ...p, ...patch.updates }
-            : p
-        ),
-      };
-    }
-    return next;
-  }
-
-  // ── Shape 2: matchDataUpdated — team changes object ──
-  // { matchDataId, teamId, changes: { players?, placePoints?, ... } }
-  if (patch.teamId && patch.changes) {
-    const idx = findTeam(patch.teamId);
-    if (idx !== -1) {
-      const changes = patch.changes || {};
-      const updatedTeam: any = { ...next.teams[idx], ...changes };
-      // If changes includes a players array, merge field-by-field
-      if (Array.isArray(changes.players)) {
-        updatedTeam.players = mergePlayers(next.teams[idx].players, changes.players);
-      }
-      next.teams[idx] = updatedTeam;
-    }
-    return next;
-  }
-
-  // ── Shape 6: bulkTeamUpdate — changes.players array ──
-  // { matchDataId, teamId, changes: { players: [...] } }
-  if (patch.teamId && patch.changes?.players) {
-    const idx = findTeam(patch.teamId);
-    if (idx !== -1) {
-      next.teams[idx] = {
-        ...next.teams[idx],
-        players: mergePlayers(next.teams[idx].players, patch.changes.players),
-      };
-    }
-    return next;
-  }
-
-  // ── Shape 4: teamStatsUpdated — players array with kill/live fields ──
-  // { matchDataId, teamId, players: [{ _id, killNum, liveState, bHasDied, health, ... }] }
-  if (patch.teamId && Array.isArray(patch.players)) {
-    const idx = findTeam(patch.teamId);
-    if (idx !== -1) {
-      next.teams[idx] = {
-        ...next.teams[idx],
-        players: mergePlayers(next.teams[idx].players, patch.players),
-        ...(patch.totalKills !== undefined && { totalKills: patch.totalKills }),
-        ...(patch.placePoints !== undefined && { placePoints: patch.placePoints }),
-      };
-    }
-    return next;
-  }
-
-  // ── Shape 5: teamPointsUpdated — changes.placePoints ──
-  // { matchDataId, teamId, changes: { placePoints } }
-  if (patch.teamId && patch.changes?.placePoints !== undefined) {
-    const idx = findTeam(patch.teamId);
-    if (idx !== -1) {
-      next.teams[idx] = {
-        ...next.teams[idx],
-        placePoints: patch.changes.placePoints,
-      };
-    }
-    return next;
-  }
-
-  // ── Shape 7: legacy team-only stat patch ──
-  // { teamId, totalKills?, placePoints? }
-  if (patch.teamId) {
-    const idx = findTeam(patch.teamId);
-    if (idx !== -1) {
-      next.teams[idx] = {
-        ...next.teams[idx],
-        ...(patch.totalKills !== undefined && { totalKills: patch.totalKills }),
-        ...(patch.placePoints !== undefined && { placePoints: patch.placePoints }),
-      };
-    }
-    return next;
-  }
-
-  // ── Shape 7b: global players array (no teamId) ──
-  if (Array.isArray(patch.players)) {
-    next.teams = next.teams.map(team => ({
-      ...team,
-      players: mergePlayers(team.players, patch.players),
-    }));
-    return next;
-  }
-
-  return next;
 }
 
 // ─────────────────────────────────────────────
@@ -448,7 +264,7 @@ const AnimatedTeamRow = ({
               }}
             />
           )}
-      
+
         {/* Rank */}
   {/* Rank */}
 <div
@@ -517,13 +333,10 @@ const AnimatedTeamRow = ({
             )}
           </div>
 
-          {/* Total Points — static from overallData */}
-          <div className="w-[60px] flex items-center justify-center text-center">
-            {team.totalPoints}
-          </div>
+      
 
 <div className="w-[0px] flex items-center justify-center text-center">
-            + 
+
           </div>
           {/* Live Kills — real-time */}
           <div className="w-[60px] flex items-center justify-center text-white text-center">
@@ -591,143 +404,31 @@ const AnimatedTeamList = ({
 
 // ─────────────────────────────────────────────
 // LiveStats (main component)
+//
+// No socket subscription anymore. PublicThemeRenderer owns the single
+// socket connection for the page, listens to 'bulkUpdate', and re-renders
+// this component with fresh `matchData` / `overallData` props whenever
+// the backend pushes a change. useSortedTeams (shared across every theme's
+// Alerts/LiveStats/battlebar) does all the derived-stat work that used to
+// live in mergeMatchPatch + six separate socket handlers here.
 // ─────────────────────────────────────────────
-const Battlebar: React.FC<LiveStatsProps> = ({
+const LiveData: React.FC<LiveStatsProps> = ({
   tournament,
   round,
   match,
-  matchData: propMatchData,
-  overallData: propOverallData,
+  matchData,
+  overallData,
 }) => {
-  const [matchData, setMatchData] = useState<MatchData | null>(null);
+  // 'overall' sortBy = cumulative event standings (placePoints + kills from
+  // overallData), which is what this hero panel has always shown — matches
+  // the old sort (b.totalPoints - a.totalPoints) exactly.
+    const liveSortedTeams: SortedTeam[] = useSortedTeams(matchData, overallData, 'live');
 
-  // Keep matchDataId in a ref so socket handlers always see the latest value
-  // without needing to be re-registered on every matchData change
-  const matchDataIdRef = useRef<string | null>(null);
-  matchDataIdRef.current = matchData?._id ?? null;
+  const sortedTeams: SortedTeam[] = useMemo(
+    () => [...liveSortedTeams].sort((a, b) => b.totalKills - a.totalKills),
+    [liveSortedTeams]
+  );
 
-  // ── Sync matchData prop → state ─────────────
-  useEffect(() => {
-    if (propMatchData) setMatchData(propMatchData);
-  }, [propMatchData]);
-
-  // ── Socket handlers ──────────────────────────
-  // All handlers read matchDataIdRef.current at call time
-  // so they always have the latest matchDataId without
-  // needing to be re-registered when matchData changes.
-  const handleLiveUpdate = useCallback((data: any) => {
-    setMatchData(prev => mergeMatchPatch(prev, data, matchDataIdRef.current));
-  }, []);
-
-  const handleMatchDataUpdated = useCallback((data: any) => {
-    setMatchData(prev => mergeMatchPatch(prev, data, matchDataIdRef.current));
-  }, []);
-
-  // playerStatsUpdated: { matchDataId, teamId, playerId, updates }
-  // updates contains liveState, bHasDied, health, healthMax, killNum
-  const handlePlayerStatsUpdated = useCallback((data: any) => {
-    setMatchData(prev => mergeMatchPatch(prev, data, matchDataIdRef.current));
-  }, []);
-
-  const handleTeamPointsUpdated = useCallback((data: any) => {
-    setMatchData(prev => mergeMatchPatch(prev, data, matchDataIdRef.current));
-  }, []);
-
-  // teamStatsUpdated: { matchDataId, teamId, players: [{ _id, killNum, liveState, bHasDied, ... }] }
-  const handleTeamStatsUpdated = useCallback((data: any) => {
-    setMatchData(prev => mergeMatchPatch(prev, data, matchDataIdRef.current));
-  }, []);
-
-  // bulkTeamUpdate: { matchDataId, teamId, changes: { players: [...] } }
-  const handleBulkTeamUpdate = useCallback((data: any) => {
-    setMatchData(prev => mergeMatchPatch(prev, data, matchDataIdRef.current));
-  }, []);
-
-  // ── Socket lifecycle ──────────────────────────
-  useEffect(() => {
-    if (!match?._id || !matchDataIdRef.current) return;
-
-    const socketManager = SocketManager.getInstance();
-    const socket = socketManager.connect();
-
-    socket.on('liveMatchUpdate', handleLiveUpdate);
-    socket.on('matchDataUpdated', handleMatchDataUpdated);
-    socket.on('playerStatsUpdated', handlePlayerStatsUpdated);
-    socket.on('teamPointsUpdated', handleTeamPointsUpdated);
-    socket.on('teamStatsUpdated', handleTeamStatsUpdated);
-    socket.on('bulkTeamUpdate', handleBulkTeamUpdate);
-
-    return () => {
-      socket.off('liveMatchUpdate', handleLiveUpdate);
-      socket.off('matchDataUpdated', handleMatchDataUpdated);
-      socket.off('playerStatsUpdated', handlePlayerStatsUpdated);
-      socket.off('teamPointsUpdated', handleTeamPointsUpdated);
-      socket.off('teamStatsUpdated', handleTeamStatsUpdated);
-      socket.off('bulkTeamUpdate', handleBulkTeamUpdate);
-    };
-  }, [
-    match?._id,
-    matchDataIdRef.current,
-    handleLiveUpdate,
-    handleMatchDataUpdated,
-    handlePlayerStatsUpdated,
-    handleTeamPointsUpdated,
-    handleTeamStatsUpdated,
-    handleBulkTeamUpdate,
-  ]);
-
-  // ── overallMap — static, from prop only, never via socket ──
-  const overallMap = useMemo((): Map<string, number> => {
-    const map = new Map<string, number>();
-    if (!propOverallData?.teams) return map;
-    for (const t of propOverallData.teams) {
-      const placePoints = t.placePoints ?? 0;
-      const overallKills = Array.isArray(t.players)
-        ? t.players.reduce((sum: number, p: any) => sum + (p.killNum || 0), 0)
-        : 0;
-      const total = placePoints + overallKills;
-      if (t.teamId) map.set(t.teamId.toString(), total);
-      if (t._id)    map.set(t._id.toString(), total);
-    }
-    return map;
-  }, [propOverallData]);
-
-  // ── Sorted teams ──────────────────────────────
-const sortedTeams = useMemo(() => {
-  if (!matchData) return [];
-
-  return matchData.teams
-    .map(team => {
-      const teamKey =
-        (team as any).teamId?.toString?.() ??
-        team._id?.toString?.() ??
-        team._id;
-
-      const totalPoints = overallMap.get(teamKey) ?? 0;
-
-      const totalKills = team.players.reduce(
-        (sum, p) => sum + (p.killNum || 0),
-        0
-      );
-
-      const isAllDead = team.players.every(
-        p => p.liveState === 5 || p.bHasDied
-      );
-
-      const hasOutsideBlueCircle = team.players.some(
-        p => p.isOutsideBlueCircle === true
-      );
-
-      return {
-        ...team,
-        totalKills,
-        totalPoints,
-        isAllDead,
-        hasOutsideBlueCircle,
-      } as any;
-    })
-    .sort((a: any, b: any) => b.totalPoints - a.totalPoints); // ✅ only overall
-}, [matchData, overallMap]);
   // ── Layout constants ──────────────────────────
   const { baseRowHeight, baseHealthBar, scaleY } = useMemo(() => {
     const listTopOffset = 250;
@@ -761,8 +462,79 @@ const sortedTeams = useMemo(() => {
   }
 
   return (
-  <div></div>
+    <div className="w-[1920px] h-[1080px] flex justify-end relative top-[0px]">
+      {/* ── Top team hero card ── */}
+      <div
+        className="w-[400px] h-[190px] top-[70px] right-0 relative"
+        style={gradientStyle}
+      >
+        <div
+          className="absolute top-[150px] right-0 w-[400px] h-[40px] text-[1.1rem] font-[Righteous]
+                     flex items-center justify-between px-4 font-bold text-white text-sm z-50"
+          style={{
+            background: `linear-gradient(to right, rgba(0,0,0,0) 40%, ${tournament.primaryColor} 80%)`,
+          }}
+        >
+          <span className="relative left-[50px]">TEAM</span>
+          <span className="relative left-[75px]">ALIVE</span>
+          
+          <span className="relative left-[4px]">KILLS</span>
+        </div>
+
+        {topTeam?.players.map((player: Player, index: number) => (
+          <div
+            key={player._id}
+            className="absolute w-[180px] h-[190px] z-0"
+            style={{
+              left: `${-5 + index * 80}px`,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              zIndex: 1,
+            }}
+          >
+            <img
+              src={player.picUrl || '/def_char.png'}
+              alt={player.playerName}
+              className="w-full h-full"
+              onError={e => { (e.target as HTMLImageElement).src = '/def_char.png'; }}
+            />
+          </div>
+        ))}
+
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/70 to-black h-[100px] top-[90px] z-10" />
+      </div>
+
+      {/* ── Animated team rows ── */}
+      <div className="absolute right-0 top-[260px] w-[400px]">
+        <div style={{ transform: `scaleY(${scaleY})`, transformOrigin: 'top right' }}>
+          <AnimatedTeamList
+            teams={sortedTeams}
+            gradientStyle={gradientStyle}
+            apiEnabled={apiEnabled}
+            baseRowHeight={baseRowHeight}
+            baseHealthBar={baseHealthBar}
+          />
+
+          <div
+
+            className="w-full h-[30px] font-[AGENCYB] bg-[#282828] flex justify-center items-center text-white font-bold"
+          >
+            ALIVE{' '}
+            <span className="bg-green-500 w-[20px] h-[20px] ml-[5px] border border-black" />
+          <div className="flex items-center ml-[20px]">
+              KNOCK{' '}
+              <span className="bg-red-500 w-[20px] h-[20px] ml-[5px] border border-white" />
+            </div>
+            <div className="flex items-center ml-[20px]">
+              DEAD{' '}
+              <span className="bg-[#282828] w-[20px] h-[20px] ml-[5px] border border-white" />
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
   );
 };
 
-export default Battlebar;
+export default LiveData;

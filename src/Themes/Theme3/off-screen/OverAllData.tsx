@@ -252,14 +252,14 @@ const OverAllData: React.FC<OverAllDataProps> = ({
     return [];
   }, [overallData, matchDatas]);
 
-  const pageSize = 10; // Show 8 rows per page
+  const pageSize = 8; // Show 8 rows per page
   const totalPages = Math.ceil(teamRankings.length / pageSize);
 
   useEffect(() => {
     if (totalPages > 0) {
       const interval = setInterval(() => {
         setPage((prev) => (prev % totalPages) + 1); // cycle pages 1 → totalPages → 1
-      }, 15000); // change every 15 seconds
+      }, 25000); // change every 15 seconds
 
       return () => clearInterval(interval);
     }
@@ -358,7 +358,11 @@ const OverAllData: React.FC<OverAllDataProps> = ({
                 <div className="w-[140px] text-center font-[AGENCYB]">{team.wwcd || 0}</div> {/* WWCD */}
                 <div className="w-[140px] text-center font-[AGENCYB]">{team.totalPlacePoints || 0}</div> {/* Placement */}
                 <div className="w-[140px] text-center font-[AGENCYB]">{team.totalKills || 0}</div> {/* Kills */}
-                <div className="w-[140px] text-center font-[AGENCYB]">{team.totalScore || 0}</div> {/* Total */}
+                <div 
+                style={{
+                  backgroundImage: `linear-gradient(to bottom right, ${tournament.primaryColor || '#ffa300'}, ${tournament.secondaryColor || '#f9df67'})`
+                }}
+                className="w-[120px] text-center font-[AGENCYB]">{team.totalScore || 0}</div> {/* Total */}
               </div>
             </div>
           </motion.div>

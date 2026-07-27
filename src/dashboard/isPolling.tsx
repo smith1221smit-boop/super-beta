@@ -31,10 +31,27 @@ interface PollingManagerProps {
   matchLabel?: string;
 }
 
+// Real transport-level connection state, not inferred from whether data
+// happens to be arriving. Three states because "never connected yet"
+// (cold start) and "was connected, now isn't" (dropped) mean different
+// things to an operator and should read differently on screen.
+type SocketStatus = "connecting" | "connected" | "disconnected";
+
 const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, matchLabel }) => {
   const [selections, setSelections] = useState<Selection[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+
+  // --- Real socket connection tracking ------------------------------------
+  // Initialized by actually asking the shared socket whether it's connected
+  // *right now*, not by assuming "false until proven otherwise". The socket
+  // is a singleton (SocketManager) that may already have been created and
+  // connected by some other component mounted earlier in the app (e.g.
+  // Alerts, LiveStats) — in that case this component's very first render
+  // should already reflect "connected", not spend a tick lying about it.
+  const [socketStatus, setSocketStatus] = useState<SocketStatus>(() =>
+    SocketManager.getInstance().isConnected() ? "connected" : "connecting"
+  );
 
   // Live-data-arrival tracking — separate from "is polling toggled on".
   // This answers "is real match data actually flowing right now", which is
@@ -58,16 +75,29 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
       .finally(() => setLoading(false));
   }, []);
 
-  // --- Socket setup for selection/polling-toggle events ---
+  // --- Socket setup for selection/polling-toggle events + connection state
   // FIX: this now runs ONCE (mount-only deps), and cleans up its own
   // listeners with socket.off(...) before the shared socket could ever
   // accumulate duplicates. Previously this effect depended on
   // [activeMatchId] and re-subscribed on every change without ever
   // removing the old handlers — each stale handler kept firing forever
   // on the shared singleton socket.
+  //
+  // Also now attaches connect/disconnect/connect_error listeners so
+  // `socketStatus` reflects the real wire state instead of being derived
+  // indirectly from whether data happened to show up.
   useEffect(() => {
     const socketManager = SocketManager.getInstance();
     const socket = socketManager.connect();
+
+    // Re-sync immediately in case connect() returned an already-connected
+    // socket (created by another component before this one mounted) — we
+    // must not wait for a 'connect' event that may never fire again.
+    setSocketStatus(socket.connected ? "connected" : "connecting");
+
+    const handleConnect = () => setSocketStatus("connected");
+    const handleDisconnect = () => setSocketStatus("disconnected");
+    const handleConnectError = () => setSocketStatus("disconnected");
 
     const handlePollingStatusUpdated = (updated: Selection) => {
       setSelections((prev) =>
@@ -101,12 +131,18 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
       setSelections((prev) => prev.filter((s) => s._id !== matchId));
     };
 
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("connect_error", handleConnectError);
     socket.on("pollingStatusUpdated", handlePollingStatusUpdated);
     socket.on("matchSelected", handleMatchSelected);
     socket.on("matchDeselected", handleMatchDeselected);
     socket.on("matchDeleted", handleMatchDeleted);
 
     return () => {
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("connect_error", handleConnectError);
       socket.off("pollingStatusUpdated", handlePollingStatusUpdated);
       socket.off("matchSelected", handleMatchSelected);
       socket.off("matchDeselected", handleMatchDeselected);
@@ -160,14 +196,32 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
     setPulsing(false);
   }, [activeTournamentId, activeRoundId]);
 
+  // Also reset the moment the socket actually drops. Without this, the
+  // seconds-ago counter would otherwise keep counting up from the last real
+  // bulkUpdate even while the wire is down — a "fake" live indicator. Once
+  // reconnected, it should read "waiting for data" again until a fresh
+  // bulkUpdate is confirmed, not resume counting from stale data.
+  useEffect(() => {
+    if (socketStatus !== "connected") {
+      setLastDataAt(null);
+      setPulsing(false);
+    }
+  }, [socketStatus]);
+
   // --- Live data confirmation ---
   // Joins the same bulk room PublicThemeRenderer uses and listens for the
   // actual 'bulkUpdate' event. Every time one arrives while polling is on,
   // this flashes the indicator and updates "last data Xs ago" — a real
   // confirmation that match data is flowing, not just that the toggle is
   // switched on.
+  //
+  // Also re-runs on socketStatus flipping back to "connected": room
+  // membership lives server-side and is dropped whenever the socket
+  // disconnects, so simply reconnecting the transport does NOT re-join the
+  // room by itself — without this dependency, a drop+reconnect would go
+  // quiet on bulkUpdate forever even though the wire looks healthy again.
   useEffect(() => {
-    if (!activeTournamentId || !activeRoundId || !buttonState) return;
+    if (!activeTournamentId || !activeRoundId || !buttonState || socketStatus !== "connected") return;
 
     const socketManager = SocketManager.getInstance();
     const socket = socketManager.connect();
@@ -187,14 +241,16 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
       socket.emit("leaveBulkRoom", { tournamentId: activeTournamentId, roundId: activeRoundId });
       if (pulseTimeoutRef.current) clearTimeout(pulseTimeoutRef.current);
     };
-  }, [activeTournamentId, activeRoundId, buttonState]);
+  }, [activeTournamentId, activeRoundId, buttonState, socketStatus]);
 
-  // Tick once a second so "Xs ago" stays live without needing new data.
+  // Tick once a second so "Xs ago" stays live without needing new data —
+  // but only while actually connected. No point (and actively misleading)
+  // to keep incrementing a "freshness" counter while the socket is down.
   useEffect(() => {
-    if (!buttonState) return;
+    if (!buttonState || socketStatus !== "connected") return;
     const id = setInterval(() => forceTick((t) => t + 1), 1000);
     return () => clearInterval(id);
-  }, [buttonState]);
+  }, [buttonState, socketStatus]);
 
   const secondsSinceData = lastDataAt !== null ? Math.max(0, Math.floor((Date.now() - lastDataAt) / 1000)) : null;
 
@@ -237,17 +293,35 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
 
   if (!activeSelection) return null;
 
-  // Three distinct states now, instead of just LIVE/PAUSED:
-  //  - PAUSED: polling toggled off
-  //  - LIVE (waiting): polling is on, but no bulkUpdate has arrived yet
-  //  - LIVE (Xs ago): polling is on AND data is confirmed flowing
-  const statusLabel = !buttonState
-    ? "PAUSED"
-    : secondsSinceData === null
-      ? "LIVE — waiting for data"
-      : `LIVE • data ${secondsSinceData}s ago`;
+  // Status priority: socket transport state always wins over anything
+  // derived from data/polling, because none of the data-freshness claims
+  // below are trustworthy if the wire itself isn't up.
+  //   - CONNECTING: never connected yet (cold start / first load)
+  //   - DISCONNECTED: was connected, dropped — socket.io is retrying
+  //   - PAUSED: connected, but polling toggled off
+  //   - LIVE (waiting): connected + polling on, no bulkUpdate confirmed yet
+  //   - LIVE (Xs ago): connected + polling on + data confirmed flowing
+  const statusLabel =
+    socketStatus === "connecting"
+      ? "CONNECTING…"
+      : socketStatus === "disconnected"
+        ? "DISCONNECTED — reconnecting…"
+        : !buttonState
+          ? "PAUSED"
+          : secondsSinceData === null
+            ? "LIVE — waiting for data"
+            : `LIVE • data ${secondsSinceData}s ago`;
 
-  const statusColor = !buttonState ? "gray" : secondsSinceData === null ? "amber" : "green";
+  const statusColor =
+    socketStatus === "connecting"
+      ? "blue"
+      : socketStatus === "disconnected"
+        ? "red"
+        : !buttonState
+          ? "gray"
+          : secondsSinceData === null
+            ? "amber"
+            : "green";
 
   return (
     <div className="flex items-center gap-3">
@@ -262,7 +336,11 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
             ? "bg-green-900/20 border-green-500/30"
             : statusColor === "amber"
               ? "bg-amber-900/20 border-amber-500/30"
-              : "bg-gray-800/50 border-gray-700"
+              : statusColor === "red"
+                ? "bg-red-900/20 border-red-500/30"
+                : statusColor === "blue"
+                  ? "bg-blue-900/20 border-blue-500/30"
+                  : "bg-gray-800/50 border-gray-700"
         } ${pulsing ? "shadow-[0_0_14px_rgba(34,197,94,0.55)]" : ""}`}
       >
         <div
@@ -271,12 +349,24 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
               ? `bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)] ${pulsing ? "" : "animate-pulse"}`
               : statusColor === "amber"
                 ? "bg-amber-500 animate-pulse shadow-[0_0_6px_rgba(245,158,11,0.6)]"
-                : "bg-gray-500"
+                : statusColor === "red"
+                  ? "bg-red-500 animate-pulse shadow-[0_0_6px_rgba(239,68,68,0.6)]"
+                  : statusColor === "blue"
+                    ? "bg-blue-500 animate-pulse shadow-[0_0_6px_rgba(59,130,246,0.6)]"
+                    : "bg-gray-500"
           }`}
         ></div>
         <span
           className={`text-xs font-medium uppercase tracking-wider ${
-            statusColor === "green" ? "text-green-400" : statusColor === "amber" ? "text-amber-400" : "text-gray-500"
+            statusColor === "green"
+              ? "text-green-400"
+              : statusColor === "amber"
+                ? "text-amber-400"
+                : statusColor === "red"
+                  ? "text-red-400"
+                  : statusColor === "blue"
+                    ? "text-blue-400"
+                    : "text-gray-500"
           }`}
         >
           {statusLabel}

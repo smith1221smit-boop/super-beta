@@ -1,6 +1,21 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import SocketManager from '../../../dashboard/socketManager.tsx';
+// NOTE: framer-motion removed. The AnimatePresence/motion.div slide-in +
+// fade was doing exactly what a CSS transition on transform/opacity does —
+// see the .dom-alert-* classes below — for a fraction of the bundle
+// weight, with the same double-rAF flip technique the other Dom.tsx
+// conversions already use to make sure the transition actually plays
+// rather than snapping straight to its end state.
+//
+// NOTE: SocketManager import removed, along with mergeSocketData and
+// handleSocketUpdate. PublicThemeRenderer owns the single socket
+// connection and passes freshly-merged `matchData` down as a prop on every
+// 'bulkUpdate' — this component just reacts to that prop changing, same as
+// Alerts.tsx / LiveStats.tsx / the other Dom.tsx conversions.
+//
+// detectAlert / buildKillMaps / killFingerprint are unchanged pure
+// functions — they never cared whether the MatchData they were handed came
+// from a socket merge or a prop update, so nothing about the milestone
+// detection logic itself needed to change.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -73,7 +88,7 @@ interface DomProps {
   matchData?: MatchData | null;
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Pure helpers — unchanged ──────────────────────────────────────────────────
 
 type KillMap = Record<string, number>;
 
@@ -217,108 +232,16 @@ function detectAlert(
   return null;
 }
 
-// ─── Merge socket payload into current MatchData ──────────────────────────────
-//
-//  The backend emits these distinct shapes:
-//
-//  A) playerStatsUpdated  → { matchDataId, teamId, playerId, updates: { killNum, killNumInVehicle, killNumByGrenade, ... } }
-//  B) teamStatsUpdated    → { matchDataId, teamId, totalKills, players: [{ _id, killNum }] }   ← only killNum
-//  C) matchDataUpdated    → { matchDataId, teamId, changes: { players: [{ _id, ... }] } }
-//  D) liveMatchUpdate     → full MatchData document with _id + teams[]
-//
-function mergeSocketData(current: MatchData, data: any, matchDataId: string): MatchData | null {
-  if (!current) return null;
-
-  // ── A. playerStatsUpdated ─────────────────────────────────────────────────
-  // Shape: { matchDataId, teamId, playerId, updates }
-  // This carries killNumInVehicle + killNumByGrenade when those fields were updated.
-  if (data.matchDataId === matchDataId && data.teamId && data.playerId && data.updates) {
-    console.log('[Dom] mergeSocketData: playerStatsUpdated', data.updates);
-    return {
-      ...current,
-      teams: current.teams.map(team =>
-        team._id?.toString() === data.teamId || team.teamId?.toString() === data.teamId
-          ? {
-              ...team,
-              players: team.players.map(player =>
-                player._id?.toString() === data.playerId
-                  ? { ...player, ...data.updates }
-                  : player
-              ),
-            }
-          : team
-      ),
-    };
-  }
-
-  // ── B. teamStatsUpdated ───────────────────────────────────────────────────
-  // Shape: { matchDataId, teamId, players: [{ _id, killNum }] }
-  // Only carries killNum — skip if playerStatsUpdated already handled it.
-  if (data.matchDataId === matchDataId && data.teamId && Array.isArray(data.players)) {
-    console.log('[Dom] mergeSocketData: teamStatsUpdated');
-    return {
-      ...current,
-      teams: current.teams.map(team =>
-        team._id?.toString() === data.teamId || team.teamId?.toString() === data.teamId
-          ? {
-              ...team,
-              players: team.players.map(player => {
-                const upd = data.players.find(
-                  (p: any) => p._id?.toString() === player._id?.toString()
-                );
-                return upd ? { ...player, ...upd } : player;
-              }),
-            }
-          : team
-      ),
-    };
-  }
-
-  // ── C. matchDataUpdated changes patch ─────────────────────────────────────
-  // Shape: { matchDataId, teamId, changes: { players: [...] } }
-  if (data.matchDataId === matchDataId && data.teamId && data.changes?.players) {
-    console.log('[Dom] mergeSocketData: matchDataUpdated changes');
-    return {
-      ...current,
-      teams: current.teams.map(team =>
-        team._id?.toString() === data.teamId || team.teamId?.toString() === data.teamId
-          ? {
-              ...team,
-              players: team.players.map(player => {
-                const upd = data.changes.players.find(
-                  (p: any) => p._id?.toString() === player._id?.toString()
-                );
-                return upd ? { ...player, ...upd } : player;
-              }),
-            }
-          : team
-      ),
-    };
-  }
-
-  // ── D. Full match replace (liveMatchUpdate) ───────────────────────────────
-  if (data._id?.toString() === matchDataId && data.teams) {
-    console.log('[Dom] mergeSocketData: full replace');
-    return data as MatchData;
-  }
-
-  return null;
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const DISPLAY_MS   = 6000;
 const EXIT_ANIM_MS = 600;
 
 const Dom: React.FC<DomProps> = React.memo(({ tournament, matchData }) => {
-  const [localMatchData, setLocalMatchData] = useState<MatchData | null>(matchData ?? null);
   const [isVisible,      setIsVisible]      = useState(false);
   const [displayedPlayer, setDisplayedPlayer] = useState<AlertPlayer | null>(null);
 
-  const matchDataId = matchData?._id?.toString() ?? null;
-
   // Stable refs
-  const matchDataRef   = useRef<MatchData | null>(matchData ?? null);
   const prevKillsRef   = useRef<KillMap>({});
   const prevVehicleRef = useRef<KillMap>({});
   const prevGrenadeRef = useRef<KillMap>({});
@@ -328,31 +251,24 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, matchData }) => {
   const firstBloodRef  = useRef(false);
   const fingerprintRef = useRef('');
   const timerRef       = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks the matchData._id we last saw, so a new match (as opposed to a
+  // routine live update to the same match) can be told apart and trackers
+  // reset accordingly — same idea as the other converted files.
+  const matchDataIdRef = useRef<string | null>(matchData?._id?.toString() ?? null);
 
-  // Keep matchDataRef in sync with state
-  useEffect(() => { matchDataRef.current = localMatchData; }, [localMatchData]);
-
-  // Initialise kill maps whenever the prop changes
-  useEffect(() => {
-    if (matchData) {
-      const { kills, vehicle, grenade, airdrop, damage, distance } = buildKillMaps(matchData);
-      prevKillsRef.current   = kills;
-      prevVehicleRef.current = vehicle;
-      prevGrenadeRef.current = grenade;
-      prevAirdropRef.current   = airdrop;
-      prevDamageRef.current     = damage;
-      prevDistanceRef.current   = distance;
-      fingerprintRef.current = killFingerprint(matchData);
-      matchDataRef.current   = matchData;
-      setLocalMatchData(matchData);
-    }
-  }, [matchData]);
-
-  // Show alert banner
+  // Show alert banner. isVisible drives the .dom-alert-visible /
+  // .dom-alert-hidden CSS classes below instead of framer-motion's
+  // initial/animate/exit props.
   const showAlert = useCallback((player: AlertPlayer) => {
     if (timerRef.current) clearTimeout(timerRef.current);
+
     setDisplayedPlayer(player);
-    setIsVisible(true);
+    // Start hidden, then flip to visible a frame later so the browser has
+    // committed the "off-screen" transform first — otherwise the browser
+    // may coalesce both state changes into one paint and the transition
+    // never plays.
+    setIsVisible(false);
+    requestAnimationFrame(() => requestAnimationFrame(() => setIsVisible(true)));
 
     timerRef.current = setTimeout(() => {
       setIsVisible(false);
@@ -363,172 +279,170 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, matchData }) => {
     }, DISPLAY_MS);
   }, []);
 
-  // Socket handler
-  const handleSocketUpdate = useCallback(
-    (data: any) => {
-      const current = matchDataRef.current;
-      if (!current || !matchDataId) return;
-
-      const merged = mergeSocketData(current, data, matchDataId);
-      if (!merged) return;
-
-      const fp = killFingerprint(merged);
-      if (fp === fingerprintRef.current) return; // nothing kill-related changed
-
-      // ── Snapshot BEFORE updating maps ──────────────────────────────────────
-      const snapKills   = { ...prevKillsRef.current };
-      const snapVehicle = { ...prevVehicleRef.current };
-      const snapGrenade = { ...prevGrenadeRef.current };
-      const snapAirdrop  = { ...prevAirdropRef.current };
-      const snapDamage    = { ...prevDamageRef.current };
-      const snapDistance  = { ...prevDistanceRef.current };
-
-      // ── Update state & maps ────────────────────────────────────────────────
-      fingerprintRef.current = fp;
-      matchDataRef.current   = merged;
-      setLocalMatchData(merged);
-
-      const { kills, vehicle, grenade, airdrop, damage, distance } = buildKillMaps(merged);
-      prevKillsRef.current   = kills;
-      prevVehicleRef.current = vehicle;
-      prevGrenadeRef.current = grenade;
-      prevAirdropRef.current   = airdrop;
-      prevDamageRef.current     = damage;
-      prevDistanceRef.current   = distance;
-
-      // ── Detect alert using PRE-update snapshots ────────────────────────────
-      const alert = detectAlert(merged, snapKills, snapVehicle, snapGrenade, snapAirdrop, snapDamage, snapDistance, firstBloodRef.current);
-
-      if (alert) {
-        if (alert.milestone === 'İLK KAN') firstBloodRef.current = true;
-        console.log(`[Dom] Alert: ${alert.playerName} — ${alert.milestone}`);
-        showAlert(alert);
-      }
-    },
-    [matchDataId, showAlert]
-  );
-
-  // Socket subscription
+  // ── Milestone detection — runs whenever the matchData PROP changes,
+  // instead of inside a socket merge handler. Same fingerprint-diffing /
+  // pre-update-snapshot approach as before, just triggered by prop updates
+  // rather than raw socket events. ──
   useEffect(() => {
-    if (!matchDataId) return;
+    if (!matchData) return;
 
-    const socket = SocketManager.getInstance().connect();
-    const events = [
-      'liveMatchUpdate',
-      'matchDataUpdated',
-      'playerStatsUpdated',
-      'teamStatsUpdated',
-      'bulkTeamUpdate',
-    ];
+    const newId = matchData._id?.toString() ?? null;
+    if (newId !== matchDataIdRef.current) {
+      // Match changed — reset every tracker so old-match counters can't
+      // leak into new-match milestone comparisons.
+      matchDataIdRef.current = newId;
+      const { kills, vehicle, grenade, airdrop, damage, distance } = buildKillMaps(matchData);
+      prevKillsRef.current    = kills;
+      prevVehicleRef.current  = vehicle;
+      prevGrenadeRef.current  = grenade;
+      prevAirdropRef.current  = airdrop;
+      prevDamageRef.current   = damage;
+      prevDistanceRef.current = distance;
+      fingerprintRef.current  = killFingerprint(matchData);
+      firstBloodRef.current   = false;
+      return; // nothing to alert on for a match we're just now seeing
+    }
 
-    events.forEach(evt => { socket.off(evt); socket.on(evt, handleSocketUpdate); });
+    const fp = killFingerprint(matchData);
+    if (fp === fingerprintRef.current) return; // nothing kill-related changed
 
-    return () => {
-      events.forEach(evt => socket.off(evt, handleSocketUpdate));
-      SocketManager.getInstance().disconnect();
-    };
-  }, [matchDataId, handleSocketUpdate]);
+    // ── Snapshot BEFORE updating maps ──────────────────────────────────────
+    const snapKills    = { ...prevKillsRef.current };
+    const snapVehicle  = { ...prevVehicleRef.current };
+    const snapGrenade  = { ...prevGrenadeRef.current };
+    const snapAirdrop  = { ...prevAirdropRef.current };
+    const snapDamage   = { ...prevDamageRef.current };
+    const snapDistance = { ...prevDistanceRef.current };
+
+    // ── Update maps ─────────────────────────────────────────────────────────
+    fingerprintRef.current = fp;
+    const { kills, vehicle, grenade, airdrop, damage, distance } = buildKillMaps(matchData);
+    prevKillsRef.current    = kills;
+    prevVehicleRef.current  = vehicle;
+    prevGrenadeRef.current  = grenade;
+    prevAirdropRef.current  = airdrop;
+    prevDamageRef.current   = damage;
+    prevDistanceRef.current = distance;
+
+    // ── Detect alert using PRE-update snapshots ────────────────────────────
+    const alert = detectAlert(matchData, snapKills, snapVehicle, snapGrenade, snapAirdrop, snapDamage, snapDistance, firstBloodRef.current);
+
+    if (alert) {
+      if (alert.milestone === 'FIRST BLOOD') firstBloodRef.current = true;
+      showAlert(alert);
+    }
+  }, [matchData, showAlert]);
 
   // Cleanup timer on unmount
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
-  if (!localMatchData || !displayedPlayer) return null;
+  if (!matchData || !displayedPlayer) return null;
 
   const primary   = tournament.primaryColor  || '#6b21a8';
   const secondary = tournament.secondaryColor || '#c084fc';
 
   return (
     <div className="w-[1920px] h-[1080px] text-white relative overflow-hidden">
-      <AnimatePresence>
-        {isVisible && displayedPlayer && (
-          <motion.div
-            key={displayedPlayer._id + displayedPlayer.milestone}
-            initial={{ x: '-110%', opacity: 0 }}
-            animate={{ x: 0,       opacity: 1 }}
-            exit={{    x: '-110%', opacity: 0 }}
-            transition={{ duration: 0.55, ease: [0.32, 0, 0.67, 0] }}
-            className="absolute top-[500px] left-[-10px] w-[400px] h-[450px]"
-          >
-            <div className="w-full h-full relative">
+      <style>{`
+        .dom-alert-card {
+          transition: transform 0.55s cubic-bezier(0.32, 0, 0.67, 0),
+                      opacity 0.55s cubic-bezier(0.32, 0, 0.67, 0);
+          will-change: transform, opacity;
+        }
+        .dom-alert-hidden {
+          transform: translateX(-110%);
+          opacity: 0;
+        }
+        .dom-alert-visible {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      `}</style>
 
-              {/* Background gradient */}
+      <div
+        key={displayedPlayer._id + displayedPlayer.milestone}
+        className={`dom-alert-card absolute top-[500px] left-[-10px] w-[400px] h-[450px] ${
+          isVisible ? 'dom-alert-visible' : 'dom-alert-hidden'
+        }`}
+      >
+        <div className="w-full h-full relative">
+
+          {/* Background gradient */}
+          <div
+            style={{ backgroundImage: `linear-gradient(to left top, ${primary}, ${secondary})` }}
+            className="absolute inset-0 w-full h-full"
+          />
+
+          {/* Player + team logo layer */}
+          <div className="absolute top-[5px] w-[475px] h-[175px]">
+
+            {/* Small team logo top-right */}
+            <img
+              src={displayedPlayer.teamLogo}
+              alt=""
+              className="w-[80px] h-[80px] absolute top-[2px] left-[307px]"
+              loading="eager"
+              decoding="async"
+            />
+
+            {/* Faded background team logo */}
+            <img
+              src={displayedPlayer.teamLogo}
+              alt=""
+              className="absolute w-[300px] h-[300px] grayscale opacity-30 left-[50px] top-[20px]"
+              loading="eager"
+              decoding="async"
+            />
+
+            {/* Player image */}
+            <img
+              src={displayedPlayer.picUrl || '/def_char.avif'}
+              alt={displayedPlayer.playerName}
+              className="w-full h-full object-contain absolute z-10 scale-[2.2] left-[-30px] top-[-10px]"
+              loading="eager"
+              decoding="async"
+            />
+
+            {/* Info panel */}
+            <div
+              className="absolute top-[270px] left-[10px] w-[82%] h-full"
+              style={{ backgroundImage: `linear-gradient(to bottom right, ${primary}, ${secondary})` }}
+            >
+              {/* Team name bar */}
               <div
-                style={{ backgroundImage: `linear-gradient(to left top, ${primary}, ${secondary})` }}
-                className="absolute inset-0 w-full h-full"
-              />
+                style={{
+                  backgroundImage: `url('/theme3assets/lines.avif')`,
+                  backgroundSize: '300px',
+                  backgroundRepeat: 'repeat',
+                }}
+                className="w-full h-[25%] bg-black relative overflow-hidden font-[AGENCYB] text-[30px] text-center"
+              >
+                {displayedPlayer.teamName.toUpperCase()}
+              </div>
 
-              {/* Player + team logo layer */}
-              <div className="absolute top-[5px] w-[475px] h-[175px]">
+              {/* Player name */}
+              <div className="font-[TUNGSTEN] text-[70px] text-center relative top-[-10px]">
+                {displayedPlayer.playerName.toUpperCase()}
+              </div>
 
-                {/* Small team logo top-right */}
-                <img
-                  src={displayedPlayer.teamLogo}
-                  alt=""
-                  className="w-[80px] h-[80px] absolute top-[2px] left-[307px]"
-                  loading="eager"
-                  decoding="async"
-                />
-
-                {/* Faded background team logo */}
-                <img
-                  src={displayedPlayer.teamLogo}
-                  alt=""
-                  className="absolute w-[300px] h-[300px] grayscale opacity-30 left-[50px] top-[20px]"
-                  loading="eager"
-                  decoding="async"
-                />
-
-                {/* Player image */}
-                <img
-                  src={displayedPlayer.picUrl || '/def_char.avif'}
-                  alt={displayedPlayer.playerName}
-                  className="w-full h-full object-contain absolute z-10 scale-[2.2] left-[-30px] top-[-10px]"
-                  loading="eager"
-                  decoding="async"
-                />
-
-                {/* Info panel */}
-                <div
-                  className="absolute top-[270px] left-[10px] w-[82%] h-full"
-                  style={{ backgroundImage: `linear-gradient(to bottom right, ${primary}, ${secondary})` }}
-                >
-                  {/* Team name bar */}
-                  <div
-                    style={{
-                      backgroundImage: `url('/theme3assets/lines.avif')`,
-                      backgroundSize: '300px',
-                      backgroundRepeat: 'repeat',
-                    }}
-                    className="w-full h-[25%] bg-black relative overflow-hidden font-[AGENCYB] text-[30px] text-center"
-                  >
-                    {displayedPlayer.teamName.toUpperCase()}
-                  </div>
-
-                  {/* Player name */}
-                  <div className="font-[TUNGSTEN] text-[70px] text-center relative top-[-10px]">
-                    {displayedPlayer.playerName.toUpperCase()}
-                  </div>
-
-                  {/* Milestone bar */}
-                  <div
-                    style={{
-                      backgroundImage: `url('/theme3assets/lines.avif')`,
-                      backgroundSize: '300px',
-                      backgroundRepeat: 'repeat',
-                    }}
-                    className="w-full h-[25%] bg-black absolute top-[133px] font-[AGENCYB] text-[38px] text-center"
-                  >
-                    <div className="relative top-[-7px]">
-                      {displayedPlayer.milestone.toUpperCase()}
-                    </div>
-                  </div>
+              {/* Milestone bar */}
+              <div
+                style={{
+                  backgroundImage: `url('/theme3assets/lines.avif')`,
+                  backgroundSize: '300px',
+                  backgroundRepeat: 'repeat',
+                }}
+                className="w-full h-[25%] bg-black absolute top-[133px] font-[AGENCYB] text-[38px] text-center"
+              >
+                <div className="relative top-[-7px]">
+                  {displayedPlayer.milestone.toUpperCase()}
                 </div>
-
               </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
+          </div>
+        </div>
+      </div>
     </div>
   );
 });

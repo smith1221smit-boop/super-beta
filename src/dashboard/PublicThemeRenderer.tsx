@@ -158,7 +158,9 @@ interface DeadTeamListEntry {
   teamName: string;
   teamLogo: string;
   placePoints: number;
+  rank: number;
   totalKills: number;
+  deadAt: string;
 }
 
 const VIEWS_NEEDING_BACKPACK = new Set(['Upper']);
@@ -171,6 +173,38 @@ const PLACEHOLDER_STYLE: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   fontSize: '24px',
+};
+
+// Consumers (Alerts, in particular) build their elimination-alert queue by
+// walking this array in order, so it must always be in actual death order —
+// oldest elimination first — no matter what order the backend happened to
+// return entries in, or what order a burst of socket updates lands in.
+//
+// Ordering rules, in priority order:
+//   1. deadAt ascending — the team eliminated earlier (e.g. 3:45) sorts
+//      before the team eliminated later (e.g. 3:55).
+//   2. rank descending, used only when deadAt is missing on one/both sides
+//      or two entries land on the exact same timestamp — a HIGHER rank
+//      number is a WORSE placement, and in a battle royale a worse
+//      placement always means that team went out earlier. So rank 10
+//      sorts before rank 9.
+const sortDeadTeamList = (list?: DeadTeamListEntry[] | null): DeadTeamListEntry[] => {
+  if (!list || list.length === 0) return [];
+  return [...list].sort((a, b) => {
+    const aTime = a.deadAt ? new Date(a.deadAt).getTime() : NaN;
+    const bTime = b.deadAt ? new Date(b.deadAt).getTime() : NaN;
+    const aValid = !Number.isNaN(aTime);
+    const bValid = !Number.isNaN(bTime);
+
+    // Both have real timestamps and they differ: earlier time wins outright.
+    if (aValid && bValid && aTime !== bTime) return aTime - bTime;
+    // Only one side has a usable timestamp: prefer the one that does.
+    if (aValid && !bValid) return -1;
+    if (!aValid && bValid) return 1;
+
+    // Same timestamp (or neither has one): fall back to rank, worst-first.
+    return (b.rank ?? 0) - (a.rank ?? 0);
+  });
 };
 
 const PublicThemeRenderer: React.FC = () => {
@@ -224,7 +258,7 @@ const PublicThemeRenderer: React.FC = () => {
     setMatch(bulk.matchesData?.current ?? null);
     setMatches(bulk.matchesData?.list ?? []);
     setMatchData(bulk.currentMatchData?.matchData ?? null);
-    setDeadTeamList(bulk.currentMatchData?.matchData?.deadTeamList ?? []);
+    setDeadTeamList(sortDeadTeamList(bulk.currentMatchData?.matchData?.deadTeamList));
     setOverallData(bulk.overallData ?? null);
     setMatchDatas(
       (bulk.matchDatasData ?? [])
@@ -321,7 +355,7 @@ const PublicThemeRenderer: React.FC = () => {
         setMatch(bulk.matchesData?.current ?? null);
         const freshMatchData = bulk.currentMatchData?.matchData ?? null;
         setMatchData(freshMatchData);
-        setDeadTeamList(freshMatchData?.deadTeamList ?? []);
+        setDeadTeamList(sortDeadTeamList(freshMatchData?.deadTeamList));
         refreshBackpackInfo(bulk);
 
         // Children still listen for the legacy 'liveMatchUpdate' socket

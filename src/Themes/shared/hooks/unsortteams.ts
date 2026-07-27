@@ -30,9 +30,25 @@ export interface Team {
   teamLogo: string;
 }
 
+// Backend-computed, locked-in result for a team the moment it's eliminated
+// — see updateDeadTeamList() in Bulkpublic.controller.js. This is the
+// authoritative source for "this match's final points," since team.placePoints
+// on matchData keeps live-updating even after death in some payloads.
+export interface DeadTeamListEntry {
+  teamId: string;
+  teamTag?: string;
+  teamName?: string;
+  teamLogo?: string;
+  placePoints?: number;
+  rank?: number;
+  totalKills?: number;
+  deadAt?: string;
+}
+
 export interface MatchData {
   _id: string;
   teams: Team[];
+  deadTeamList?: DeadTeamListEntry[];
 }
 
 export interface OverallData {
@@ -62,8 +78,17 @@ export interface SortedTeam extends Team {
 //
 // sortBy:
 //  - 'live'    → placePoints then kills (LiveStats/battlebar in-match ranking)
-//  - 'overall' → cumulative points across the event, from overallData (used
-//                by LiveStats' "top team" hero panel when overall standings matter)
+//  - 'overall' → cumulative points across the event. IMPORTANT: overallData
+//                itself updates LIVE — it already folds in each team's
+//                current-match placePoints/kills in real time, even while
+//                a team is still alive. So to make "only count after death"
+//                true, we have to back the live in-match contribution back
+//                OUT of overallMap's number to get the true prior-matches
+//                baseline, then only add it back in once deadTeamList
+//                confirms the team is eliminated (using deadTeamList's
+//                locked values, not the still-ticking matchData ones).
+//                See thisMatchLiveContribution / thisMatchFinalContribution
+//                below. Used by LiveStats' "top team" hero panel.
 export function useSortedTeams(
   matchData: MatchData | null | undefined,
   overallData?: OverallData | null,
@@ -84,26 +109,64 @@ export function useSortedTeams(
     return map;
   }, [overallData]);
 
+  // deadTeamList entries keyed by teamId — the one place the FINAL,
+  // locked-in placePoints/totalKills for this match live. Used both for
+  // isAllDead and for the points math below.
+  const deadTeamMap = useMemo(() => {
+    const map = new Map<string, DeadTeamListEntry>();
+    (matchData?.deadTeamList ?? []).forEach(entry => {
+      if (entry.teamId) map.set(entry.teamId.toString(), entry);
+    });
+    return map;
+  }, [matchData?.deadTeamList]);
+
   return useMemo(() => {
     if (!matchData) return [];
 
     const withDerived = matchData.teams.map(team => {
-      const teamKey = (team.teamId ?? team._id)?.toString();
+      // Try both possible id fields — matchData's team subdocuments don't
+      // always populate teamId the same way overallData/deadTeamList key
+      // their entries, so a single-key lookup can silently miss.
+      const teamIdKey = team.teamId?.toString();
+      const teamDocKey = team._id?.toString();
+      const lookupKey = teamIdKey ?? teamDocKey ?? '';
+
       const totalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
       const aliveCount = team.players.filter(p => p.liveState !== 5 && !p.bHasDied).length;
-      // NOTE: deliberately NOT checking health === 0 here. A player who
-      // hasn't received their first live-stat tick yet also sits at
-      // default health 0 — that's "no data yet," not "dead." Using it as
-      // a death signal caused false "team eliminated" alerts for teams
-      // that simply hadn't started reporting live data, right around the
-      // moment ANY team's first kill came in. liveState === 5 / bHasDied
-      // are the only signals the backend sets specifically to mean death.
-      const isAllDead =
-        team.players.length > 0 &&
-        team.players.every(p => p.liveState === 5 || p.bHasDied);
+
+      const deadEntry =
+        (teamIdKey && deadTeamMap.get(teamIdKey)) ||
+        (teamDocKey && deadTeamMap.get(teamDocKey));
+
+      // NOTE (kept from the original derivation): deliberately NOT checking
+      // health === 0 here. A player who hasn't received their first
+      // live-stat tick yet also sits at default health 0 — that's "no data
+      // yet," not "dead." liveState === 5 / bHasDied are the only signals
+      // the backend sets specifically to mean death.
+      const isAllDead = deadEntry
+        ? true
+        : team.players.length > 0 &&
+          team.players.every(p => p.liveState === 5 || p.bHasDied);
+
       const hasOutsideBlueCircle = team.players.some(p => p.isOutsideBlueCircle === true);
       const teamRank = team.players[0]?.rank || 0;
-      const totalPoints = overallMap.get(teamKey ?? '') ?? 0;
+
+      // What overallData currently attributes to THIS match, live, using
+      // the same placePoints+kills formula the backend uses when it builds
+      // overallData — this is what has to be subtracted back out.
+      const thisMatchLiveContribution = (team.placePoints ?? 0) + totalKills;
+
+      // What actually counts once the team is confirmed dead — prefer
+      // deadTeamList's locked snapshot; fall back to the live numbers if
+      // deadTeamList hasn't been populated for this team yet.
+      const thisMatchFinalContribution = deadEntry
+        ? (deadEntry.placePoints ?? 0) + (deadEntry.totalKills ?? totalKills)
+        : thisMatchLiveContribution;
+
+      const liveOverallTotal = overallMap.get(lookupKey) ?? 0;
+      const priorBaseline = liveOverallTotal - thisMatchLiveContribution;
+
+      const totalPoints = priorBaseline + (isAllDead ? thisMatchFinalContribution : 0);
 
       return { ...team, totalKills, aliveCount, isAllDead, hasOutsideBlueCircle, teamRank, totalPoints };
     });
@@ -115,5 +178,5 @@ export function useSortedTeams(
     return withDerived.sort((a, b) =>
       b.placePoints !== a.placePoints ? b.placePoints - a.placePoints : b.totalKills - a.totalKills
     );
-  }, [matchData, overallMap, sortBy]);
+  }, [matchData, overallMap, deadTeamMap, sortBy]);
 }

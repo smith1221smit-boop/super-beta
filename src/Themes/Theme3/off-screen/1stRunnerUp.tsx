@@ -1,5 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import api from '../../../login/api.tsx';
+import React, { useMemo } from 'react';
 
 interface Tournament {
   _id: string;
@@ -42,57 +41,10 @@ interface OverallData {
 interface RunnerUpProps {
   tournament: Tournament;
   round?: Round | null;
-  overallData?: any;
+  overallData?: OverallData | null;
 }
 
-const FirstRunnerUp: React.FC<RunnerUpProps> = ({ tournament, round, overallData: propOverallData }) => {
-  const [overallData, setOverallData] = useState<OverallData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (propOverallData) {
-      setOverallData(propOverallData);
-      setLoading(false);
-    } else {
-      const fetchOverall = async () => {
-        if (!round) return;
-        try {
-          setLoading(true);
-
-          // Initialize empty overall data structure
-          const data: OverallData = {
-            tournamentId: tournament._id,
-            roundId: round._id,
-            userId: '',
-            teams: [],
-            createdAt: new Date().toISOString()
-          };
-
-          // Try to get overall data, but don't fail if it doesn't exist
-          try {
-            const overallUrl = `/public/tournaments/${tournament._id}/rounds/${round._id}/overall`;
-            const overallResponse = await api.get(overallUrl);
-            Object.assign(data, overallResponse.data);
-          } catch (overallError) {
-            console.log('Overall data not available, using empty data structure');
-          }
-
-          setOverallData(data);
-          setError(null);
-        } catch (err) {
-          console.error('Failed to fetch overall data:', err);
-          setError('Failed to load overall data');
-          setOverallData(null);
-        } finally {
-          setLoading(false);
-        }
-      };
-
-      if (tournament._id && round?._id) fetchOverall();
-    }
-  }, [tournament._id, round?._id, propOverallData]);
-
+const FirstRunnerUp: React.FC<RunnerUpProps> = ({ tournament, round, overallData }) => {
   const second = useMemo(() => {
     if (!overallData) return null;
 
@@ -107,18 +59,10 @@ const FirstRunnerUp: React.FC<RunnerUpProps> = ({ tournament, round, overallData
     return enriched[1] || null;
   }, [overallData]);
 
-  if (loading) {
+  if (!overallData || !second) {
     return (
       <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">Loading...</div>
-      </div>
-    );
-  }
-
-  if (error || !overallData || !second) {
-    return (
-      <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">{error || 'Not enough data'}</div>
+        <div className="text-white text-2xl font-[Righteous]">Not enough data</div>
       </div>
     );
   }

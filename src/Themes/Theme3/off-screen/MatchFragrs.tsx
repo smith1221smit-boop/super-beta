@@ -1,6 +1,12 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import SocketManager from '../../../dashboard/socketManager.tsx';
+import { MatchData } from '../../shared/hooks/unsortteams';
+// NOTE: SocketManager import removed, along with the "wait for first
+// liveMatchUpdate then disconnect" socket bootstrap and the localMatchData
+// mirror it wrote into. PublicThemeRenderer owns the single socket
+// connection, does the one REST/bulk fetch, and passes freshly-merged
+// `matchData` down as a prop — topPlayers/sortedTeams below are derived
+// directly from that prop now.
 
 interface Tournament {
   _id: string;
@@ -26,36 +32,6 @@ interface Match {
   _matchNo?: number;
 }
 
-interface Player {
-  _id: string;
-  playerName: string;
-  killNum: number;
-  bHasDied: boolean;
-  picUrl?: string;
-  damage?: string;
-  survivalTime?: number;
-  assists?: number;
-  
-  // Live stats fields
-  health: number;
-  healthMax: number;
-  liveState: number; // 0,1,2,3 = alive, 4 = knocked, 5 = dead
-}
-
-interface Team {
-  _id: string;
-  teamTag: string;
-  slot?: number;
-  placePoints: number;
-  players: Player[];
-  teamLogo: string;
-}
-
-interface MatchData {
-  _id: string;
-  teams: Team[];
-}
-
 interface MatchFragrsProps {
   tournament: Tournament;
   round?: Round | null;
@@ -64,69 +40,7 @@ interface MatchFragrsProps {
 }
 
 const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, matchData }) => {
-   const [localMatchData, setLocalMatchData] = useState<MatchData | null>(matchData || null);
-   const [matchDataId, setMatchDataId] = useState<string | null>(matchData?._id?.toString() || null);
-   const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
-   const [dataReceived, setDataReceived] = useState<boolean>(false);
-   const [hasFetched, setHasFetched] = useState<boolean>(false);
    const [selectedView, setSelectedView] = useState<'fragers' | 'teams'>('fragers');
-
-  useEffect(() => {
-    if (matchData && !dataReceived && !hasFetched) {
-      console.log('MatchFragrs: Received new matchData prop, updating local state');
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-      setLastUpdateTime(Date.now());
-      // Disconnect socket immediately after receiving prop data
-      const socketManager = SocketManager.getInstance();
-      socketManager.disconnect();
-    }
-  }, [matchData, dataReceived, hasFetched]);
-
-  useEffect(() => {
-    if (!match?._id || !matchDataId || hasFetched) return;
-
-    console.log('Setting up socket for initial data fetch - match:', match._id, 'matchData:', matchDataId);
-
-    // Get a fresh socket connection from the manager
-    const socketManager = SocketManager.getInstance();
-    const freshSocket = socketManager.connect();
-
-    console.log('Socket connected:', freshSocket?.connected);
-
-    // Test socket connection
-    freshSocket.emit('test', 'MatchFragrs component connected');
-
-    // Handler for live updates - only accept first data
-    const handleLiveUpdate = (data: any) => {
-      if (data._id?.toString() === matchDataId && !dataReceived) {
-        console.log('MatchFragrs: Received first live data, updating and disconnecting');
-        setLocalMatchData(data);
-        setLastUpdateTime(Date.now());
-        setDataReceived(true);
-        setHasFetched(true);
-        freshSocket.off('liveMatchUpdate', handleLiveUpdate);
-        freshSocket.disconnect();
-      }
-    };
-
-    freshSocket.on('liveMatchUpdate', handleLiveUpdate);
-
-    return () => {
-      console.log('MatchFragrs: Cleaning up socket listener');
-      freshSocket.off('liveMatchUpdate', handleLiveUpdate);
-      // Don't disconnect here to avoid triggering UI changes
-    };
-  }, [match?._id, matchDataId, hasFetched]);
-
-  // Add effect to handle prop changes and force re-render
-  useEffect(() => {
-    if (matchData && matchData._id?.toString() !== matchDataId && !dataReceived && !hasFetched) {
-      console.log('MatchData prop changed, updating local state');
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-    }
-  }, [matchData, matchDataId, dataReceived, hasFetched]);
 
   // Typed text helper using Framer Motion
   const renderTyped = (text: string, className?: string, delayBase: number = 0) => {
@@ -162,11 +76,11 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
 
   
 
-  // Get top 5 players by kills, then damage, then assists - recalculated on every localMatchData change
+  // Get top 5 players by kills, then damage, then assists - recalculated whenever the matchData prop changes
   const topPlayers = useMemo(() => {
-    if (!localMatchData) return [];
+    if (!matchData) return [];
 
-    const allPlayers = localMatchData.teams.flatMap(team => {
+    const allPlayers = matchData.teams.flatMap(team => {
       const teamTotalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
       return team.players.map(player => ({
         ...player,
@@ -189,18 +103,18 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
     });
 
     return sorted.slice(0, 5);
-  }, [localMatchData]);
+  }, [matchData]);
 
-  // Get sorted teams by points and kills - recalculated on every localMatchData change
+  // Get sorted teams by points and kills - recalculated whenever the matchData prop changes
   const sortedTeams = useMemo(() => {
-    if (!localMatchData) return [];
+    if (!matchData) return [];
 
-    return localMatchData.teams
+    return matchData.teams
       .map(team => ({
         ...team,
         totalKills: team.players.reduce((sum, p) => sum + (p.killNum || 0), 0),
         alive: team.players.filter(p => p.liveState !== 5 && !p.bHasDied).length,
-        totalDamage: team.players.reduce((sum, p) => sum + (parseInt(p.damage || '0') || 0), 0),
+        totalDamage: team.players.reduce((sum, p) => sum + (parseInt(String(p.damage ?? '0')) || 0), 0),
       }))
       .sort((a, b) => {
         // Sort by points first (descending), then by kills (descending)
@@ -209,9 +123,9 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
         }
         return b.totalKills - a.totalKills;
       });
-  }, [localMatchData]);
+  }, [matchData]);
 
-  if (!localMatchData) {
+  if (!matchData) {
     return (
       <div className="w-[1920px] h-[1080px] bg-black flex items-center justify-center">
         <div className="text-white text-2xl font-[Righteous]">No match data available</div>

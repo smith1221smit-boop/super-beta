@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
-
-
+// NOTE: the self-fetch of round matches is gone — PublicThemeRenderer
+// already loads the full `matches` list and passes it down as a prop; the
+// "next match" is just derived from it.
 
 interface Tournament {
   _id: string;
@@ -29,33 +30,10 @@ interface CommingUpNextProps {
   tournament: Tournament;
   round?: Round | null;
   match?: Match | null; // currently selected match
+  matches?: Match[];
 }
 
-const CommingUpNext: React.FC<CommingUpNextProps> = ({ tournament, round, match }) => {
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const run = async () => {
-      if (!round?._id) return;
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await fetch(`https://backend-prod-bs4c.onrender.com/api/public/rounds/${round._id}/matches`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: Match[] = await res.json();
-        setMatches(data || []);
-      } catch (e: any) {
-        console.error('CommingUpNext: failed to fetch matches', e);
-        setError('Failed to load matches');
-      } finally {
-        setLoading(false);
-      }
-    };
-    run();
-  }, [round?._id]);
-
+const CommingUpNext: React.FC<CommingUpNextProps> = ({ tournament, round, match, matches = [] }) => {
   const sortedMatches = useMemo(() => {
     return [...matches].sort((a, b) => (a.matchNo || a._matchNo || 0) - (b.matchNo || b._matchNo || 0));
   }, [matches]);
@@ -70,18 +48,6 @@ const CommingUpNext: React.FC<CommingUpNextProps> = ({ tournament, round, match 
   if (!round) {
     return (
       <div className="w-[1920px] h-[1080px]  text-white flex items-center justify-center">No round selected</div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="w-[1920px] h-[1080px]  text-white flex items-center justify-center">Loading next match...</div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="w-[1920px] h-[1080px] bg-black text-red-400 flex items-center justify-center">{error}</div>
     );
   }
 
@@ -104,7 +70,7 @@ const CommingUpNext: React.FC<CommingUpNextProps> = ({ tournament, round, match 
         transition={{ duration: 0.6, ease: 'easeOut' }}
       >
         <h1 className="text-white font-bold whitespace-pre text-[8rem]">COMING UP NEXT</h1>
-      
+
       </motion.div>
 
       {/* Next match card */}
@@ -122,7 +88,7 @@ const CommingUpNext: React.FC<CommingUpNextProps> = ({ tournament, round, match 
         <div className="flex h-full text-white">
           <div className="flex-1 p-6 flex flex-col justify-center items-center mt-[-40px]">
           <div className=" text-[4rem] font-bebas">{tournament.tournamentName || '-'}</div>
-          <div 
+          <div
   style={{
     background: `linear-gradient(
       to right,
@@ -139,8 +105,8 @@ const CommingUpNext: React.FC<CommingUpNextProps> = ({ tournament, round, match 
 
 
             <div className=" text-[3rem] font-[Righteous]">Map : {nextMatch.map || '-'}</div>
-            <div 
-                  
+            <div
+
                      style={{
                        background: `linear-gradient(
                          to right,
@@ -151,7 +117,7 @@ const CommingUpNext: React.FC<CommingUpNextProps> = ({ tournament, round, match 
                        )`,
                      }}
             className=" text-[3rem] font-[Righteous] w-[700px] flex justify-center">ROUND : {round.roundName || '-'}</div>
-         
+
           </div>
           <div
   className="w-[520px] h-full flex items-center justify-center text-black text-[3rem] font-bebas"

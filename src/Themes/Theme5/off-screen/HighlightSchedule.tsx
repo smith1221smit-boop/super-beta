@@ -1,6 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import Teams from 'dashboard/MainTeams';
 
 interface Tournament {
   _id: string;
@@ -82,66 +81,17 @@ const getMapImage = (mapName?: string) => {
 };
 
 const HighlightSchedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMatches, matchDatas: propMatchDatas, selectedScheduleMatches }) => {
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (propMatches && propMatchDatas) {
-      // Use props if available
-      const matchesWithTeams = propMatches.map((match, idx) => ({
-        ...match,
-        teams: propMatchDatas[idx]?.teams || []
-      }));
-      setMatches(matchesWithTeams);
-      setLoading(false);
-    } else if (round?._id) {
-      // Fallback to fetching
-      const run = async () => {
-        try {
-          setLoading(true);
-          setError(null);
-          const res = await fetch(`https://backend-prod-530t.onrender.com/api/public/rounds/${round._id}/matches`);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const matchesData: Match[] = await res.json();
-
-          // Fetch selected match
-          const selectedRes = await fetch(`https://backend-prod-530t.onrender.com/api/public/tournaments/${tournament._id}/rounds/${round._id}/selected-match`);
-          let selectedMatchId = null;
-          if (selectedRes.ok) {
-            const selectedData = await selectedRes.json();
-            selectedMatchId = selectedData.matchId;
-          }
-          setSelectedMatchId(selectedMatchId);
-
-          // Fetch matchData for each match to get teams
-          const matchDataPromises = matchesData.map(match =>
-            fetch(`https://backend-prod-530t.onrender.com/api/public/matches/${match._id}/matchdata`)
-              .then(res => res.ok ? res.json() : null)
-              .catch(() => null)
-          );
-          const matchDatas = await Promise.all(matchDataPromises);
-
-          // Attach teams to matches
-          const matchesWithTeams = matchesData.map((match, idx) => ({
-            ...match,
-            teams: matchDatas[idx]?.teams || []
-          }));
-
-          setMatches(matchesWithTeams);
-        } catch (e: any) {
-          console.error('Schedule: failed to fetch matches', e);
-          setError('Failed to load matches');
-        } finally {
-          setLoading(false);
-        }
-      };
-      run();
-    } else {
-      setLoading(false);
-    }
-  }, [round?._id, tournament._id, propMatches, propMatchDatas]);
+  // NOTE: the REST fallback fetch (fetch(...rounds/:id/matches),
+  // fetch(...selected-match), fetch(...matchdata) per match) has been
+  // removed. PublicThemeRenderer always supplies `matches`/`matchDatas`
+  // as props now, so this is a pure derivation instead of an effect.
+  const matches = useMemo<Match[]>(() => {
+    if (!propMatches) return [];
+    return propMatches.map((match, idx) => ({
+      ...match,
+      teams: propMatchDatas?.[idx]?.teams || []
+    }));
+  }, [propMatches, propMatchDatas]);
 
   const sortedMatches = useMemo(() => {
     // Filter to only selected matches if any are selected
@@ -160,18 +110,6 @@ const HighlightSchedule: React.FC<ScheduleProps> = ({ tournament, round, matches
   if (!round) {
     return (
       <div className="w-[1920px] h-[1080px]  text-white flex items-center justify-center">No round selected</div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="w-[1920px] h-[1080px]  text-white flex items-center justify-center">Loading schedule...</div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="w-[1920px] h-[1080px]  text-red-400 flex items-center justify-center">{error}</div>
     );
   }
 

@@ -1,6 +1,10 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import SocketManager from '../../../dashboard/socketManager.tsx';
-import Teams from 'dashboard/MainTeams.tsx';
+import React, { useMemo } from 'react';
+// NOTE: SocketManager import removed, along with the "wait for first
+// liveMatchUpdate then disconnect" bootstrap effect and the localMatchData
+// mirror it fed. PublicThemeRenderer owns the single socket connection,
+// listens to 'bulkUpdate', and passes freshly-merged `matchData` down as a
+// prop on every change — this component just reads that prop directly now,
+// same as the Theme2 conversion pattern.
 
 interface Tournament {
   _id: string;
@@ -72,70 +76,6 @@ interface MatchFragrsProps {
 
 
 const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, matchData }) => {
-   const [localMatchData, setLocalMatchData] = useState<MatchData | null>(matchData || null);
-   const [matchDataId, setMatchDataId] = useState<string | null>(matchData?._id?.toString() || null);
-   const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
-   const [dataReceived, setDataReceived] = useState<boolean>(false);
-   const [hasFetched, setHasFetched] = useState<boolean>(false);
-   const [selectedView, setSelectedView] = useState<'fragers' | 'teams'>('fragers');
-
-  useEffect(() => {
-    if (matchData && !dataReceived && !hasFetched) {
-      console.log('MatchFragrs: Received new matchData prop, updating local state');
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-      setLastUpdateTime(Date.now());
-      // Disconnect socket immediately after receiving prop data
-      const socketManager = SocketManager.getInstance();
-      socketManager.disconnect();
-    }
-  }, [matchData, dataReceived, hasFetched]);
-
-  useEffect(() => {
-    if (!match?._id || !matchDataId || hasFetched) return;
-
-    console.log('Setting up socket for initial data fetch - match:', match._id, 'matchData:', matchDataId);
-
-    // Get a fresh socket connection from the manager
-    const socketManager = SocketManager.getInstance();
-    const freshSocket = socketManager.connect();
-
-    console.log('Socket connected:', freshSocket?.connected);
-
-    // Test socket connection
-    freshSocket.emit('test', 'MatchFragrs component connected');
-
-    // Handler for live updates - only accept first data
-    const handleLiveUpdate = (data: any) => {
-      if (data._id?.toString() === matchDataId && !dataReceived) {
-        console.log('MatchFragrs: Received first live data, updating and disconnecting');
-        setLocalMatchData(data);
-        setLastUpdateTime(Date.now());
-        setDataReceived(true);
-        setHasFetched(true);
-        freshSocket.off('liveMatchUpdate', handleLiveUpdate);
-        freshSocket.disconnect();
-      }
-    };
-
-    freshSocket.on('liveMatchUpdate', handleLiveUpdate);
-
-    return () => {
-      console.log('MatchFragrs: Cleaning up socket listener');
-      freshSocket.off('liveMatchUpdate', handleLiveUpdate);
-      // Don't disconnect here to avoid triggering UI changes
-    };
-  }, [match?._id, matchDataId, hasFetched]);
-
-  // Add effect to handle prop changes and force re-render
-  useEffect(() => {
-    if (matchData && matchData._id?.toString() !== matchDataId && !dataReceived && !hasFetched) {
-      console.log('MatchData prop changed, updating local state');
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-    }
-  }, [matchData, matchDataId, dataReceived, hasFetched]);
-
 type StatKey =
   | "killNum"
   | "damage"
@@ -146,9 +86,9 @@ type StatKey =
 
 // Get top 5 players by kills, damage, assists (same as working off-screen)
  const topCategories = useMemo(() => {
-  if (!localMatchData) return [];
+  if (!matchData) return [];
 
-  const allPlayers = localMatchData.teams.flatMap(team =>
+  const allPlayers = matchData.teams.flatMap(team =>
     team.players.map(player => ({
       ...player,
       killNum: Number(player.killNum || 0),
@@ -173,9 +113,9 @@ type StatKey =
     { label: "KILL DISTANCE", player: getTop("killDistance"), valueKey: "killDistance" as StatKey },
     { label: "TRAVEL DISTANCE", player: getTop("travelDistance"), valueKey: "travelDistance" as StatKey }
   ];
-}, [localMatchData]);
+}, [matchData]);
 
-  if (!localMatchData) {
+  if (!matchData) {
     return (
      <div></div>
     );
@@ -188,15 +128,15 @@ type StatKey =
           backgroundImage: `linear-gradient(135deg, ${
             tournament.primaryColor || '#000'
           }, #000)`,
-       
+
         }}
         className="w-[500px] h-[110px] text-[77px] font-[tungsten] absolute left-[690px] text-center text-white pt-[0px] top-[10px]"
       >
   PLAYERS SUMMARY
       </div>
-     
 
-     
+
+
       <div className='w-[1900px] h-[800px] absolute left-[70px] top-[180px] flex gap-5'>
         {topCategories.map((item, index) => {
   const player = item.player;
@@ -229,7 +169,7 @@ type StatKey =
     </div>
 
     {/* Stat Value */}
-    <div 
+    <div
       style={{
                       color: `${tournament.primaryColor || '#6b21a8'}`,
 
@@ -251,7 +191,7 @@ type StatKey =
   <div className="absolute bottom-0 left-0 w-full h-[45%] bg-gradient-to-t from-black/100 to-transparent z-20" />
 </div>
       {/* Player Name */}
-      <div 
+      <div
           style={{
                       backgroundImage: `linear-gradient(to left top, ${tournament.primaryColor || '#6b21a8'}, ${tournament.secondaryColor || '#c084fc'}), url('https://res.cloudinary.com/dqckienxj/image/upload/v1748293303/purple-waves-light-abstract-zg_qfebgm.jpg')`,
 
@@ -276,4 +216,3 @@ type StatKey =
 
 
 export default MatchFragrs;
-

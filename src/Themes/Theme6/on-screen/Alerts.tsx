@@ -1,6 +1,17 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import SocketManager from '../../../dashboard/socketManager.tsx';
+import { useSortedTeams, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+// NOTE: SocketManager import removed, along with the six manual event
+// handlers (handleLiveUpdate, handleMatchDataUpdate, handlePlayerUpdate,
+// handleTeamPointsUpdate, handleTeamStatsUpdate, handleBulkTeamUpdate) and
+// the localMatchData mirror state they all wrote into. PublicThemeRenderer
+// owns the single socket connection, listens to 'bulkUpdate', and passes
+// freshly-merged `matchData` down as a prop on every change — this
+// component now just reacts to that prop, same as the Theme2 conversion.
+//
+// Player / Team / MatchData / SortedTeam are imported from useSortedTeams
+// rather than redeclared locally — duplicate same-named interfaces with
+// different shapes are NOT the same type to TypeScript.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,277 +38,119 @@ interface Match {
   _matchNo?: number;
 }
 
-interface Player {
-  _id: string;
-  playerName: string;
-  killNum: number;
-  bHasDied: boolean;
-  picUrl?: string;
-  health: number;
-  healthMax: number;
-  liveState: number;
-  rank?: number;
-}
-
-interface Team {
-  _id: string;
-  teamTag: string;
-  teamName: string;
-  slot?: number;
-  placePoints: number;
-  players: Player[];
-  teamLogo: string;
-}
-
-interface MatchData {
-  _id: string;
-  teams: Team[];
-}
-
 interface AlertsProps {
   tournament: Tournament;
   round?: Round | null;
   match?: Match | null;
   matchData?: MatchData | null;
+  deadTeamList?: any[];
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+const ALERT_DISPLAY_MS = 6000;
+
 const Alerts: React.FC<AlertsProps> = ({ tournament, round, match, matchData }) => {
-  const [localMatchData,   setLocalMatchData]   = useState<MatchData | null>(matchData || null);
-  const [matchDataId,      setMatchDataId]      = useState<string | null>(matchData?._id?.toString() || null);
-  const [lastUpdateTime,   setLastUpdateTime]   = useState<number>(Date.now());
-  const [showAlert,        setShowAlert]        = useState<boolean>(false);
-  const [currentAlertTeam, setCurrentAlertTeam] = useState<Team | null>(null);
+  const matchDataIdRef = useRef<string | null>(matchData?._id?.toString() ?? null);
 
   const shownTeamsRef  = useRef<Set<string>>(new Set());
-  const timeoutRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const alertIdRef     = useRef<number>(0);
+  // Teams this client has actually observed NOT-all-dead at some earlier
+  // tick. A team can only queue an elimination alert if it's in this set —
+  // this closes the race where stale/default player data (before a team's
+  // first real live-stat write) can look "all dead" on the very first
+  // computation, with no genuine alive tick ever having been witnessed.
+  const everAliveRef   = useRef<Set<string>>(new Set());
+  const alertQueueRef  = useRef<SortedTeam[]>([]);
+  const currentAlertTeamRef = useRef<SortedTeam | null>(null);
+  const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const alertIdRef     = useRef(0);
 
-  // ── Sync matchData prop ────────────────────────────────────────────────────
+  const [currentAlertTeam, setCurrentAlertTeam] = useState<SortedTeam | null>(null);
+  const [showAlert, setShowAlert] = useState(false);
+
+  // 'live' → placePoints then kills, same in-match ranking this theme
+  // always used. teamRank / totalKills / isAllDead come pre-derived from
+  // the hook.
+  const sortedTeams: SortedTeam[] = useSortedTeams(matchData, null, 'live');
+
+  // ── Reset queue when the match itself changes ──
   useEffect(() => {
-    if (matchData) {
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-      setLastUpdateTime(Date.now());
+    if (!matchData) return;
+    const newId = matchData._id?.toString();
+    if (newId !== matchDataIdRef.current) {
+      matchDataIdRef.current = newId;
+      shownTeamsRef.current.clear();
+      everAliveRef.current.clear();
+      alertQueueRef.current = [];
+      currentAlertTeamRef.current = null;
+      setCurrentAlertTeam(null);
+      setShowAlert(false);
+      if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
     }
   }, [matchData]);
 
-  // ── Reset when match changes ───────────────────────────────────────────────
-  useEffect(() => {
-    if (matchData && matchData._id?.toString() !== matchDataId) {
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-      shownTeamsRef.current.clear();
-      setShowAlert(false);
-      setCurrentAlertTeam(null);
-      if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
-    }
-  }, [matchData, matchDataId]);
+  // ── Advance the alert queue one at a time ──
+  const showNextAlert = useCallback(() => {
+    if (currentAlertTeamRef.current) return; // one at a time
+    const next = alertQueueRef.current.shift();
+    if (!next) return;
 
-  // ── Helper: trigger alert for a fully eliminated team ─────────────────────
-  const triggerEliminationAlert = (team: Team) => {
-    if (shownTeamsRef.current.has(team._id)) return;
-    shownTeamsRef.current.add(team._id);
     alertIdRef.current += 1;
-    setCurrentAlertTeam(team);
+    currentAlertTeamRef.current = next;
+    setCurrentAlertTeam(next);
     setShowAlert(true);
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(() => {
+
+    if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+    hideTimeoutRef.current = setTimeout(() => {
       setShowAlert(false);
+      currentAlertTeamRef.current = null;
       setCurrentAlertTeam(null);
-      timeoutRef.current = null;
-    }, 6000);
-  };
+      hideTimeoutRef.current = null;
+      showNextAlert();
+    }, ALERT_DISPLAY_MS);
+  }, []);
 
-  // ── Helper: is a team fully wiped ─────────────────────────────────────────
-  const isEliminated = (team: Team) =>
-    team.players.every(p => p.health === 0 || p.bHasDied || p.liveState === 5);
-
-  // ── Socket setup ──────────────────────────────────────────────────────────
+  // ── Detect newly-eliminated teams off the (already-sorted, already-
+  // derived) sortedTeams list every time it changes, instead of re-walking
+  // raw matchData.teams inside six different socket handlers. isAllDead
+  // comes from the hook and requires liveState === 5 OR bHasDied === true
+  // — health === 0 alone is never treated as death. A team must also have
+  // been observed NOT-all-dead at some earlier tick (everAliveRef) before
+  // it's eligible to alert at all. ──
   useEffect(() => {
-    if (!matchDataId) return;
+    for (const team of sortedTeams) {
+      if (!team.isAllDead) {
+        everAliveRef.current.add(team._id);
+        continue;
+      }
+      if (everAliveRef.current.has(team._id) && !shownTeamsRef.current.has(team._id)) {
+        shownTeamsRef.current.add(team._id);
+        alertQueueRef.current.push(team);
+      }
+    }
+    showNextAlert();
+  }, [sortedTeams, showNextAlert]);
 
-    const socketManager = SocketManager.getInstance();
-    const freshSocket   = socketManager.connect();
-
-    const alertsHandlers = {
-      handleLiveUpdate: (data: any) => {
-        if (data._id?.toString() !== matchDataId) return;
-        if (data._id) {
-          setLocalMatchData((prev: MatchData | null) => {
-            const newData = data;
-            if (newData.teams) {
-              for (const team of newData.teams) {
-                if (isEliminated(team)) { triggerEliminationAlert(team); break; }
-              }
-            }
-            return newData;
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-
-      handleMatchDataUpdate: (data: any) => {
-        if (data.matchDataId !== matchDataId) return;
-        setLocalMatchData((prev: MatchData | null) => {
-          if (!prev) return prev;
-          const updatedTeams = prev.teams.map((team: any) => {
-            if (team._id === data.teamId || team.teamId === data.teamId) {
-              const changes  = data.changes || {};
-              const nextTeam = { ...team, ...changes };
-              if (Array.isArray(changes.players)) {
-                const byId = new Map(changes.players.map((p: any) => [p._id?.toString?.() || p._id, p]));
-                nextTeam.players = team.players.map((p: Player) => {
-                  const upd = byId.get(p._id?.toString?.() || p._id);
-                  return upd ? { ...p, ...upd } : p;
-                });
-              }
-              return nextTeam;
-            }
-            return team;
-          });
-          const updatedTeam = updatedTeams.find((t: any) => t._id === data.teamId || t.teamId === data.teamId);
-          if (updatedTeam && isEliminated(updatedTeam)) triggerEliminationAlert(updatedTeam);
-          return { ...prev, teams: updatedTeams };
-        });
-        setLastUpdateTime(Date.now());
-      },
-
-      handlePlayerUpdate: (data: any) => {
-        if (data.matchDataId !== matchDataId) return;
-        setLocalMatchData((prev: MatchData | null) => {
-          if (!prev) return prev;
-          const newTeams = prev.teams.map((team: any) => {
-            if (team._id === data.teamId || team.teamId === data.teamId) {
-              return {
-                ...team,
-                players: team.players.map((player: Player) =>
-                  player._id === data.playerId ? { ...player, ...data.updates } : player
-                ),
-              };
-            }
-            return team;
-          });
-          const updatedTeam = newTeams.find((t: any) => t._id === data.teamId || t.teamId === data.teamId);
-          if (updatedTeam && isEliminated(updatedTeam)) triggerEliminationAlert(updatedTeam);
-          return { ...prev, teams: newTeams };
-        });
-        setLastUpdateTime(Date.now());
-      },
-
-      handleTeamPointsUpdate: (data: any) => {
-        if (data.matchDataId !== matchDataId) return;
-        setLocalMatchData((prev: MatchData | null) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            teams: prev.teams.map((team: any) =>
-              team._id === data.teamId || team.teamId === data.teamId
-                ? { ...team, placePoints: data.changes?.placePoints ?? team.placePoints }
-                : team
-            ),
-          };
-        });
-        setLastUpdateTime(Date.now());
-      },
-
-      handleTeamStatsUpdate: (data: any) => {
-        if (data.matchDataId !== matchDataId) return;
-        setLocalMatchData((prev: MatchData | null) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            teams: prev.teams.map((team: any) => {
-              if (team._id === data.teamId || team.teamId === data.teamId) {
-                const updatedPlayers = data.players
-                  ? team.players.map((player: any) => {
-                      const upd = data.players.find((p: any) => p._id === player._id);
-                      return upd ? { ...player, killNum: upd.killNum } : player;
-                    })
-                  : team.players;
-                return { ...team, players: updatedPlayers };
-              }
-              return team;
-            }),
-          };
-        });
-        setLastUpdateTime(Date.now());
-      },
-
-      handleBulkTeamUpdate: (data: any) => {
-        if (data.matchDataId !== matchDataId) return;
-        setLocalMatchData((prev: MatchData | null) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            teams: prev.teams.map((team: any) => {
-              if ((team._id === data.teamId || team.teamId === data.teamId) && data.changes?.players) {
-                const byId = new Map(data.changes.players.map((p: any) => [p._id?.toString?.() || p._id, p]));
-                return {
-                  ...team,
-                  players: team.players.map((player: Player) => {
-                    const upd = byId.get(player._id?.toString?.() || player._id);
-                    return upd ? { ...player, ...upd } : player;
-                  }),
-                };
-              }
-              return team;
-            }),
-          };
-        });
-        setLastUpdateTime(Date.now());
-      },
-    };
-
-    freshSocket.on('liveMatchUpdate',   alertsHandlers.handleLiveUpdate);
-    freshSocket.on('matchDataUpdated',  alertsHandlers.handleMatchDataUpdate);
-    freshSocket.on('playerStatsUpdated',alertsHandlers.handlePlayerUpdate);
-    freshSocket.on('teamPointsUpdated', alertsHandlers.handleTeamPointsUpdate);
-    freshSocket.on('teamStatsUpdated',  alertsHandlers.handleTeamStatsUpdate);
-    freshSocket.on('bulkTeamUpdate',    alertsHandlers.handleBulkTeamUpdate);
-
-    return () => {
-      freshSocket.off('liveMatchUpdate',   alertsHandlers.handleLiveUpdate);
-      freshSocket.off('matchDataUpdated',  alertsHandlers.handleMatchDataUpdate);
-      freshSocket.off('playerStatsUpdated',alertsHandlers.handlePlayerUpdate);
-      freshSocket.off('teamPointsUpdated', alertsHandlers.handleTeamPointsUpdate);
-      freshSocket.off('teamStatsUpdated',  alertsHandlers.handleTeamStatsUpdate);
-      freshSocket.off('bulkTeamUpdate',    alertsHandlers.handleBulkTeamUpdate);
-    };
-  }, [matchDataId]);
-
-  // Cleanup timer on unmount
-  useEffect(() => () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); }, []);
-
-  // ── Derived data ───────────────────────────────────────────────────────────
-  const sortedTeams = useMemo(() => {
-    if (!localMatchData) return [];
-    return localMatchData.teams
-      .map(team => ({
-        ...team,
-        totalKills: team.players.reduce((s, p) => s + (p.killNum || 0), 0),
-        alive:      team.players.filter(p => p.liveState !== 5).length,
-        teamRank:   team.players[0]?.rank || 0,
-      }))
-      .sort((a, b) =>
-        b.placePoints !== a.placePoints
-          ? b.placePoints - a.placePoints
-          : b.totalKills - a.totalKills
-      );
-  }, [localMatchData, lastUpdateTime]);
-
+  // Re-resolve the alerting team against the latest sortedTeams each render
+  // so rank/kills shown stay live for as long as the card is on screen,
+  // falling back to the queued snapshot if it briefly drops out of the list.
   const alertTeam = useMemo(
-    () => currentAlertTeam ? sortedTeams.find(t => t._id === currentAlertTeam._id) ?? null : null,
+    () => (currentAlertTeam ? sortedTeams.find(t => t._id === currentAlertTeam._id) ?? currentAlertTeam : null),
     [currentAlertTeam, sortedTeams]
   );
 
-  if (!localMatchData) return null;
+  // Cleanup timer on unmount
+  useEffect(() => () => {
+    if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+  }, []);
+
+  if (!matchData) return null;
 
   const primary   = tournament.primaryColor  || '#6b21a8';
   const secondary = tournament.secondaryColor || '#c084fc';
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Render (unchanged from the original markup) ──
 return (
   <div className="w-[1920px] h-[1080px] text-white p-8 relative">
     <AnimatePresence>
@@ -320,7 +173,7 @@ return (
               className="w-[30%] h-full"
             />
 
-           
+
 
             {/* Logo + Background Logo */}
             <div className="absolute top-[5px] w-[180px] h-[180px]">
@@ -362,7 +215,7 @@ return (
 
               {/* TEAM TAG */}
               <div className="font-[TUNGSTEN] text-[70px]">
-               {alertTeam.teamName.toUpperCase()}
+               {(alertTeam.teamName || alertTeam.teamTag || '').toUpperCase()}
               </div>
 
               {/* BOTTOM BAR */}
@@ -378,7 +231,7 @@ return (
               </div>
 
               {/* EXTRA INFO */}
-             
+
 
             </div>
           </div>

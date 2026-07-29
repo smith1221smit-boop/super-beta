@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import api from '../../../login/api';
 import { motion } from 'framer-motion';
+// NOTE: api import removed along with the REST fallback branch — the
+// tournament round/matches selection screen only reaches this view via
+// PublicThemeRenderer, which always supplies matches + matchDatas as props.
 
 interface Tournament {
   _id: string;
@@ -80,60 +82,17 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMat
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (propMatches && propMatchDatas) {
-      // Use props if available
+    if (propMatches) {
       const matchesWithTeams = propMatches.map((match, idx) => ({
         ...match,
-        teams: propMatchDatas[idx]?.teams || []
+        teams: propMatchDatas?.[idx]?.teams || []
       }));
       setMatches(matchesWithTeams);
       setLoading(false);
-    } else if (round?._id) {
-      // Fallback to fetching
-      const run = async () => {
-        try {
-          setLoading(true);
-          setError(null);
-          const res = await api.get(`/public/rounds/${round._id}/matches`);
-          if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
-          const matchesData: Match[] = res.data;
-
-          // Fetch selected match
-          const selectedRes = await api.get(`/public/tournaments/${tournament._id}/rounds/${round._id}/selected-match`);
-          let selectedMatchId = null;
-          if (selectedRes.status === 200) {
-            const selectedData = selectedRes.data;
-            selectedMatchId = selectedData.matchId;
-          }
-          setSelectedMatchId(selectedMatchId);
-
-          // Fetch matchData for each match to get teams
-          const matchDataPromises = matchesData.map(match =>
-            api.get(`/public/matches/${match._id}/matchdata`)
-              .then(res => res ? res.data : null)
-              .catch(() => null)
-          );
-          const matchDatas = await Promise.all(matchDataPromises);
-
-          // Attach teams to matches
-          const matchesWithTeams = matchesData.map((match, idx) => ({
-            ...match,
-            teams: matchDatas[idx]?.teams || []
-          }));
-
-          setMatches(matchesWithTeams);
-        } catch (e: any) {
-          console.error('Schedule: failed to fetch matches', e);
-          setError('Failed to load matches');
-        } finally {
-          setLoading(false);
-        }
-      };
-      run();
     } else {
       setLoading(false);
     }
-  }, [round?._id, tournament._id, propMatches, propMatchDatas]);
+  }, [propMatches, propMatchDatas]);
 
   const sortedMatches = useMemo(() => {
     // Filter to only selected matches if any are selected

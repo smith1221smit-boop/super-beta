@@ -1,5 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import SocketManager from '../../../dashboard/socketManager.tsx';
+import React, { useMemo } from 'react';
+// NOTE: SocketManager import removed, along with the socket-driven
+// "wait for first live update, then disconnect" fetch logic. PublicThemeRenderer
+// owns the single socket connection, listens to 'bulkUpdate', and passes
+// freshly-merged matchData down as a prop — this component now just reacts
+// to that prop.
 
 interface Tournament {
   _id: string;
@@ -68,78 +72,12 @@ interface MatchFragrsProps {
 
 
 const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, matchData }) => {
-   const [localMatchData, setLocalMatchData] = useState<MatchData | null>(matchData || null);
-   const [matchDataId, setMatchDataId] = useState<string | null>(matchData?._id?.toString() || null);
-   const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
-   const [dataReceived, setDataReceived] = useState<boolean>(false);
-   const [hasFetched, setHasFetched] = useState<boolean>(false);
-   const [selectedView, setSelectedView] = useState<'fragers' | 'teams'>('fragers');
-
-  useEffect(() => {
-    if (matchData && !dataReceived && !hasFetched) {
-      console.log('MatchFragrs: Received new matchData prop, updating local state');
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-      setLastUpdateTime(Date.now());
-      // Disconnect socket immediately after receiving prop data
-      const socketManager = SocketManager.getInstance();
-      socketManager.disconnect();
-    }
-  }, [matchData, dataReceived, hasFetched]);
-
-  useEffect(() => {
-    if (!match?._id || !matchDataId || hasFetched) return;
-
-    console.log('Setting up socket for initial data fetch - match:', match._id, 'matchData:', matchDataId);
-
-    // Get a fresh socket connection from the manager
-    const socketManager = SocketManager.getInstance();
-    const freshSocket = socketManager.connect();
-
-    console.log('Socket connected:', freshSocket?.connected);
-
-    // Test socket connection
-    freshSocket.emit('test', 'MatchFragrs component connected');
-
-    // Handler for live updates - only accept first data
-    const handleLiveUpdate = (data: any) => {
-      if (data._id?.toString() === matchDataId && !dataReceived) {
-        console.log('MatchFragrs: Received first live data, updating and disconnecting');
-        setLocalMatchData(data);
-        setLastUpdateTime(Date.now());
-        setDataReceived(true);
-        setHasFetched(true);
-        freshSocket.off('liveMatchUpdate', handleLiveUpdate);
-        freshSocket.disconnect();
-      }
-    };
-
-    freshSocket.on('liveMatchUpdate', handleLiveUpdate);
-
-    return () => {
-      console.log('MatchFragrs: Cleaning up socket listener');
-      freshSocket.off('liveMatchUpdate', handleLiveUpdate);
-      // Don't disconnect here to avoid triggering UI changes
-    };
-  }, [match?._id, matchDataId, hasFetched]);
-
-  // Add effect to handle prop changes and force re-render
-  useEffect(() => {
-    if (matchData && matchData._id?.toString() !== matchDataId && !dataReceived && !hasFetched) {
-      console.log('MatchData prop changed, updating local state');
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-    }
-  }, [matchData, matchDataId, dataReceived, hasFetched]);
-
-
-
-
-  // Get top 5 players by kills, then damage, then assists - recalculated on every localMatchData change
+  // Get top 5 players by kills, then damage, then assists - recalculated
+  // whenever the matchData prop changes.
   const topPlayers = useMemo(() => {
-    if (!localMatchData) return [];
+    if (!matchData) return [];
 
-    const allPlayers = localMatchData.teams.flatMap(team => {
+    const allPlayers = matchData.teams.flatMap(team => {
       const teamTotalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
       return team.players.map(player => ({
         ...player,
@@ -163,10 +101,10 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
     });
 
     return sorted.slice(0, 5);
-  }, [localMatchData]);
+  }, [matchData]);
 
 
-  if (!localMatchData) {
+  if (!matchData) {
     return (
       <div className="w-[1920px] h-[1080px] flex items-center justify-center">
         <div className="text-white text-2xl font-[Righteous]"></div>

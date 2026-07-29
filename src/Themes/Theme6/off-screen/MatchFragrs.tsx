@@ -1,6 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import SocketManager from '../../../dashboard/socketManager.tsx';
+// NOTE: SocketManager import removed, along with the localMatchData mirror
+// state and its two socket effects. PublicThemeRenderer owns the single
+// socket connection and passes freshly-merged `matchData` down as a prop —
+// this component now just reads that prop directly.
 
 interface Tournament {
   _id: string;
@@ -67,42 +70,7 @@ interface MatchFragrsProps {
 }
 
 const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, matchData }) => {
-  const [localMatchData, setLocalMatchData] = useState<MatchData | null>(matchData || null);
-  const [matchDataId, setMatchDataId] = useState<string | null>(matchData?._id?.toString() || null);
-  const [dataReceived, setDataReceived] = useState<boolean>(false);
-  const [hasFetched, setHasFetched] = useState<boolean>(false);
-
-  useEffect(() => {
-    if (matchData && !dataReceived && !hasFetched) {
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-      const socketManager = SocketManager.getInstance();
-      socketManager.disconnect();
-    }
-  }, [matchData, dataReceived, hasFetched]);
-
-  useEffect(() => {
-    if (!match?._id || !matchDataId || hasFetched) return;
-
-    const socketManager = SocketManager.getInstance();
-    const freshSocket = socketManager.connect();
-
-    const handleLiveUpdate = (data: any) => {
-      if (data._id?.toString() === matchDataId && !dataReceived) {
-        setLocalMatchData(data);
-        setDataReceived(true);
-        setHasFetched(true);
-        freshSocket.off('liveMatchUpdate', handleLiveUpdate);
-        freshSocket.disconnect();
-      }
-    };
-
-    freshSocket.on('liveMatchUpdate', handleLiveUpdate);
-
-    return () => {
-      freshSocket.off('liveMatchUpdate', handleLiveUpdate);
-    };
-  }, [match?._id, matchDataId, hasFetched]);
+  const localMatchData = matchData ?? null;
 
   // Top 5 players
   const topPlayers = useMemo(() => {

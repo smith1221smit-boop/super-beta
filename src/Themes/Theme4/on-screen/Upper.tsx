@@ -1,5 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import SocketManager from '../../../dashboard/socketManager.tsx';
+import React, { useMemo } from 'react';
+// NOTE: SocketManager import removed, along with the six manual event
+// handlers and the localMatchData mirror state they all wrote into.
+// PublicThemeRenderer owns the single socket connection, listens to
+// 'bulkUpdate', and passes freshly-merged matchData down as a prop on every
+// change — this component now just reacts to that prop.
 
 interface Tournament {
   _id: string;
@@ -61,262 +65,14 @@ interface UpperProps {
 }
 
 const Upper: React.FC<UpperProps> = ({ tournament, round, match, matchData, backpackInfo }) => {
-  const [localMatchData, setLocalMatchData] = useState<MatchData | null>(matchData || null);
-  const [matchDataId, setMatchDataId] = useState<string | null>(matchData?._id?.toString() || null);
-  const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
-  const [socketStatus, setSocketStatus] = useState<string>('disconnected');
-  const [updateCount, setUpdateCount] = useState<number>(0);
-
-  useEffect(() => {
-    if (matchData) {
-      console.log('Upper: Received new matchData prop, updating local state');
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-      setLastUpdateTime(Date.now());
-    }
-  }, [matchData]);
-
-  useEffect(() => {
-    if (!match?._id || !matchDataId) return;
-
-    console.log('Setting up real-time listeners for Upper - match:', match._id, 'matchData:', matchDataId);
-
-    // Get a fresh socket connection from the manager
-    const socketManager = SocketManager.getInstance();
-    const freshSocket = socketManager.connect();
-
-    console.log('Socket connected:', freshSocket?.connected);
-    console.log('Socket ID:', freshSocket?.id);
-
-    // Update initial status
-    setSocketStatus(freshSocket?.connected ? 'connected' : 'disconnected');
-
-    // Test socket connection
-    freshSocket.emit('test', 'Upper component connected');
-
-    // Log all incoming events for debugging
-    const debugHandler = (eventName: string, data: any) => {
-      console.log(`Upper: Received ${eventName}:`, data);
-    };
-
-    freshSocket.onAny(debugHandler);
-
-    // Create unique event handler names to avoid conflicts with dashboard
-    const upperHandlers = {
-      handleLiveUpdate: (data: any) => {
-        console.log('Upper: Received liveMatchUpdate for match:', data._id);
-
-        // Check if this update is for the current matchData
-        if (data._id?.toString() !== matchDataId) {
-          console.log('Upper: liveMatchUpdate not for current matchData, ignoring');
-          return;
-        }
-
-        console.log('Upper: Updating localMatchData with live API data');
-        setLocalMatchData(data);
-        setLastUpdateTime(Date.now());
-        setUpdateCount(prev => prev + 1);
-      },
-
-      handleMatchDataUpdate: (data: any) => {
-        console.log('Upper: Received matchDataUpdated:', data);
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev: MatchData | null) => {
-            if (!prev) return prev;
-            const updatedTeams = prev.teams.map((team: any) => {
-              // Check both _id and teamId for team matching
-              if (team._id === data.teamId || team.teamId === data.teamId) {
-                const changes = data.changes || {};
-                const nextTeam: any = { ...team, ...changes };
-                if (Array.isArray(changes.players)) {
-                  const updatesById = new Map(
-                    changes.players.map((p: any) => [p._id?.toString?.() || p._id, p])
-                  );
-                  nextTeam.players = team.players.map((p: Player) => {
-                    const key = p._id?.toString?.() || p._id;
-                    const upd = updatesById.get(key);
-                    return upd ? { ...p, ...upd } : p;
-                  });
-                }
-                return nextTeam;
-              }
-              return team;
-            });
-            return { ...prev, teams: updatedTeams };
-          });
-          setLastUpdateTime(Date.now());
-          setUpdateCount(prev => prev + 1);
-        }
-      },
-
-      handlePlayerUpdate: (data: any) => {
-        console.log('Upper: Received playerStatsUpdated:', data);
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev: MatchData | null) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              teams: prev.teams.map((team: any) => {
-                // Check both _id and teamId for team matching
-                if (team._id === data.teamId || team.teamId === data.teamId) {
-                  return {
-                    ...team,
-                    players: team.players.map((player: Player) =>
-                      player._id === data.playerId
-                        ? { ...player, ...data.updates }
-                        : player
-                    ),
-                  };
-                }
-                return team;
-              }),
-            };
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-
-      handleTeamPointsUpdate: (data: any) => {
-        console.log('Upper: Received team points update:', data);
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev: MatchData | null) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              teams: prev.teams.map((team: any) => {
-                // Check both _id and teamId for team matching
-                if (team._id === data.teamId || team.teamId === data.teamId) {
-                  return {
-                    ...team,
-                    placePoints: data.changes?.placePoints ?? team.placePoints,
-                  };
-                }
-                return team;
-              }),
-            };
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-
-      handleTeamStatsUpdate: (data: any) => {
-        console.log('Upper: Received teamStatsUpdated:', data);
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev: MatchData | null) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              teams: prev.teams.map((team: any) => {
-                // Check both _id and teamId for team matching
-                if (team._id === data.teamId || team.teamId === data.teamId) {
-                  // Update player kill numbers if provided
-                  const updatedPlayers = data.players ?
-                    team.players.map((player: any) => {
-                      const playerUpdate = data.players.find((p: any) => p._id === player._id);
-                      return playerUpdate ? { ...player, killNum: playerUpdate.killNum } : player;
-                    }) : team.players;
-
-                  return {
-                    ...team,
-                    players: updatedPlayers,
-                  };
-                }
-                return team;
-              }),
-            };
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-
-      handleBulkTeamUpdate: (data: any) => {
-        console.log('Upper: Received bulk team update:', data);
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev: MatchData | null) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              teams: prev.teams.map((team: any) => {
-                // Check both _id and teamId for team matching
-                if ((team._id === data.teamId || team.teamId === data.teamId) && data.changes?.players) {
-                  const playerUpdates = new Map(
-                    data.changes.players.map((p: any) => [p._id?.toString?.() || p._id, p])
-                  );
-                  return {
-                    ...team,
-                    players: team.players.map((player: Player) => {
-                      const key = player._id?.toString?.() || player._id;
-                      const update = playerUpdates.get(key);
-                      return update ? { ...player, ...update } : player;
-                    }),
-                  };
-                }
-                return team;
-              }),
-            };
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-
-      handleConnect: () => {
-        console.log('Upper: Socket connected');
-        setSocketStatus('connected');
-      },
-
-      handleDisconnect: () => {
-        console.log('Upper: Socket disconnected');
-        setSocketStatus('disconnected');
-      }
-    };
-
-    // Listen to all relevant socket events with unique handlers
-    freshSocket.on('liveMatchUpdate', upperHandlers.handleLiveUpdate);
-    freshSocket.on('matchDataUpdated', upperHandlers.handleMatchDataUpdate);
-    freshSocket.on('playerStatsUpdated', upperHandlers.handlePlayerUpdate);
-    freshSocket.on('teamPointsUpdated', upperHandlers.handleTeamPointsUpdate);
-    freshSocket.on('teamStatsUpdated', upperHandlers.handleTeamStatsUpdate);
-    freshSocket.on('bulkTeamUpdate', upperHandlers.handleBulkTeamUpdate);
-    freshSocket.on('connect', upperHandlers.handleConnect);
-    freshSocket.on('disconnect', upperHandlers.handleDisconnect);
-
-    return () => {
-      console.log('Upper: Cleaning up socket listeners');
-      // Clean up debug handler
-      freshSocket.offAny();
-
-      // Clean up with the exact same handler references
-      freshSocket.off('liveMatchUpdate', upperHandlers.handleLiveUpdate);
-      freshSocket.off('matchDataUpdated', upperHandlers.handleMatchDataUpdate);
-      freshSocket.off('playerStatsUpdated', upperHandlers.handlePlayerUpdate);
-      freshSocket.off('teamPointsUpdated', upperHandlers.handleTeamPointsUpdate);
-      freshSocket.off('teamStatsUpdated', upperHandlers.handleTeamStatsUpdate);
-      freshSocket.off('bulkTeamUpdate', upperHandlers.handleBulkTeamUpdate);
-      freshSocket.off('connect', upperHandlers.handleConnect);
-      freshSocket.off('disconnect', upperHandlers.handleDisconnect);
-      // Notify socket manager that this component is done with the socket
-      socketManager.disconnect();
-    };
-  }, [match?._id, matchDataId]);
-
-  // Add effect to handle prop changes and force re-render
-  useEffect(() => {
-    if (matchData && matchData._id?.toString() !== matchDataId) {
-      console.log('MatchData prop changed, updating local state');
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-    }
-  }, [matchData, matchDataId]);
-
-  // Get top 5 teams by alive players
+  // Get top 5 teams by alive players — recalculated whenever the matchData
+  // prop changes.
   const topTeams = useMemo(() => {
-    if (!localMatchData) return [];
-
-    console.log('Upper: Recalculating topTeams at', new Date(lastUpdateTime).toLocaleTimeString());
+    if (!matchData) return [];
 
     const useApiHealth = round?.apiEnable === true;
 
-    return localMatchData.teams
+    return matchData.teams
       .map(team => {
         const aliveCount = team.players.filter(p => !p.bHasDied).length;
         let wwcd: number;
@@ -335,10 +91,10 @@ const Upper: React.FC<UpperProps> = ({ tournament, round, match, matchData, back
       .filter(team => team.aliveCount > 0)
       .sort((a, b) => b.aliveCount - a.aliveCount)
       .slice(0, 5);
-  }, [localMatchData, lastUpdateTime, round?.apiEnable]);
+  }, [matchData, round?.apiEnable]);
 
 
-  if (!localMatchData) {
+  if (!matchData) {
     return (
       <svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
         <text x="1600" y="350" fontFamily="Arial" fontSize="24" fill="white">No match data</text>

@@ -1,6 +1,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import api from '../../../login/api.tsx';
+// NOTE: api import and the three REST calls it drove (matches list,
+// per-match matchdata, overall data) removed. PublicThemeRenderer already
+// does one REST fetch for the whole page and passes `overallData`,
+// `matches`, and `matchDatas` straight down as props for the 'EventMvp'
+// view — the matchesPlayed-per-team enrichment that used to run after the
+// fetch is now a useMemo derived from those props instead.
 
 interface Tournament {
   _id: string;
@@ -70,6 +75,9 @@ interface MatchData {
 interface TopFraggerProps {
   tournament: Tournament;
   round?: Round | null;
+  overallData?: OverallData | null;
+  matches?: Match[];
+  matchDatas?: MatchData[];
 }
 
 interface StatBoxData {
@@ -88,80 +96,35 @@ const formatSecondsToMMSS = (seconds: number = 0) => {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 };
 
-const TopFragger: React.FC<TopFraggerProps> = ({ tournament, round }) => {
-  const [overallData, setOverallData] = useState<OverallData | null>(null);
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [matchDatas, setMatchDatas] = useState<MatchData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+const TopFragger: React.FC<TopFraggerProps> = ({
+  tournament,
+  round,
+  overallData: rawOverallData,
+  matches = [],
+  matchDatas = [],
+}) => {
   const [playerPhotos, setPlayerPhotos] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!round) return;
+  // Same matchesPlayed-per-team enrichment the old fetch used to compute
+  // after loading matchDatas — now derived straight from props.
+  const overallData = useMemo(() => {
+    if (!rawOverallData) return null;
 
-      try {
-        setLoading(true);
+    const teamMatchesCount = new Map<string, number>();
+    matchDatas.forEach(matchData => {
+      matchData?.teams.forEach(team => {
+        const count = teamMatchesCount.get(team.teamId) || 0;
+        teamMatchesCount.set(team.teamId, count + 1);
+      });
+    });
 
-        // Initialize empty overall data structure
-        const data: OverallData = {
-          tournamentId: tournament._id,
-          roundId: round._id,
-          userId: '',
-          teams: [],
-          createdAt: new Date().toISOString()
-        };
+    const updatedTeams = rawOverallData.teams.map(team => ({
+      ...team,
+      matchesPlayed: teamMatchesCount.get(team.teamId) || 0,
+    }));
 
-        const matchesUrl = `/public/rounds/${round._id}/matches`;
-        const matchesResponse = await api.get(matchesUrl);
-        const matchesList: Match[] = matchesResponse.data;
-        setMatches(matchesList);
-
-        const matchDataPromises = matchesList.map(match => {
-          const url = `/public/matches/${match._id}/matchdata`;
-          return api.get(url)
-            .then(res => res.data)
-            .catch(() => null);
-        });
-
-        // Try to get overall data, but don't fail if it doesn't exist
-        try {
-          const overallUrl = `/public/tournaments/${tournament._id}/rounds/${round._id}/overall`;
-          const overallResponse = await api.get(overallUrl);
-          Object.assign(data, overallResponse.data);
-        } catch (overallError) {
-          console.log('Overall data not available, using calculated data from matches');
-        }
-        const matchDatas: (MatchData | null)[] = await Promise.all(matchDataPromises);
-        setMatchDatas(matchDatas.filter(m => m !== null) as MatchData[]);
-
-        const teamMatchesCount = new Map<string, number>();
-        matchDatas.forEach(matchData => {
-          matchData?.teams.forEach(team => {
-            const count = teamMatchesCount.get(team.teamId) || 0;
-            teamMatchesCount.set(team.teamId, count + 1);
-          });
-        });
-
-        // Update teams with matchesPlayed
-        const updatedTeams = data.teams.map(team => ({
-          ...team,
-          matchesPlayed: teamMatchesCount.get(team.teamId) || 0,
-        }));
-
-        setOverallData({ ...data, teams: updatedTeams });
-      } catch (err) {
-        console.error('Error fetching overall data:', err);
-        setError('Failed to load data');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (tournament._id && round?._id) {
-      fetchData();
-    }
-  }, [tournament._id, round?._id]);
+    return { ...rawOverallData, teams: updatedTeams };
+  }, [rawOverallData, matchDatas]);
 
   // Get top players by kills
   const topPlayers = useMemo(() => {
@@ -396,18 +359,10 @@ secondaryValue: topPlayer?.numericDamage?.toFixed(2) || "0.00",
     );
   };
 
-  if (loading) {
+  if (!overallData) {
     return (
       <div className="w-[1920px] h-[1080px]  flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]"></div>
-      </div>
-    );
-  }
-
-  if (error || !overallData) {
-    return (
-      <div className="w-[1920px] h-[1080px]  flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">{error || 'No overall data available'}</div>
+        <div className="text-white text-2xl font-[Righteous]">No overall data available</div>
       </div>
     );
   }

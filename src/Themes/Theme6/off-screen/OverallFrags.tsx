@@ -132,14 +132,14 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallD
       });
     });
 
-    return Array.from(playerMap.values())
-      .map((p) => ({
-        ...p,
-        killNum: p.totalKills,
-        matchesPlayed: p.appearances,
-      }))
-      .sort((a, b) => b.killNum - a.killNum)
-      .slice(0, 5);
+   return Array.from(playerMap.values())
+  .map((p) => ({
+    ...p,
+    killNum: p.totalKills,
+    matchesPlayed: p.appearances,
+  }))
+  .sort((a, b) => b.killNum - a.killNum || b.numericDamage - a.numericDamage || (b.assists || 0) - (a.assists || 0))
+  .slice(0, 5);
   }, [overallData]);
 
   if (!overallData) {

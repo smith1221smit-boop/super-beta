@@ -1,6 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import api from '../../../login/api';
-import SocketManager from '../../../dashboard/socketManager.tsx';
+import React, { useMemo } from 'react';
+import { MatchData } from '../../shared/hooks/unsortteams';
+// NOTE: SocketManager import removed along with the socket-fetch effects
+// that mirrored matchData into local state. PublicThemeRenderer owns the
+// single socket connection and passes freshly-merged `matchData` (and
+// `backpackInfo`) down as props directly.
 
 interface Tournament {
     _id: string;
@@ -26,49 +29,6 @@ interface Match {
     _matchNo?: number;
 }
 
-interface Player {
-    _id: string;
-    playerName: string;
-    killNum: number;
-    bHasDied: boolean;
-    picUrl?: string;
-    damage?: string | number;
-    survivalTime?: number;
-    assists?: number;
-    playerKey?: string;
-    // Extended player properties
-    teamLogo?: string;
-    teamTag?: string;
-    teamName?: string;
-    numericDamage?: number;
-    teamPoints?: number;
-    heals?: number;
-    // Live stats fields
-    health?: number;
-    knockouts?: number;
-    healthMax?: number;
-    liveState?: number; // 0,1,2,3 = alive, 4 = knocked, 5 = dead
-    useSmokeGrenadeNum?: number;
-    useFragGrenadeNum?: number;
-    useBurnGrenadeNum?: number;
-    useFlashGrenadeNum?: number;
-}
-
-interface Team {
-    _id: string;
-    teamTag: string;
-    slot?: number;
-    placePoints: number;
-    players: Player[];
-    teamLogo: string;
-    teamName: string;
-}
-
-interface MatchData {
-    _id: string;
-    teams: Team[];
-}
-
 interface BackpackInfo {
   userId: string;
   tournamentId: string;
@@ -86,7 +46,6 @@ interface MatchFragrsProps {
     match?: Match | null;
     matchData?: MatchData | null;
     backpackInfo?: BackpackInfo | null;
-    matchDataId?: string;
 }
 
 interface StatBoxData {
@@ -99,106 +58,22 @@ interface StatBoxProps extends StatBoxData {
   tournament: Tournament;
 }
 
-const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, match, matchData, backpackInfo, matchDataId: propMatchDataId }) => {
-  const [localMatchData, setLocalMatchData] = useState<MatchData | null>(matchData || null);
-  const [matchDataId, setMatchDataId] = useState<string | null>(propMatchDataId || matchData?._id?.toString() || null);
-  const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
-  const [dataReceived, setDataReceived] = useState<boolean>(false);
-  const [hasFetched, setHasFetched] = useState<boolean>(false);
-  const [selectedView, setSelectedView] = useState<'fragers' | 'teams'>('fragers');
-  const [backpackData, setBackpackData] = useState<BackpackInfo | null>(backpackInfo || null);
-
-    useEffect(() => {
-        if (matchData && !dataReceived && !hasFetched) {
-            console.log('MatchFragrs: Received new matchData prop, updating local state');
-            setLocalMatchData(matchData);
-            setMatchDataId(matchData._id?.toString());
-            setLastUpdateTime(Date.now());
-            // Disconnect socket immediately after receiving prop data
-            const socketManager = SocketManager.getInstance();
-            socketManager.disconnect();
-        }
-    }, [matchData, dataReceived, hasFetched]);
-
-    useEffect(() => {
-        if (!match?._id || !matchDataId || hasFetched) return;
-
-        console.log('Setting up socket for initial data fetch - match:', match._id, 'matchData:', matchDataId);
-
-        // Get a fresh socket connection from the manager
-        const socketManager = SocketManager.getInstance();
-        const freshSocket = socketManager.connect();
-
-        console.log('Socket connected:', freshSocket?.connected);
-
-        // Test socket connection
-        freshSocket.emit('test', 'MatchFragrs component connected');
-
-        // Handler for live updates - only accept first data
-        const handleLiveUpdate = (data: any) => {
-            if (data._id?.toString() === matchDataId && !dataReceived) {
-                console.log('MatchFragrs: Received first live data, updating and disconnecting');
-                setLocalMatchData(data);
-                setLastUpdateTime(Date.now());
-                setDataReceived(true);
-                setHasFetched(true);
-                freshSocket.off('liveMatchUpdate', handleLiveUpdate);
-                freshSocket.disconnect();
-            }
-        };
-
-        freshSocket.on('liveMatchUpdate', handleLiveUpdate);
-
-        return () => {
-            console.log('MatchFragrs: Cleaning up socket listener');
-            freshSocket.off('liveMatchUpdate', handleLiveUpdate);
-            // Don't disconnect here to avoid triggering UI changes
-        };
-    }, [match?._id, matchDataId, hasFetched]);
-
-    // Add effect to handle prop changes and force re-render
-    useEffect(() => {
-        if (matchData && matchData._id?.toString() !== matchDataId && !dataReceived && !hasFetched) {
-            console.log('MatchData prop changed, updating local state');
-            setLocalMatchData(matchData);
-            setMatchDataId(matchData._id?.toString());
-        }
-    }, [matchData, matchDataId, dataReceived, hasFetched]);
-
-    // Use backpackInfo prop
-    useEffect(() => {
-        setBackpackData(backpackInfo ?? null);
-    }, [backpackInfo]);
-
-
-const teamStats = useMemo(() => {
-  if (!localMatchData) return [];
-
-  // Example: map teams into an array of objects for the stat boxes
-  return localMatchData.teams.map(team => ({
-    teamTag: team.teamTag,
-    totalElims: team.players.reduce((sum, p) => sum + (p.killNum || 0), 0),
-    totalDamage: team.players.reduce((sum, p) => sum + Number(p.damage || 0), 0),
-    knocks: team.players.reduce((sum, p) => sum + (p.assists || 0), 0),
-    heals: team.players.reduce((sum, p) => sum + (p.health || 0), 0),
-    logo: team.teamLogo,
-  }));
-}, [localMatchData]);
+const Mvp: React.FC<MatchFragrsProps> = ({ tournament, round, match, matchData, backpackInfo }) => {
 
     const calculatePlayerHeals = (playerKey: string | number) => {
-  if (!backpackData?.teambackpackinfo?.TeamBackPackList) return 0;
-  
+  if (!backpackInfo?.teambackpackinfo?.TeamBackPackList) return 0;
+
   // Find the player's backpack data
-  const playerBackpack = backpackData.teambackpackinfo.TeamBackPackList.find(
+  const playerBackpack = backpackInfo.teambackpackinfo.TeamBackPackList.find(
     (p: any) => p && String(p.PlayerKey) === String(playerKey)
   );
-  
+
   if (!playerBackpack) return 0;
-  
+
   // Sum up all heal items (601001-601006)
   let totalHeals = 0;
   const healIds = [601001, 601002, 601003, 601004, 601005, 601006];
-  
+
   healIds.forEach(id => {
     if (playerBackpack[id]) {
       const match = String(playerBackpack[id]).match(/Num:(\d+)/);
@@ -207,27 +82,27 @@ const teamStats = useMemo(() => {
       }
     }
   });
-  
+
   return totalHeals;
 };
 
 const topPlayers = useMemo(() => {
-  if (!localMatchData?.teams) return [];
-  
+  if (!matchData?.teams) return [];
+
   // Flatten all players from all teams and add team info
-  const allPlayers = localMatchData.teams.flatMap(team => 
+  const allPlayers = matchData.teams.flatMap(team =>
     team.players.map(player => {
-      const playerKey = player.playerKey || (player as any).PlayerKey || player._id;
+      const playerKey = (player as any).playerKey || (player as any).PlayerKey || player._id;
       return {
         ...player,
         playerKey, // Ensure playerKey is set
         teamLogo: team.teamLogo,
         teamTag: team.teamTag,
-        teamName: team.teamName,
+        teamName: (team as any).teamName,
         // Calculate numeric damage if it's a string
-        numericDamage: typeof player.damage === 'string' ? 
-          parseFloat(player.damage) : 
-          player.damage || 0,
+        numericDamage: typeof (player as any).damage === 'string' ?
+          parseFloat((player as any).damage) :
+          (player as any).damage || 0,
         // Add team points for sorting
         teamPoints: team.placePoints || 0,
         // Calculate heals for this player
@@ -235,17 +110,17 @@ const topPlayers = useMemo(() => {
       };
     })
   );
-  
+
   // Sort by kills (descending), then damage (descending), then assists (descending)
   const sortedPlayers = [...allPlayers].sort((a, b) => {
     if (b.killNum !== a.killNum) return (b.killNum || 0) - (a.killNum || 0);
     if (b.numericDamage !== a.numericDamage) return b.numericDamage - a.numericDamage;
-    if ((b.assists || 0) !== (a.assists || 0)) return (b.assists || 0) - (a.assists || 0);
+    if (((b as any).assists || 0) !== ((a as any).assists || 0)) return ((b as any).assists || 0) - ((a as any).assists || 0);
     return 0;
   });
 
   return sortedPlayers.slice(0, 10); // Get top 10 players
-}, [localMatchData, backpackData]);
+}, [matchData, backpackInfo]);
 
 
     const topPlayer = topPlayers[0]; // first player after sorting
@@ -274,7 +149,7 @@ const topPlayers = useMemo(() => {
       {
         img: "/theme4assets/knoc.png",
         primaryValue: "TOTAL KNOCKS",
-        secondaryValue: topPlayer?.knockouts || 0,
+        secondaryValue: (topPlayer as any)?.knockouts || 0,
       },
     ];
 
@@ -337,7 +212,7 @@ const topPlayers = useMemo(() => {
 
     return (
       <>
-        {!localMatchData ? (
+        {!matchData ? (
           <div className="w-[1920px] h-[1080px] flex items-center justify-center">
             <div className="text-white text-2xl font-[Righteous]"></div>
           </div>
@@ -432,4 +307,3 @@ const topPlayers = useMemo(() => {
 
 
 export default Mvp;
-

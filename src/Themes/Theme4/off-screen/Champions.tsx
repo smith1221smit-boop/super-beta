@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import api from '../../../login/api.tsx';
 import { motion } from 'framer-motion';
+// NOTE: api import and the overallData REST fetch removed —
+// PublicThemeRenderer now does the one shared fetch and passes overallData
+// and matchData down as props.
 
 interface Tournament {
   _id: string;
@@ -71,53 +73,11 @@ interface ChampionsProps {
   tournament: Tournament;
   round?: Round | null;
   matchData?: MatchData | null;
+  overallData?: OverallData | null;
 }
 
-const Champions: React.FC<ChampionsProps> = ({ tournament, round, matchData }) => {
-  const [overallData, setOverallData] = useState<OverallData | null>(null);
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [matchDatas, setMatchDatas] = useState<MatchData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+const Champions: React.FC<ChampionsProps> = ({ tournament, round, matchData, overallData }) => {
   const [playerPhotos, setPlayerPhotos] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    const fetchOverall = async () => {
-      if (!round) return;
-      try {
-        setLoading(true);
-
-        // Initialize empty overall data structure
-        const data: OverallData = {
-          tournamentId: tournament._id,
-          roundId: round._id,
-          userId: '',
-          teams: [],
-          createdAt: new Date().toISOString()
-        };
-
-        // Try to get overall data, but don't fail if it doesn't exist
-        try {
-          const overallUrl = `/public/tournaments/${tournament._id}/rounds/${round._id}/overall`;
-          const overallResponse = await api.get(overallUrl);
-          Object.assign(data, overallResponse.data);
-        } catch (overallError) {
-          console.log('Overall data not available, using empty data structure');
-        }
-
-        setOverallData(data);
-        setError(null);
-      } catch (err) {
-        console.error('Failed to fetch overall data:', err);
-        setError('Failed to load overall data');
-        setOverallData(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (tournament._id && round?._id) fetchOverall();
-  }, [tournament._id, round?._id]);
 
   const champion = useMemo(() => {
     if (!overallData) return null;
@@ -139,66 +99,29 @@ const Champions: React.FC<ChampionsProps> = ({ tournament, round, matchData }) =
     return { ...first, leadOverNext } as (Team & { total: number; totalKills: number; leadOverNext: number });
   }, [overallData]);
 
-  // Extract player photos from match data
+  // Extract player photos from the current match's live data — the freshest
+  // pictures available, used as an override over overallData's snapshot.
   useEffect(() => {
-    if (!matchData) {
-      console.log('Champions: No matchData available');
+    if (!matchData?.teams || matchData.teams.length === 0) {
+      setPlayerPhotos({});
       return;
     }
 
-    try {
-      console.log('Champions: Processing matchData for player photos', matchData);
-      
-      // Create a map of player uId to their photo URL from match data
-      const photosMap: Record<string, string> = {};
-      
-      if (!matchData.teams || matchData.teams.length === 0) {
-        console.log('Champions: No teams found in matchData');
-        setPlayerPhotos({});
-        return;
-      }
-      
-      matchData.teams.forEach(team => {
-        if (!team.players || team.players.length === 0) {
-          console.log(`Champions: No players found in team ${team.teamId}`);
-          return;
+    const photosMap: Record<string, string> = {};
+    matchData.teams.forEach(team => {
+      (team.players || []).forEach(player => {
+        if (player.picUrl && player.uId) {
+          photosMap[player.uId] = player.picUrl;
         }
-        
-        team.players.forEach(player => {
-          if (player.picUrl && player.uId) {
-            photosMap[player.uId] = player.picUrl;
-            console.log(`Champions: Found photo for player uId ${player.uId}: ${player.picUrl}`);
-          } else {
-            console.log(`Champions: No picUrl or uId for player ${player._id}`);
-          }
-        });
       });
-      
-      console.log('Champions: Player photos map:', photosMap);
-      setPlayerPhotos(photosMap);
-    } catch (err) {
-      console.error('Failed to extract player photos from match data:', err);
-      setPlayerPhotos({});
-    }
+    });
+    setPlayerPhotos(photosMap);
   }, [matchData]);
 
-
-  
-
-  if (loading) {
-    console.log('Champions: Loading state');
+  if (!overallData || !champion) {
     return (
       <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">Loading...</div>
-      </div>
-    );
-  }
-
-  if (error || !overallData || !champion) {
-    console.log('Champions: Error or no data state -', error || 'No overall data available');
-    return (
-      <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">{error || 'No overall data available'}</div>
+        <div className="text-white text-2xl font-[Righteous]">No overall data available</div>
       </div>
     );
   }
@@ -220,7 +143,7 @@ const Champions: React.FC<ChampionsProps> = ({ tournament, round, matchData }) =
       </div>
 
       {/* Champion Team Info */}
-      <div 
+      <div
       style={{
           backgroundImage: `linear-gradient(to right, ${tournament.primaryColor}, ${"#000000"})`,
               }}
@@ -280,7 +203,7 @@ const Champions: React.FC<ChampionsProps> = ({ tournament, round, matchData }) =
             >
               {player.playerName}
             </div>
-          
+
           </motion.div>
         ))}
       </motion.div>
@@ -289,4 +212,3 @@ const Champions: React.FC<ChampionsProps> = ({ tournament, round, matchData }) =
 };
 
 export default Champions;
-

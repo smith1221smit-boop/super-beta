@@ -1,5 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
+// NOTE: local matches state and the fetch-on-mount effect removed.
+// PublicThemeRenderer already supplies the full `matches` array as a prop —
+// "next match" is derived from it below instead of self-fetching.
 
 
 
@@ -29,35 +32,12 @@ interface CommingUpNextProps {
   tournament: Tournament;
   round?: Round | null;
   match?: Match | null; // currently selected match
+  matches?: Match[];
 }
 
-const CommingUpNext: React.FC<CommingUpNextProps> = ({ tournament, round, match }) => {
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const run = async () => {
-      if (!round?._id) return;
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await fetch(`https://backend-prod-bs4c.onrender.com/api/public/rounds/${round._id}/matches`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: Match[] = await res.json();
-        setMatches(data || []);
-      } catch (e: any) {
-        console.error('CommingUpNext: failed to fetch matches', e);
-        setError('Failed to load matches');
-      } finally {
-        setLoading(false);
-      }
-    };
-    run();
-  }, [round?._id]);
-
+const CommingUpNext: React.FC<CommingUpNextProps> = ({ tournament, round, match, matches }) => {
   const sortedMatches = useMemo(() => {
-    return [...matches].sort((a, b) => (a.matchNo || a._matchNo || 0) - (b.matchNo || b._matchNo || 0));
+    return [...(matches || [])].sort((a, b) => (a.matchNo || a._matchNo || 0) - (b.matchNo || b._matchNo || 0));
   }, [matches]);
 
   const nextMatch = useMemo(() => {
@@ -70,18 +50,6 @@ const CommingUpNext: React.FC<CommingUpNextProps> = ({ tournament, round, match 
   if (!round) {
     return (
       <div className="w-[1920px] h-[1080px]  text-white flex items-center justify-center">No round selected</div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="w-[1920px] h-[1080px]  text-white flex items-center justify-center">Loading next match...</div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="w-[1920px] h-[1080px] bg-black text-red-400 flex items-center justify-center">{error}</div>
     );
   }
 

@@ -129,6 +129,11 @@ interface MatchData {
   userId: string;
   teams: any[];
   deadTeamList?: DeadTeamListEntry[];
+  // Set by the backend's live-tick path (applyLiveTeamDiff in
+  // Bulkpublic.controller.js) when `teams` contains only the team(s) that
+  // changed since the last push, not the full roster — see
+  // mergeMatchDataTeams below.
+  isPartialTeams?: boolean;
 }
 
 interface OverallData {
@@ -137,6 +142,11 @@ interface OverallData {
   userId: string;
   teams: any[];
   createdAt: string;
+  // Set by the backend's live-tick path (applyLiveOverallDiff in
+  // Bulkpublic.controller.js) when `teams` contains only the team(s) whose
+  // cumulative stats changed since the last push, not the full round
+  // standings — see mergeOverallTeams below.
+  isPartialTeams?: boolean;
 }
 
 interface BackpackInfo {
@@ -252,6 +262,73 @@ const PublicThemeRenderer: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Mirrors `matchData` state so the socket listener below (registered once
+  // per [tournamentId, roundId], not re-registered on every matchData
+  // change) can merge against the LATEST value instead of a stale closure.
+  const matchDataRef = useRef<MatchData | null>(null);
+  useEffect(() => {
+    matchDataRef.current = matchData;
+  }, [matchData]);
+
+  // Same mirroring for overallData (round-wide standings) and matches (the
+  // round's match list), so the socket listener below can merge/preserve
+  // against the latest value rather than a stale closure.
+  const overallDataRef = useRef<OverallData | null>(null);
+  useEffect(() => {
+    overallDataRef.current = overallData;
+  }, [overallData]);
+
+  const matchesRef = useRef<Match[]>([]);
+  useEffect(() => {
+    matchesRef.current = matches;
+  }, [matches]);
+
+  // The live-tick socket path now sends only the team(s) that actually
+  // changed since the last push for this match (backend: applyLiveTeamDiff
+  // in Bulkpublic.controller.js), flagged via `isPartialTeams`. Merge those
+  // into the previously-known full matchData instead of replacing it
+  // outright — everything downstream (this component's own state, and the
+  // props it hands to LiveStats/Alerts/Dom) keeps seeing a complete object
+  // either way. A payload without the flag (initial load, manual refresh,
+  // or a backend that predates this change) is always a full snapshot and
+  // is used as-is — this is the safe default for every non-live-tick path.
+  const mergeMatchDataTeams = (prev: MatchData | null, incoming: any): MatchData | null => {
+    if (!incoming) return null;
+    if (!incoming.isPartialTeams || !prev || String((prev as any)._id) !== String(incoming._id)) {
+      return incoming;
+    }
+    const teamMap = new Map(
+      (prev.teams || []).map((t: any) => [String(t.teamId ?? t._id), t])
+    );
+    (incoming.teams || []).forEach((t: any) => {
+      teamMap.set(String(t.teamId ?? t._id), t);
+    });
+    return { ...incoming, teams: Array.from(teamMap.values()) };
+  };
+
+  // Same idea as mergeMatchDataTeams, but for the round-wide cumulative
+  // standings (backend: applyLiveOverallDiff). A partial push only carries
+  // the team(s) whose totals actually changed since the last push for this
+  // round; merge those into the previously-known full standings instead of
+  // replacing them outright.
+  const mergeOverallTeams = (prev: OverallData | null, incoming: any): OverallData | null => {
+    if (!incoming) return null;
+    if (
+      !incoming.isPartialTeams ||
+      !prev ||
+      String(prev.roundId) !== String(incoming.roundId)
+    ) {
+      return incoming;
+    }
+    const teamMap = new Map(
+      (prev.teams || []).map((t: any) => [String(t.teamId ?? t._id), t])
+    );
+    (incoming.teams || []).forEach((t: any) => {
+      teamMap.set(String(t.teamId ?? t._id), t);
+    });
+    return { ...incoming, teams: Array.from(teamMap.values()) };
+  };
+
   const applyBulkPayload = (bulk: any) => {
     setTournament(bulk.tournamentData);
     setRound(bulk.roundData);
@@ -342,8 +419,20 @@ const PublicThemeRenderer: React.FC = () => {
     const handleBulkUpdate = (bulk: any) => {
       setTournament(bulk.tournamentData);
       setRound(bulk.roundData);
-      setMatches(bulk.matchesData?.list ?? []);
-      setOverallData(bulk.overallData ?? null);
+
+      // matchesData.listUnchanged (backend: Bulkpublic.controller.js) means
+      // the match list is identical to what was last sent for this round —
+      // list comes back empty in that case, so keep what we already have
+      // instead of replacing it with nothing.
+      if (!bulk.matchesData?.listUnchanged) {
+        matchesRef.current = bulk.matchesData?.list ?? [];
+        setMatches(matchesRef.current);
+      }
+
+      const mergedOverallData = mergeOverallTeams(overallDataRef.current, bulk.overallData ?? null);
+      overallDataRef.current = mergedOverallData;
+      setOverallData(mergedOverallData);
+
       setMatchDatas(
         (bulk.matchDatasData ?? []).map((e: any) => e.matchData).filter(Boolean)
       );
@@ -353,19 +442,27 @@ const PublicThemeRenderer: React.FC = () => {
 
       if (isOurMatch) {
         setMatch(bulk.matchesData?.current ?? null);
-        const freshMatchData = bulk.currentMatchData?.matchData ?? null;
-        setMatchData(freshMatchData);
-        setDeadTeamList(sortDeadTeamList(freshMatchData?.deadTeamList));
+        const incomingMatchData = bulk.currentMatchData?.matchData ?? null;
+        const mergedMatchData = mergeMatchDataTeams(matchDataRef.current, incomingMatchData);
+        matchDataRef.current = mergedMatchData;
+        setMatchData(mergedMatchData);
+        // deadTeamList is always computed server-side from the FULL team
+        // list before the live-tick trim happens, so it's complete on
+        // every push regardless of isPartialTeams — no merge needed here.
+        setDeadTeamList(sortDeadTeamList(incomingMatchData?.deadTeamList));
         refreshBackpackInfo(bulk);
 
         // Children still listen for the legacy 'liveMatchUpdate' socket
         // event to detect eliminations. The backend now only emits
         // 'bulkUpdate', so replay it locally to whatever listeners are
-        // already registered on this socket instance.
-        if (freshMatchData) {
+        // already registered on this socket instance — replay the MERGED
+        // (complete) object, not the raw partial push, so a listener doing
+        // a full replace of its own (e.g. Dom.tsx's data.teams branch)
+        // never sees a truncated team list.
+        if (mergedMatchData) {
           socket.listeners('liveMatchUpdate').forEach((listener: any) => {
             try {
-              listener(freshMatchData);
+              listener(mergedMatchData);
             } catch (e) {
               console.error('Error replaying liveMatchUpdate to listener', e);
             }
@@ -434,23 +531,21 @@ const PublicThemeRenderer: React.FC = () => {
       case 'Schedule':
         return renderComp('Schedule', { tournament, round, matches, matchDatas, selectedScheduleMatches: selectedScheduleMatchIds });
       case 'CommingUpNext':
-        return renderComp('CommingUpNext', { tournament, round, match });
+        return renderComp('CommingUpNext', { tournament, round, match, matches });
       case 'Champions':
-        return renderComp('Champions', { tournament, round, matchData });
+        return renderComp('Champions', { tournament, round, matchData, overallData });
       case '1stRunnerUp':
         return renderComp('FirstRunnerUp', { tournament, round, overallData });
       case '2ndRunnerUp':
         return renderComp('SecondRunnerUp', { tournament, round, overallData });
       case 'EventMvp':
-        return renderComp('EventMvp', { tournament, round, overallData });
+        return renderComp('EventMvp', { tournament, round, overallData, matches, matchDatas });
       case 'MatchSummary':
         return renderComp('MatchSummary', { tournament, round, match, matchData });
       case 'playerH2H':
         return renderComp('PlayerH2H', { tournament, round, match, matchData });
       case 'TeamH2H':
         return renderComp('TeamH2H', { tournament, round, match, matchData });
-      case 'ZoneClose':
-        return renderComp('ZoneClose', { tournament, round, match });
       case 'intro':
         return renderComp('Intro', { tournament, round, match, matchData });
       case 'mapPreview':

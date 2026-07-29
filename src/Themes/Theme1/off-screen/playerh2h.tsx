@@ -1,5 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
+// NOTE: local matchData state, propMatchData sync effect, and the REST
+// fallback fetch removed. PublicThemeRenderer always supplies matchData as
+// a prop for this view now.
 
 interface Tournament {
   _id: string;
@@ -59,40 +62,7 @@ interface PlayerH2HProps {
    matchData?: MatchData | null;
  }
 
-const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchData: propMatchData }) => {
-   const [matchData, setMatchData] = useState<MatchData | null>(null);
-   const [loading, setLoading] = useState(true);
-   const [error, setError] = useState<string | null>(null);
-
-   useEffect(() => {
-     if (propMatchData) {
-       setMatchData(propMatchData);
-       setLoading(false);
-       setError(null);
-     } else {
-       const fetchMatchData = async () => {
-         if (!match) return;
-         try {
-           setLoading(true);
-           const url = `https://backend-prod-530t.onrender.com/api/public/matches/${match._id}/matchdata`;
-           const res = await fetch(url, { credentials: 'include' });
-           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-           const data: MatchData = await res.json();
-           setMatchData(data);
-           setError(null);
-         } catch (err) {
-           console.error('Failed to fetch match data:', err);
-           setError('Failed to load match data');
-           setMatchData(null);
-         } finally {
-           setLoading(false);
-         }
-       };
-
-       if (match?._id) fetchMatchData();
-     }
-   }, [match?._id, propMatchData]);
-
+const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchData }) => {
   const topPlayers = useMemo(() => {
     if (!matchData) return null;
 
@@ -122,18 +92,10 @@ const PlayerH2H: React.FC<PlayerH2HProps> = ({ tournament, round, match, matchDa
     };
   }, [matchData]);
 
-  if (loading) {
-    return (
-      <div style={{ width: '1920px', height: '1080px',  display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ color: 'white', fontSize: '24px', fontFamily: 'Righteous' }}>Loading...</div>
-      </div>
-    );
-  }
-
-  if (error || !matchData || !topPlayers?.first || !topPlayers?.second) {
+  if (!matchData || !topPlayers?.first || !topPlayers?.second) {
     return (
       <div style={{ width: '1920px', height: '1080px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ color: 'white', fontSize: '24px', fontFamily: 'Righteous' }}>{error || 'Not enough players'}</div>
+        <div style={{ color: 'white', fontSize: '24px', fontFamily: 'Righteous' }}>Not enough players</div>
       </div>
     );
   }

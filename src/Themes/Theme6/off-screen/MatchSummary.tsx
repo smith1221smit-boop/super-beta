@@ -1,5 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import SocketManager from '../../../dashboard/socketManager.tsx';
+import React, { useMemo } from 'react';
+// NOTE: SocketManager import removed, along with the localMatchData mirror
+// state and its two socket/effect blocks. PublicThemeRenderer owns the
+// single socket connection and passes freshly-merged `matchData` down as a
+// prop — this component now just reads that prop directly.
 
 /* -------------------- Interfaces -------------------- */
 
@@ -109,78 +112,7 @@ const MatchSummary: React.FC<MatchSummaryProps> = ({
   matchData
 }) => {
 
-  console.log("=== MatchSummary Render ===");
-  console.log("tournament:", tournament);
-  console.log("round:", round);
-  console.log("match:", match);
-  console.log("matchData prop:", matchData);
-
-  const [localMatchData, setLocalMatchData] = useState<MatchData | null>(matchData || null);
-  const [matchDataId, setMatchDataId] = useState<string | null>(matchData?._id || null);
-  const [dataReceived, setDataReceived] = useState(false);
-  const [hasFetched, setHasFetched] = useState(false);
-
-  /* -------------------- Receive Props -------------------- */
-
-  useEffect(() => {
-    console.log("=== matchData Prop Effect ===");
-    console.log("matchData received:", matchData);
-
-    if (matchData) {
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id);
-    }
-  }, [matchData]);
-
-  /* -------------------- Socket Live Update -------------------- */
-
-  useEffect(() => {
-
-    console.log("=== Socket Effect ===");
-
-    if (!match?._id) {
-      console.log("No match id");
-      return;
-    }
-
-    if (hasFetched) {
-      console.log("Already fetched");
-      return;
-    }
-
-    const socketManager = SocketManager.getInstance();
-    const socket = socketManager.connect();
-
-    console.log("Socket connected");
-
-    const handleLiveUpdate = (data: any) => {
-
-      console.log("Live update received:", data);
-
-      if (!matchDataId || data._id === matchDataId) {
-
-        console.log("Updating localMatchData");
-
-        setLocalMatchData(data);
-        setMatchDataId(data._id);
-        setDataReceived(true);
-        setHasFetched(true);
-
-        socket.off('liveMatchUpdate', handleLiveUpdate);
-        socket.disconnect();
-
-        console.log("Socket disconnected");
-      }
-    };
-
-    socket.on('liveMatchUpdate', handleLiveUpdate);
-
-    return () => {
-      console.log("Socket cleanup");
-      socket.off('liveMatchUpdate', handleLiveUpdate);
-    };
-
-  }, [match?._id, matchDataId, hasFetched]);
+  const localMatchData = matchData ?? null;
 
   /* -------------------- Stats -------------------- */
 

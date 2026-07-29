@@ -1,6 +1,10 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import api from '../../../login/api.tsx';
+// NOTE: api import and the fetch-on-mount effect removed (which fetched
+// matches, then per-match matchdata, then overall). PublicThemeRenderer
+// already supplies overallData, matches, and matchDatas as props — the
+// matchesPlayed-per-team aggregation that used to run after the fetches
+// now runs in the topPlayers useMemo below, off the matchDatas prop.
 
 interface Tournament {
   _id: string;
@@ -70,81 +74,36 @@ interface MatchData {
 interface OverallFragsProps {
   tournament: Tournament;
   round?: Round | null;
+  matchData?: MatchData | null;
+  overallData?: OverallData | null;
+  matches?: Match[];
+  matchDatas?: MatchData[];
 }
 
-const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round }) => {
-  const [overallData, setOverallData] = useState<OverallData | null>(null);
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [matchDatas, setMatchDatas] = useState<MatchData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, overallData: rawOverallData, matches, matchDatas: rawMatchDatas }) => {
+  const matchDatas = useMemo(() => rawMatchDatas || [], [rawMatchDatas]);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!round) return;
+  // Fold in matchesPlayed-per-team, same aggregation the old fetch effect
+  // did after pulling every match's matchdata — now derived from the
+  // matchDatas prop instead of a chain of REST calls.
+  const overallData = useMemo(() => {
+    if (!rawOverallData) return null;
 
-      try {
-        setLoading(true);
+    const teamMatchesCount = new Map<string, number>();
+    matchDatas.forEach(matchData => {
+      matchData?.teams.forEach(team => {
+        const count = teamMatchesCount.get(team.teamId) || 0;
+        teamMatchesCount.set(team.teamId, count + 1);
+      });
+    });
 
-        // Initialize empty overall data structure
-        const data: OverallData = {
-          tournamentId: tournament._id,
-          roundId: round._id,
-          userId: '',
-          teams: [],
-          createdAt: new Date().toISOString()
-        };
+    const updatedTeams = rawOverallData.teams.map(team => ({
+      ...team,
+      matchesPlayed: teamMatchesCount.get(team.teamId) || 0,
+    }));
 
-        const matchesUrl = `/public/rounds/${round._id}/matches`;
-        const matchesResponse = await api.get(matchesUrl);
-        const matchesList: Match[] = matchesResponse.data;
-        setMatches(matchesList);
-
-        const matchDataPromises = matchesList.map(match => {
-          const url = `/public/matches/${match._id}/matchdata`;
-          return api.get(url)
-            .then(res => res.data)
-            .catch(() => null);
-        });
-
-        // Try to get overall data, but don't fail if it doesn't exist
-        try {
-          const overallUrl = `/public/tournaments/${tournament._id}/rounds/${round._id}/overall`;
-          const overallResponse = await api.get(overallUrl);
-          Object.assign(data, overallResponse.data);
-        } catch (overallError) {
-          console.log('Overall data not available, using calculated data from matches');
-        }
-        const matchDatas: (MatchData | null)[] = await Promise.all(matchDataPromises);
-        setMatchDatas(matchDatas.filter(m => m !== null) as MatchData[]);
-
-        const teamMatchesCount = new Map<string, number>();
-        matchDatas.forEach(matchData => {
-          matchData?.teams.forEach(team => {
-            const count = teamMatchesCount.get(team.teamId) || 0;
-            teamMatchesCount.set(team.teamId, count + 1);
-          });
-        });
-
-        // Update teams with matchesPlayed
-        const updatedTeams = data.teams.map(team => ({
-          ...team,
-          matchesPlayed: teamMatchesCount.get(team.teamId) || 0,
-        }));
-
-        setOverallData({ ...data, teams: updatedTeams });
-      } catch (err) {
-        console.error('Error fetching overall data:', err);
-        setError('Failed to load data');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (tournament._id && round?._id) {
-      fetchData();
-    }
-  }, [tournament._id, round?._id]);
+    return { ...rawOverallData, teams: updatedTeams };
+  }, [rawOverallData, matchDatas]);
 
   // Typed text helper using Framer Motion
   const renderTyped = (text: string, className?: string, delayBase: number = 0) => {
@@ -278,18 +237,10 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round }) => {
     return sorted.slice(0, 5);
   }, [overallData, matchDatas]);
 
-  if (loading) {
+  if (!overallData) {
     return (
       <div className="w-[1920px] h-[1080px]  flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">Loading...</div>
-      </div>
-    );
-  }
-
-  if (error || !overallData) {
-    return (
-      <div className="w-[1920px] h-[1080px]  flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">{error || 'No overall data available'}</div>
+        <div className="text-white text-2xl font-[Righteous]">No overall data available</div>
       </div>
     );
   }

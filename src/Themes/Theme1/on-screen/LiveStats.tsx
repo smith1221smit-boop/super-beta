@@ -1,5 +1,10 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import SocketManager from '../../../dashboard/socketManager.tsx';
+import React, { useMemo } from 'react';
+// NOTE: SocketManager import removed, along with the localMatchData mirror
+// state, six manual socket event handlers, and the overallData socket
+// listener. PublicThemeRenderer owns the single socket connection, listens
+// to 'bulkUpdate', and passes freshly-merged `matchData` / `overallData`
+// down as props on every change — this component now reacts to those props
+// directly instead of maintaining its own copy.
 
 interface Tournament {
   _id: string;
@@ -61,276 +66,15 @@ interface LiveStatsProps {
 }
 
 const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchData, overallData }) => {
-  const [localMatchData, setLocalMatchData] = useState<MatchData | null>(matchData || null);
-  const [matchDataId, setMatchDataId] = useState<string | null>(matchData?._id?.toString() || null);
-  const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
-  const [socketStatus, setSocketStatus] = useState<string>('disconnected');
-  const [updateCount, setUpdateCount] = useState<number>(0);
-  const [overallMap, setOverallMap] = useState<Map<string, any>>(new Map());
-  const [localOverallData, setLocalOverallData] = useState<any>(overallData || null);
+  // Purely derived from props now — no local mirror state, no socket
+  // subscription. matchData/overallData come straight from
+  // PublicThemeRenderer's 'bulkUpdate' merge.
+  const localMatchData = matchData || null;
 
-  useEffect(() => {
-    if (matchData) {
-      console.log('LiveStats: Received new matchData prop, updating local state');
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-      setLastUpdateTime(Date.now());
-    }
-  }, [matchData]);
-
-  useEffect(() => {
-    if (!match?._id || !matchDataId) return;
-
-    console.log('Setting up real-time listeners for LiveStats - match:', match._id, 'matchData:', matchDataId);
-    
-    // Get a fresh socket connection from the manager
-    const socketManager = SocketManager.getInstance();
-    const freshSocket = socketManager.connect();
-    
-    console.log('Socket connected:', freshSocket?.connected);
-    console.log('Socket ID:', freshSocket?.id);
-    
-    // Update initial status
-    setSocketStatus(freshSocket?.connected ? 'connected' : 'disconnected');
-    
-    // Test socket connection
-    freshSocket.emit('test', 'LiveStats component connected');
-    
-    // Log all incoming events for debugging
-    const debugHandler = (eventName: string, data: any) => {
-      console.log(`LiveStats: Received ${eventName}:`, data);
-    };
-    
-    freshSocket.onAny(debugHandler);
-
-    // Create unique event handler names to avoid conflicts with dashboard
-    const liveStatsHandlers = {
-      handleLiveUpdate: (data: any) => {
-        console.log('LiveStats: Received liveMatchUpdate for match:', data._id);
-
-        // Check if this update is for the current matchData
-        if (data._id?.toString() !== matchDataId) {
-          console.log('LiveStats: liveMatchUpdate not for current matchData, ignoring');
-          return;
-        }
-
-        console.log('LiveStats: Updating localMatchData with live API data');
-        setLocalMatchData(data);
-        setLastUpdateTime(Date.now());
-        setUpdateCount(prev => prev + 1);
-      },
-
-      handleMatchDataUpdate: (data: any) => {
-        console.log('LiveStats: Received matchDataUpdated:', data);
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev: MatchData | null) => {
-            if (!prev) return prev;
-            const updatedTeams = prev.teams.map((team: any) => {
-              // Check both _id and teamId for team matching
-              if (team._id === data.teamId || team.teamId === data.teamId) {
-                const changes = data.changes || {};
-                const nextTeam: any = { ...team, ...changes };
-                if (Array.isArray(changes.players)) {
-                  const updatesById = new Map(
-                    changes.players.map((p: any) => [p._id?.toString?.() || p._id, p])
-                  );
-                  nextTeam.players = team.players.map((p: Player) => {
-                    const key = p._id?.toString?.() || p._id;
-                    const upd = updatesById.get(key);
-                    return upd ? { ...p, ...upd } : p;
-                  });
-                }
-                return nextTeam;
-              }
-              return team;
-            });
-            return { ...prev, teams: updatedTeams };
-          });
-          setLastUpdateTime(Date.now());
-          setUpdateCount(prev => prev + 1);
-        }
-      },
-
-      handlePlayerUpdate: (data: any) => {
-        console.log('LiveStats: Received playerStatsUpdated:', data);
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev: MatchData | null) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              teams: prev.teams.map((team: any) => {
-                // Check both _id and teamId for team matching
-                if (team._id === data.teamId || team.teamId === data.teamId) {
-                  return {
-                    ...team,
-                    players: team.players.map((player: Player) =>
-                      player._id === data.playerId
-                        ? { ...player, ...data.updates }
-                        : player
-                    ),
-                  };
-                }
-                return team;
-              }),
-            };
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-
-      handleTeamPointsUpdate: (data: any) => {
-        console.log('LiveStats: Received team points update:', data);
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev: MatchData | null) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              teams: prev.teams.map((team: any) => {
-                // Check both _id and teamId for team matching
-                if (team._id === data.teamId || team.teamId === data.teamId) {
-                  return {
-                    ...team,
-                    placePoints: data.changes?.placePoints ?? team.placePoints,
-                  };
-                }
-                return team;
-              }),
-            };
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-
-      handleTeamStatsUpdate: (data: any) => {
-        console.log('LiveStats: Received teamStatsUpdated:', data);
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev: MatchData | null) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              teams: prev.teams.map((team: any) => {
-                // Check both _id and teamId for team matching
-                if (team._id === data.teamId || team.teamId === data.teamId) {
-                  // Update player kill numbers if provided
-                  const updatedPlayers = data.players ?
-                    team.players.map((player: any) => {
-                      const playerUpdate = data.players.find((p: any) => p._id === player._id);
-                      return playerUpdate ? { ...player, killNum: playerUpdate.killNum } : player;
-                    }) : team.players;
-                  
-                  return {
-                    ...team,
-                    players: updatedPlayers,
-                  };
-                }
-                return team;
-              }),
-            };
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-
-      handleBulkTeamUpdate: (data: any) => {
-        console.log('LiveStats: Received bulk team update:', data);
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev: MatchData | null) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              teams: prev.teams.map((team: any) => {
-                // Check both _id and teamId for team matching
-                if ((team._id === data.teamId || team.teamId === data.teamId) && data.changes?.players) {
-                  const playerUpdates = new Map(
-                    data.changes.players.map((p: any) => [p._id?.toString?.() || p._id, p])
-                  );
-                  return {
-                    ...team,
-                    players: team.players.map((player: Player) => {
-                      const key = player._id?.toString?.() || player._id;
-                      const update = playerUpdates.get(key);
-                      return update ? { ...player, ...update } : player;
-                    }),
-                  };
-                }
-                return team;
-              }),
-            };
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-
-      handleOverallDataUpdate: (data: any) => {
-        console.log('LiveStats: Received overallDataUpdate:', data);
-        setLocalOverallData(data);
-        setLastUpdateTime(Date.now());
-      },
-
-      handleConnect: () => {
-        console.log('LiveStats: Socket connected');
-        setSocketStatus('connected');
-      },
-
-      handleDisconnect: () => {
-        console.log('LiveStats: Socket disconnected');
-        setSocketStatus('disconnected');
-      }
-    };
-
-    // Listen to all relevant socket events with unique handlers
-    freshSocket.on('liveMatchUpdate', liveStatsHandlers.handleLiveUpdate);
-    freshSocket.on('matchDataUpdated', liveStatsHandlers.handleMatchDataUpdate);
-    freshSocket.on('playerStatsUpdated', liveStatsHandlers.handlePlayerUpdate);
-    freshSocket.on('teamPointsUpdated', liveStatsHandlers.handleTeamPointsUpdate);
-    freshSocket.on('teamStatsUpdated', liveStatsHandlers.handleTeamStatsUpdate);
-    freshSocket.on('bulkTeamUpdate', liveStatsHandlers.handleBulkTeamUpdate);
-    freshSocket.on('overallDataUpdate', liveStatsHandlers.handleOverallDataUpdate);
-    freshSocket.on('connect', liveStatsHandlers.handleConnect);
-    freshSocket.on('disconnect', liveStatsHandlers.handleDisconnect);
-
-    return () => {
-      console.log('LiveStats: Cleaning up socket listeners');
-      // Clean up debug handler
-      freshSocket.offAny();
-      
-      // Clean up with the exact same handler references
-      freshSocket.off('liveMatchUpdate', liveStatsHandlers.handleLiveUpdate);
-      freshSocket.off('matchDataUpdated', liveStatsHandlers.handleMatchDataUpdate);
-      freshSocket.off('playerStatsUpdated', liveStatsHandlers.handlePlayerUpdate);
-      freshSocket.off('teamPointsUpdated', liveStatsHandlers.handleTeamPointsUpdate);
-      freshSocket.off('teamStatsUpdated', liveStatsHandlers.handleTeamStatsUpdate);
-      freshSocket.off('bulkTeamUpdate', liveStatsHandlers.handleBulkTeamUpdate);
-      freshSocket.off('overallDataUpdate', liveStatsHandlers.handleOverallDataUpdate);
-      freshSocket.off('connect', liveStatsHandlers.handleConnect);
-      freshSocket.off('disconnect', liveStatsHandlers.handleDisconnect);
-      // Notify socket manager that this component is done with the socket
-      socketManager.disconnect();
-    };
-  }, [match?._id, matchDataId]);
-
-  // Add effect to handle prop changes and force re-render
-  useEffect(() => {
-    if (matchData && matchData._id?.toString() !== matchDataId) {
-      console.log('MatchData prop changed, updating local state');
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-    }
-  }, [matchData, matchDataId]);
-
-  // Handle overallData prop changes
-  useEffect(() => {
-    if (overallData) {
-      console.log('OverallData prop changed, updating local state');
-      setLocalOverallData(overallData);
-    }
-  }, [overallData]);
-
-  // Use overall data from local state
-  useEffect(() => {
-    if (localOverallData && Array.isArray(localOverallData.teams)) {
-      const map = new Map<string, any>();
-      for (const t of localOverallData.teams) {
+  const overallMap = useMemo(() => {
+    const map = new Map<string, any>();
+    if (overallData && Array.isArray(overallData.teams)) {
+      for (const t of overallData.teams) {
         const key = t.teamId?.toString?.() || t.teamId;
         if (!key) continue;
         map.set(key, {
@@ -338,18 +82,15 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
           players: Array.isArray(t.players) ? t.players : [],
         });
       }
-      setOverallMap(map);
-    } else {
-      setOverallMap(new Map());
     }
-  }, [localOverallData]);
+    return map;
+  }, [overallData]);
 
-  // Sort teams by points first, then by kills - recalculated on every localMatchData change
+  // Sort teams by points first, then by kills - recalculated whenever
+  // matchData/overallMap change.
   const sortedTeams = useMemo(() => {
     if (!localMatchData) return [];
-    
-    console.log('LiveStats: Recalculating sortedTeams at', new Date(lastUpdateTime).toLocaleTimeString());
-    
+
     return localMatchData.teams
       .map(team => {
         const teamKey = (team as any).teamId?.toString?.() || (team as any).teamId || team._id;
@@ -376,7 +117,7 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
         }
         return b.totalKills - a.totalKills;
       });
-  }, [localMatchData, lastUpdateTime, overallMap]);
+  }, [localMatchData, overallMap]);
 
   if (!localMatchData) {
     return (

@@ -1,6 +1,11 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { motion } from 'framer-motion';
-import api from '../../../login/api.tsx';
+import React, { useEffect, useMemo, useState } from 'react';
+// NOTE: api import and the own-REST fetch of matches/overallData/matchDatas
+// removed — PublicThemeRenderer already does the one shared fetch and
+// passes overallData, matches, and matchDatas down as props for the
+// 'EventMvp' view. (This file's internal component was historically named
+// TopFragger — renamed to EventMvp to match the file/view it's actually
+// wired to; component-file matching is by filename, not export name, see
+// resolveComponent() in PublicThemeRenderer.tsx.)
 
 interface Tournament {
   _id: string;
@@ -48,14 +53,6 @@ interface Team {
   matchesPlayed?: number;
 }
 
-interface OverallData {
-  tournamentId: string;
-  roundId: string;
-  userId: string;
-  teams: Team[];
-  createdAt: string;
-}
-
 interface Match {
   _id: string;
   matchName?: string;
@@ -67,9 +64,20 @@ interface MatchData {
   teams: Team[];
 }
 
-interface TopFraggerProps {
+interface OverallData {
+  tournamentId: string;
+  roundId: string;
+  userId: string;
+  teams: Team[];
+  createdAt: string;
+}
+
+interface EventMvpProps {
   tournament: Tournament;
   round?: Round | null;
+  overallData?: OverallData | null;
+  matches?: Match[];
+  matchDatas?: MatchData[];
 }
 
 interface StatBoxData {
@@ -88,80 +96,8 @@ const formatSecondsToMMSS = (seconds: number = 0) => {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 };
 
-const TopFragger: React.FC<TopFraggerProps> = ({ tournament, round }) => {
-  const [overallData, setOverallData] = useState<OverallData | null>(null);
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [matchDatas, setMatchDatas] = useState<MatchData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+const EventMvp: React.FC<EventMvpProps> = ({ tournament, round, overallData, matches = [], matchDatas = [] }) => {
   const [playerPhotos, setPlayerPhotos] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!round) return;
-
-      try {
-        setLoading(true);
-
-        // Initialize empty overall data structure
-        const data: OverallData = {
-          tournamentId: tournament._id,
-          roundId: round._id,
-          userId: '',
-          teams: [],
-          createdAt: new Date().toISOString()
-        };
-
-        const matchesUrl = `/public/rounds/${round._id}/matches`;
-        const matchesResponse = await api.get(matchesUrl);
-        const matchesList: Match[] = matchesResponse.data;
-        setMatches(matchesList);
-
-        const matchDataPromises = matchesList.map(match => {
-          const url = `/public/matches/${match._id}/matchdata`;
-          return api.get(url)
-            .then(res => res.data)
-            .catch(() => null);
-        });
-
-        // Try to get overall data, but don't fail if it doesn't exist
-        try {
-          const overallUrl = `/public/tournaments/${tournament._id}/rounds/${round._id}/overall`;
-          const overallResponse = await api.get(overallUrl);
-          Object.assign(data, overallResponse.data);
-        } catch (overallError) {
-          console.log('Overall data not available, using calculated data from matches');
-        }
-        const matchDatas: (MatchData | null)[] = await Promise.all(matchDataPromises);
-        setMatchDatas(matchDatas.filter(m => m !== null) as MatchData[]);
-
-        const teamMatchesCount = new Map<string, number>();
-        matchDatas.forEach(matchData => {
-          matchData?.teams.forEach(team => {
-            const count = teamMatchesCount.get(team.teamId) || 0;
-            teamMatchesCount.set(team.teamId, count + 1);
-          });
-        });
-
-        // Update teams with matchesPlayed
-        const updatedTeams = data.teams.map(team => ({
-          ...team,
-          matchesPlayed: teamMatchesCount.get(team.teamId) || 0,
-        }));
-
-        setOverallData({ ...data, teams: updatedTeams });
-      } catch (err) {
-        console.error('Error fetching overall data:', err);
-        setError('Failed to load data');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (tournament._id && round?._id) {
-      fetchData();
-    }
-  }, [tournament._id, round?._id]);
 
   // Get top players by kills
   const topPlayers = useMemo(() => {
@@ -273,45 +209,21 @@ const TopFragger: React.FC<TopFraggerProps> = ({ tournament, round }) => {
   // Extract player photos from match data
   useEffect(() => {
     if (!matchDatas || matchDatas.length === 0) {
-      console.log('EventMvp: No matchDatas available');
+      setPlayerPhotos({});
       return;
     }
 
-    try {
-      console.log('EventMvp: Processing matchDatas for player photos', matchDatas);
-      
-      // Create a map of player uId to their photo URL from match data
-      const photosMap: Record<string, string> = {};
-      
-      matchDatas.forEach(matchData => {
-        if (!matchData.teams || matchData.teams.length === 0) {
-          console.log('EventMvp: No teams found in matchData');
-          return;
-        }
-        
-        matchData.teams.forEach(team => {
-          if (!team.players || team.players.length === 0) {
-            console.log(`EventMvp: No players found in team ${team.teamId}`);
-            return;
+    const photosMap: Record<string, string> = {};
+    matchDatas.forEach(matchData => {
+      matchData.teams?.forEach(team => {
+        team.players?.forEach(player => {
+          if (player.picUrl && player.uId) {
+            photosMap[player.uId] = player.picUrl;
           }
-          
-          team.players.forEach(player => {
-            if (player.picUrl && player.uId) {
-              photosMap[player.uId] = player.picUrl;
-              console.log(`EventMvp: Found photo for player uId ${player.uId}: ${player.picUrl}`);
-            } else {
-              console.log(`EventMvp: No picUrl or uId for player ${player._id}`);
-            }
-          });
         });
       });
-      
-      console.log('EventMvp: Player photos map:', photosMap);
-      setPlayerPhotos(photosMap);
-    } catch (err) {
-      console.error('Failed to extract player photos from match data:', err);
-      setPlayerPhotos({});
-    }
+    });
+    setPlayerPhotos(photosMap);
   }, [matchDatas]);
 
   const topPlayer = topPlayers[0]; // first player after sorting
@@ -396,18 +308,10 @@ secondaryValue: topPlayer?.numericDamage?.toFixed(2) || "0.00",
     );
   };
 
-  if (loading) {
+  if (!overallData) {
     return (
       <div className="w-[1920px] h-[1080px]  flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]"></div>
-      </div>
-    );
-  }
-
-  if (error || !overallData) {
-    return (
-      <div className="w-[1920px] h-[1080px]  flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">{error || 'No overall data available'}</div>
+        <div className="text-white text-2xl font-[Righteous]">No overall data available</div>
       </div>
     );
   }
@@ -507,4 +411,4 @@ secondaryValue: topPlayer?.numericDamage?.toFixed(2) || "0.00",
   )
 };
 
-export default TopFragger;
+export default EventMvp;

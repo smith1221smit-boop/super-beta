@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import api from '../../../login/api';
+// NOTE: api import and the REST fallback branch removed — PublicThemeRenderer
+// always supplies `matchData` as a prop now, so the fetch path was dead.
 
 
 interface Tournament {
@@ -130,31 +131,8 @@ const StatBox: React.FC<{ header: string; value: string | number; color?: string
 };
 
 
-const MatchSummary: React.FC<MatchSummaryProps> = ({ tournament, round, match, matchData: propMatchData, matchDataId, backpackInfo }) => {
-  const [matchData, setMatchData] = useState<MatchData | null>(propMatchData || null);
-  const [loading, setLoading] = useState(!propMatchData);
+const MatchSummary: React.FC<MatchSummaryProps> = ({ tournament, round, match, matchData, backpackInfo }) => {
   const [totalHeals, setTotalHeals] = useState(0);
-
-  useEffect(() => {
-    if (propMatchData) {
-      setMatchData(propMatchData);
-      setLoading(false);
-    } else if (match?._id && !matchData) {
-      const fetchMatchData = async () => {
-        try {
-          setLoading(true);
-          const res = await api.get(`/public/matches/${match._id}/matchdata`);
-          setMatchData(res.data);
-        } catch (err) {
-          console.error('Failed to fetch match data:', err);
-          setMatchData(null);
-        } finally {
-          setLoading(false);
-        }
-      };
-      fetchMatchData();
-    }
-  }, [match?._id, propMatchData, matchData]);
 
 useEffect(() => {
   if (!backpackInfo) {
@@ -304,14 +282,6 @@ if (teamWithPlacement10?.players.length) {
       matchDuration,
     };
   }, [matchData]);
-
-  if (loading) {
-    return (
-      <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div style={{ color: 'white', fontSize: '24px', fontFamily: 'Righteous' }}></div>
-      </div>
-    );
-  }
 
   if (!matchData || !stats) return null;
 

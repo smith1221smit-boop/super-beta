@@ -1,5 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import api from '../../../login/api.tsx';
+import React, { useMemo } from 'react';
+// NOTE: api import and the REST fetch-on-mount effect removed.
+// PublicThemeRenderer always supplies overallData (and matchData) as props
+// for this view now.
 
 interface Tournament {
   _id: string;
@@ -46,51 +48,11 @@ interface OverallData {
 interface ChampionsProps {
   tournament: Tournament;
   round?: Round | null;
+  matchData?: any;
+  overallData?: OverallData | null;
 }
 
-const Champions: React.FC<ChampionsProps> = ({ tournament, round }) => {
-  const [overallData, setOverallData] = useState<OverallData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchOverall = async () => {
-      if (!round) return;
-      try {
-        setLoading(true);
-
-        // Initialize empty overall data structure
-        const data: OverallData = {
-          tournamentId: tournament._id,
-          roundId: round._id,
-          userId: '',
-          teams: [],
-          createdAt: new Date().toISOString()
-        };
-
-        // Try to get overall data, but don't fail if it doesn't exist
-        try {
-          const overallUrl = `/public/tournaments/${tournament._id}/rounds/${round._id}/overall`;
-          const overallResponse = await api.get(overallUrl);
-          Object.assign(data, overallResponse.data);
-        } catch (overallError) {
-          console.log('Overall data not available, using empty data structure');
-        }
-
-        setOverallData(data);
-        setError(null);
-      } catch (err) {
-        console.error('Failed to fetch overall data:', err);
-        setError('Failed to load overall data');
-        setOverallData(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (tournament._id && round?._id) fetchOverall();
-  }, [tournament._id, round?._id]);
-
+const Champions: React.FC<ChampionsProps> = ({ tournament, round, overallData }) => {
   const champion = useMemo(() => {
     if (!overallData) return null;
 
@@ -111,18 +73,10 @@ const Champions: React.FC<ChampionsProps> = ({ tournament, round }) => {
     return { ...first, leadOverNext } as (Team & { total: number; totalKills: number; leadOverNext: number });
   }, [overallData]);
 
-  if (loading) {
+  if (!overallData || !champion) {
     return (
       <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">Loading...</div>
-      </div>
-    );
-  }
-
-  if (error || !overallData || !champion) {
-    return (
-      <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">{error || 'No overall data available'}</div>
+        <div className="text-white text-2xl font-[Righteous]">No overall data available</div>
       </div>
     );
   }

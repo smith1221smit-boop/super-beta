@@ -6,8 +6,16 @@ import React, {
   useRef,
   memo,
 } from 'react';
-import SocketManager from '../../../dashboard/socketManager.tsx';
 import { FaChevronRight } from 'react-icons/fa';
+// NOTE: SocketManager import removed, along with mergeMatchPatch /
+// mergePlayers and the six socket handlers (handleLiveUpdate,
+// handleMatchDataUpdated, handlePlayerStatsUpdated, handleTeamPointsUpdated,
+// handleTeamStatsUpdated, handleBulkTeamUpdate) plus the local matchData
+// mirror state they all wrote into. PublicThemeRenderer owns the single
+// socket connection, listens to 'bulkUpdate', and passes freshly-merged
+// `matchData` down as a prop on every change — this component now just
+// reacts to that prop directly, same as the Alerts.tsx / Dom.tsx
+// conversions in this theme.
 // ─────────────────────────────────────────────
 // Interfaces
 // ─────────────────────────────────────────────
@@ -70,173 +78,6 @@ interface LiveStatsProps {
   match?: Match | null;
   matchData?: MatchData | null;
   overallData?: any;
-}
-
-// ─────────────────────────────────────────────
-// mergePlayers
-// Merges ALL fields: liveState, bHasDied, health,
-// healthMax, killNum from patch into existing players
-// ─────────────────────────────────────────────
-function mergePlayers(existingPlayers: Player[], updates: any[]): Player[] {
-  if (!updates?.length) return existingPlayers;
-  const map = new Map(
-    updates.map((p: any) => [p._id?.toString?.() ?? p._id, p])
-  );
-  return existingPlayers.map(p => {
-    const upd = map.get(p._id?.toString?.() ?? p._id);
-    return upd ? { ...p, ...upd } : p;
-  });
-}
-
-// ─────────────────────────────────────────────
-// mergeMatchPatch
-//
-// Handles every socket event shape from both the
-// old and new server implementations:
-//
-// Shape 1 — liveMatchUpdate:
-//   { _id, teams: [...] }  full replacement
-//
-// Shape 2 — matchDataUpdated:
-//   { matchDataId, teamId, changes: { players?, placePoints?, ... } }
-//
-// Shape 3 — playerStatsUpdated:
-//   { matchDataId, teamId, playerId, updates: { liveState, bHasDied, health, healthMax, killNum, ... } }
-//
-// Shape 4 — teamStatsUpdated:
-//   { matchDataId, teamId, players: [{ _id, killNum, liveState, ... }] }
-//
-// Shape 5 — teamPointsUpdated:
-//   { matchDataId, teamId, changes: { placePoints } }
-//
-// Shape 6 — bulkTeamUpdate:
-//   { matchDataId, teamId, changes: { players: [...] } }
-//
-// Shape 7 — simple arrays (legacy):
-//   { teamId, players: [...] }  or  { players: [...] }
-// ─────────────────────────────────────────────
-function mergeMatchPatch(
-  prev: MatchData | null,
-  patch: any,
-  matchDataId: string | null
-): MatchData | null {
-  if (!prev) return null;
-
-  // ── Shape 1: full teams replacement (liveMatchUpdate) ──
-  if (patch.teams) {
-    // Only apply if the update is for the current matchData
-    if (patch._id && matchDataId && patch._id.toString() !== matchDataId) return prev;
-    return { ...prev, teams: patch.teams };
-  }
-
-  // All other shapes require matchDataId filtering
-  if (patch.matchDataId && matchDataId && patch.matchDataId !== matchDataId) {
-    return prev;
-  }
-
-  const next: MatchData = { ...prev, teams: [...prev.teams] };
-
-  const findTeam = (id: string) =>
-    next.teams.findIndex(t => t._id === id || t.teamId === id);
-
-  // ── Shape 3: playerStatsUpdated — single player field update ──
-  // { matchDataId, teamId, playerId, updates: { liveState, bHasDied, health, ... } }
-  if (patch.playerId && patch.updates) {
-    const idx = findTeam(patch.teamId);
-    if (idx !== -1) {
-      next.teams[idx] = {
-        ...next.teams[idx],
-        players: next.teams[idx].players.map(p =>
-          p._id === patch.playerId || p._id?.toString() === patch.playerId?.toString()
-            ? { ...p, ...patch.updates }
-            : p
-        ),
-      };
-    }
-    return next;
-  }
-
-  // ── Shape 2: matchDataUpdated — team changes object ──
-  // { matchDataId, teamId, changes: { players?, placePoints?, ... } }
-  if (patch.teamId && patch.changes) {
-    const idx = findTeam(patch.teamId);
-    if (idx !== -1) {
-      const changes = patch.changes || {};
-      const updatedTeam: any = { ...next.teams[idx], ...changes };
-      // If changes includes a players array, merge field-by-field
-      if (Array.isArray(changes.players)) {
-        updatedTeam.players = mergePlayers(next.teams[idx].players, changes.players);
-      }
-      next.teams[idx] = updatedTeam;
-    }
-    return next;
-  }
-
-  // ── Shape 6: bulkTeamUpdate — changes.players array ──
-  // { matchDataId, teamId, changes: { players: [...] } }
-  if (patch.teamId && patch.changes?.players) {
-    const idx = findTeam(patch.teamId);
-    if (idx !== -1) {
-      next.teams[idx] = {
-        ...next.teams[idx],
-        players: mergePlayers(next.teams[idx].players, patch.changes.players),
-      };
-    }
-    return next;
-  }
-
-  // ── Shape 4: teamStatsUpdated — players array with kill/live fields ──
-  // { matchDataId, teamId, players: [{ _id, killNum, liveState, bHasDied, health, ... }] }
-  if (patch.teamId && Array.isArray(patch.players)) {
-    const idx = findTeam(patch.teamId);
-    if (idx !== -1) {
-      next.teams[idx] = {
-        ...next.teams[idx],
-        players: mergePlayers(next.teams[idx].players, patch.players),
-        ...(patch.totalKills !== undefined && { totalKills: patch.totalKills }),
-        ...(patch.placePoints !== undefined && { placePoints: patch.placePoints }),
-      };
-    }
-    return next;
-  }
-
-  // ── Shape 5: teamPointsUpdated — changes.placePoints ──
-  // { matchDataId, teamId, changes: { placePoints } }
-  if (patch.teamId && patch.changes?.placePoints !== undefined) {
-    const idx = findTeam(patch.teamId);
-    if (idx !== -1) {
-      next.teams[idx] = {
-        ...next.teams[idx],
-        placePoints: patch.changes.placePoints,
-      };
-    }
-    return next;
-  }
-
-  // ── Shape 7: legacy team-only stat patch ──
-  // { teamId, totalKills?, placePoints? }
-  if (patch.teamId) {
-    const idx = findTeam(patch.teamId);
-    if (idx !== -1) {
-      next.teams[idx] = {
-        ...next.teams[idx],
-        ...(patch.totalKills !== undefined && { totalKills: patch.totalKills }),
-        ...(patch.placePoints !== undefined && { placePoints: patch.placePoints }),
-      };
-    }
-    return next;
-  }
-
-  // ── Shape 7b: global players array (no teamId) ──
-  if (Array.isArray(patch.players)) {
-    next.teams = next.teams.map(team => ({
-      ...team,
-      players: mergePlayers(team.players, patch.players),
-    }));
-    return next;
-  }
-
-  return next;
 }
 
 // ─────────────────────────────────────────────
@@ -599,84 +440,13 @@ const LiveStats: React.FC<LiveStatsProps> = ({
   matchData: propMatchData,
   overallData: propOverallData,
 }) => {
-  const [matchData, setMatchData] = useState<MatchData | null>(null);
+  // matchData now comes straight from the prop — PublicThemeRenderer owns
+  // the single socket connection, merges every 'bulkUpdate' push into its
+  // own state, and passes the freshly-merged object down here. No local
+  // mirror state, no socket handlers, no manual patch-merging needed.
+  const matchData = propMatchData ?? null;
 
-  // Keep matchDataId in a ref so socket handlers always see the latest value
-  // without needing to be re-registered on every matchData change
-  const matchDataIdRef = useRef<string | null>(null);
-  matchDataIdRef.current = matchData?._id ?? null;
-
-  // ── Sync matchData prop → state ─────────────
-  useEffect(() => {
-    if (propMatchData) setMatchData(propMatchData);
-  }, [propMatchData]);
-
-  // ── Socket handlers ──────────────────────────
-  // All handlers read matchDataIdRef.current at call time
-  // so they always have the latest matchDataId without
-  // needing to be re-registered when matchData changes.
-  const handleLiveUpdate = useCallback((data: any) => {
-    setMatchData(prev => mergeMatchPatch(prev, data, matchDataIdRef.current));
-  }, []);
-
-  const handleMatchDataUpdated = useCallback((data: any) => {
-    setMatchData(prev => mergeMatchPatch(prev, data, matchDataIdRef.current));
-  }, []);
-
-  // playerStatsUpdated: { matchDataId, teamId, playerId, updates }
-  // updates contains liveState, bHasDied, health, healthMax, killNum
-  const handlePlayerStatsUpdated = useCallback((data: any) => {
-    setMatchData(prev => mergeMatchPatch(prev, data, matchDataIdRef.current));
-  }, []);
-
-  const handleTeamPointsUpdated = useCallback((data: any) => {
-    setMatchData(prev => mergeMatchPatch(prev, data, matchDataIdRef.current));
-  }, []);
-
-  // teamStatsUpdated: { matchDataId, teamId, players: [{ _id, killNum, liveState, bHasDied, ... }] }
-  const handleTeamStatsUpdated = useCallback((data: any) => {
-    setMatchData(prev => mergeMatchPatch(prev, data, matchDataIdRef.current));
-  }, []);
-
-  // bulkTeamUpdate: { matchDataId, teamId, changes: { players: [...] } }
-  const handleBulkTeamUpdate = useCallback((data: any) => {
-    setMatchData(prev => mergeMatchPatch(prev, data, matchDataIdRef.current));
-  }, []);
-
-  // ── Socket lifecycle ──────────────────────────
-  useEffect(() => {
-    if (!match?._id || !matchDataIdRef.current) return;
-
-    const socketManager = SocketManager.getInstance();
-    const socket = socketManager.connect();
-
-    socket.on('liveMatchUpdate', handleLiveUpdate);
-    socket.on('matchDataUpdated', handleMatchDataUpdated);
-    socket.on('playerStatsUpdated', handlePlayerStatsUpdated);
-    socket.on('teamPointsUpdated', handleTeamPointsUpdated);
-    socket.on('teamStatsUpdated', handleTeamStatsUpdated);
-    socket.on('bulkTeamUpdate', handleBulkTeamUpdate);
-
-    return () => {
-      socket.off('liveMatchUpdate', handleLiveUpdate);
-      socket.off('matchDataUpdated', handleMatchDataUpdated);
-      socket.off('playerStatsUpdated', handlePlayerStatsUpdated);
-      socket.off('teamPointsUpdated', handleTeamPointsUpdated);
-      socket.off('teamStatsUpdated', handleTeamStatsUpdated);
-      socket.off('bulkTeamUpdate', handleBulkTeamUpdate);
-    };
-  }, [
-    match?._id,
-    matchDataIdRef.current,
-    handleLiveUpdate,
-    handleMatchDataUpdated,
-    handlePlayerStatsUpdated,
-    handleTeamPointsUpdated,
-    handleTeamStatsUpdated,
-    handleBulkTeamUpdate,
-  ]);
-
-  // ── overallMap — static, from prop only, never via socket ──
+  // ── overallMap — static, from prop only ──
   const overallMap = useMemo((): Map<string, number> => {
     const map = new Map<string, number>();
     if (!propOverallData?.teams) return map;

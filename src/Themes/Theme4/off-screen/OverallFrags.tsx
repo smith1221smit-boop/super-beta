@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { motion } from 'framer-motion';
-import api from '../../../login/api.tsx';
+import React, { useMemo } from 'react';
+// NOTE: api import and the own-REST fetch of matches/overallData/matchDatas
+// removed — PublicThemeRenderer already does the one shared fetch and
+// passes overallData, matches, and matchDatas down as props.
 
 interface Tournament {
   _id: string;
@@ -71,90 +72,20 @@ interface OverallFragsProps {
   tournament: Tournament;
   round?: Round | null;
   match?: Match | null;
+  overallData?: OverallData | null;
+  matches?: Match[];
+  matchDatas?: MatchData[];
 }
 
-const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, match }) => {
-  const [overallData, setOverallData] = useState<OverallData | null>(null);
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [matchDatas, setMatchDatas] = useState<MatchData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+// Module-scope (not inside OverallFrags) since SidePlayerCard, a sibling
+// component defined later in this file, also calls it.
+const formatSecondsToMMSS = (seconds: number = 0) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+};
 
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!round) return;
-
-      try {
-        setLoading(true);
-
-        // Initialize empty overall data structure
-        const data: OverallData = {
-          tournamentId: tournament._id,
-          roundId: round._id,
-          userId: '',
-          teams: [],
-          createdAt: new Date().toISOString()
-        };
-
-        const matchesUrl = `/public/rounds/${round._id}/matches`;
-        const matchesResponse = await api.get(matchesUrl);
-        const matchesList: Match[] = matchesResponse.data;
-        setMatches(matchesList);
-
-        const matchDataPromises = matchesList.map(m => {
-          const url = `/public/matches/${m._id}/matchdata`;
-          return api.get(url)
-            .then(res => res.data)
-            .catch(() => null);
-        });
-
-        // Try to get overall data, but don't fail if it doesn't exist
-        try {
-          const overallUrl = `/public/tournaments/${tournament._id}/rounds/${round._id}/overall`;
-          const overallResponse = await api.get(overallUrl);
-          Object.assign(data, overallResponse.data);
-        } catch (overallError) {
-          console.log('Overall data not available, using calculated data from matches');
-        }
-
-        const fetchedMatchDatas: (MatchData | null)[] = await Promise.all(matchDataPromises);
-        const validMatchDatas = fetchedMatchDatas.filter(m => m !== null) as MatchData[];
-        setMatchDatas(validMatchDatas);
-
-        const teamMatchesCount = new Map<string, number>();
-        validMatchDatas.forEach(matchData => {
-          matchData?.teams.forEach(team => {
-            const count = teamMatchesCount.get(team.teamId) || 0;
-            teamMatchesCount.set(team.teamId, count + 1);
-          });
-        });
-
-        // Update teams with matchesPlayed
-        const updatedTeams = data.teams.map(team => ({
-          ...team,
-          matchesPlayed: teamMatchesCount.get(team.teamId) || 0,
-        }));
-
-        setOverallData({ ...data, teams: updatedTeams });
-      } catch (err) {
-        console.error('Error fetching overall data:', err);
-        setError('Failed to load data');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (tournament._id && round?._id) {
-      fetchData();
-    }
-  }, [tournament._id, round?._id]);
-
-  const formatSecondsToMMSS = (seconds: number = 0) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
+const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, match, overallData, matchDatas = [] }) => {
   // Get top 5 players by comprehensive score
   const topPlayers = useMemo(() => {
     if (!overallData || matchDatas.length === 0) return [];
@@ -253,18 +184,10 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, match })
     return sorted.slice(0, 5);
   }, [overallData, matchDatas]);
 
-  if (loading) {
+  if (!overallData) {
     return (
       <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">Loading...</div>
-      </div>
-    );
-  }
-
-  if (error || !overallData) {
-    return (
-      <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">{error || 'No overall data available'}</div>
+        <div className="text-white text-2xl font-[Righteous]">No overall data available</div>
       </div>
     );
   }
@@ -352,12 +275,6 @@ const OverallFrags: React.FC<OverallFragsProps> = ({ tournament, round, match })
       </div>
     </div>
   );
-};
-
-const formatSecondsToMMSS = (seconds: number = 0) => {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 };
 
 const SidePlayerCard = ({

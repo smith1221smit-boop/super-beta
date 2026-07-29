@@ -1,7 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
-import SocketManager from '../../../dashboard/socketManager.tsx';
-import Teams from 'dashboard/MainTeams.tsx';
+import React, { useMemo } from 'react';
+import { MatchData } from '../../shared/hooks/unsortteams';
+// NOTE: SocketManager import (and the unused Teams import) removed along
+// with the five manual socket event handlers and the localMatchData mirror
+// they wrote into. PublicThemeRenderer owns the single socket connection
+// and passes freshly-merged `matchData` down as a prop — this component
+// now just derives from that prop directly.
 
 interface Tournament {
   _id: string;
@@ -27,37 +30,6 @@ interface Match {
   _matchNo?: number;
 }
 
-interface Player {
-  _id: string;
-  playerName: string;
-  killNum: number;
-  bHasDied: boolean;
-  picUrl?: string;
-  damage?: string | number;
-  survivalTime?: number;
-  assists?: number;
-  health?: number;
-  healthMax?: number;
-  liveState?: number; // 0,1,2,3 = alive, 4 = knocked, 5 = dead
-  knockouts:number
-}
-
-interface Team {
-  _id: string;
-  teamId?: string;
-  teamName?: string;
-  teamTag: string;
-  slot?: number;
-  placePoints: number;
-  players: Player[];
-  teamLogo: string;
-}
-
-interface MatchData {
-  _id: string;
-  teams: Team[];
-}
-
 interface WwcdSummaryProps {
   tournament: Tournament;
   round?: Round | null;
@@ -66,130 +38,14 @@ interface WwcdSummaryProps {
 }
 
 const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, matchData }) => {
-  const [localMatchData, setLocalMatchData] = useState<MatchData | null>(matchData || null);
-  const [matchDataId, setMatchDataId] = useState<string | null>(matchData?._id?.toString() || null);
-  const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
-  const [socketStatus, setSocketStatus] = useState<'connected' | 'disconnected'>('disconnected');
-
-  useEffect(() => {
-    if (matchData) {
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-      setLastUpdateTime(Date.now());
-    }
-  }, [matchData]);
-
-  useEffect(() => {
-    if (!match?._id || !matchDataId) return;
-
-    const socketManager = SocketManager.getInstance();
-    const socket = socketManager.connect();
-    setSocketStatus(socket?.connected ? 'connected' : 'disconnected');
-
-    const handlers = {
-      handleLiveUpdate: (data: any) => {
-        if (data._id?.toString() === matchDataId) {
-          setLocalMatchData(data);
-          setLastUpdateTime(Date.now());
-        }
-      },
-      handleMatchDataUpdate: (data: any) => {
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev) => {
-            if (!prev) return prev;
-            const updatedTeams = prev.teams.map((team: any) => {
-              if (team._id === data.teamId || team.teamId === data.teamId) {
-                const changes = data.changes || {};
-                const nextTeam: any = { ...team, ...changes };
-                if (Array.isArray(changes.players)) {
-                  const updatesById = new Map(
-                    changes.players.map((p: any) => [p._id?.toString?.() || p._id, p])
-                  );
-                  nextTeam.players = (team.players || []).map((p: Player) => {
-                    const key = (p as any)._id?.toString?.() || (p as any)._id;
-                    const upd = updatesById.get(key);
-                    return upd ? { ...p, ...upd } : p;
-                  });
-                }
-                return nextTeam;
-              }
-              return team;
-            });
-            return { ...prev, teams: updatedTeams };
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-      handlePlayerUpdate: (data: any) => {
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              teams: prev.teams.map((team: any) => {
-                if (team._id === data.teamId || team.teamId === data.teamId) {
-                  return {
-                    ...team,
-                    players: (team.players || []).map((player: Player) =>
-                      (player as any)._id === data.playerId ? { ...player, ...data.updates } : player
-                    ),
-                  };
-                }
-                return team;
-              }),
-            };
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-      handleTeamPointsUpdate: (data: any) => {
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              teams: prev.teams.map((team: any) => {
-                if (team._id === data.teamId || team.teamId === data.teamId) {
-                  return { ...team, placePoints: data.changes?.placePoints ?? team.placePoints };
-                }
-                return team;
-              }),
-            };
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-      handleConnect: () => setSocketStatus('connected'),
-      handleDisconnect: () => setSocketStatus('disconnected'),
-    };
-
-    socket.on('liveMatchUpdate', handlers.handleLiveUpdate);
-    socket.on('matchDataUpdated', handlers.handleMatchDataUpdate);
-    socket.on('playerStatsUpdated', handlers.handlePlayerUpdate);
-    socket.on('teamPointsUpdated', handlers.handleTeamPointsUpdate);
-    socket.on('connect', handlers.handleConnect);
-    socket.on('disconnect', handlers.handleDisconnect);
-
-    return () => {
-      socket.offAny();
-      socket.off('liveMatchUpdate', handlers.handleLiveUpdate);
-      socket.off('matchDataUpdated', handlers.handleMatchDataUpdate);
-      socket.off('playerStatsUpdated', handlers.handlePlayerUpdate);
-      socket.off('teamPointsUpdated', handlers.handleTeamPointsUpdate);
-      socket.off('connect', handlers.handleConnect);
-      socket.off('disconnect', handlers.handleDisconnect);
-      socketManager.disconnect();
-    };
-  }, [match?._id, matchDataId]);
-
   const teamsWithTotals = useMemo(() => {
-    if (!localMatchData) return [] as Array<Team & { totalKills: number; total: number; totalDamage: number; totalAssists: number }>;
-    return localMatchData.teams
+    if (!matchData) return [] as Array<any>;
+    return matchData.teams
       .map((team) => {
         const totalKills = team.players.reduce((sum, p) => sum + (Number(p.killNum) || 0), 0);
-        const totalDamage = team.players.reduce((sum, p) => sum + (Number(p.damage) || 0), 0);
-        const totalAssists = team.players.reduce((sum, p) => sum + (Number(p.assists) || 0), 0);
-        const totakKnockouts = team.players.reduce((sum, p) => sum + (Number(p.knockouts) || 0), 0);
+        const totalDamage = team.players.reduce((sum, p) => sum + (Number((p as any).damage) || 0), 0);
+        const totalAssists = team.players.reduce((sum, p) => sum + (Number((p as any).assists) || 0), 0);
+        const totakKnockouts = team.players.reduce((sum, p) => sum + (Number((p as any).knockouts) || 0), 0);
         return {
           ...team,
           totalKills,
@@ -204,11 +60,11 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
         if (b.placePoints !== a.placePoints) return (b.placePoints || 0) - (a.placePoints || 0);
         return (b.total || 0) - (a.total || 0);
       });
-  }, [localMatchData, lastUpdateTime]);
+  }, [matchData]);
 
   const winner = teamsWithTotals[0];
 
-  if (!localMatchData) {
+  if (!matchData) {
     return (
       <div className="w-[1920px] h-[1080px] bg-black flex items-center justify-center">
         <div className="text-white text-2xl font-[Righteous]">No match data available</div>
@@ -218,12 +74,9 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
 
   // Get top 4 players from the winning team
   const topPlayers = winner?.players
-    .filter(player => player.picUrl) // Filter players with pictures
-    .sort((a, b) => (b.killNum || 0) - (a.killNum || 0)) // Sort by kills
+    .filter((player: any) => player.picUrl) // Filter players with pictures
+    .sort((a: any, b: any) => (b.killNum || 0) - (a.killNum || 0)) // Sort by kills
     .slice(0, 4); // Get top 4 players
-
-  // Debug: Log player data
-  console.log('Winner:', winner?.teamTag, 'Top players:', topPlayers?.length, topPlayers?.map(p => ({ name: p.playerName, pic: p.picUrl })));
 
   return (
   <div className=' w-[1920px] h-[1080px] '>
@@ -238,9 +91,9 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
    className='text-white text-[10rem] font-[agencyb] absolute left-[500px] top-[0px]'>
      <div>WINNER WINNER</div>
      <div>CHICKEN DINNER</div>
-     
+
    </div>
- 
+
      <div
     style={{
     border: "2px solid",
@@ -250,21 +103,21 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
   }}
       className='bg-white w-[350px] h-[130px] absolute left-[760px] top-[940px] flex '>
         <div
-        
+
         className='w-full h-[100%]'
            style={{
    backgroundImage: `linear-gradient(135deg, ${
  tournament.secondaryColor || '#000'
 }, #000)`,
-  
+
  }}>
-       <img 
-      
+       <img
+
        src={winner?.teamLogo ||  "/def_logo.png"} alt="" className='w-[150px] h-[100px] object-contain pl-[20px] ' />
        </div>
         <div className='text-black text-[79px] font-[agencyb]  text-center w-full'>{winner.teamTag}</div>
       </div>
-     
+
    <div
     key={winner?._id || winner?.teamId}
      style={{
@@ -275,35 +128,32 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
  }}
    className='bg-black w-[900px] h-[130px] absolute left-[500px] top-[810px]'>
 <div className="text-white text-[76px] font-[agencyb] flex items-center gap-[100px] w-full ml-[210px]">
- 
+
  <span>DAY {round?.day}</span>
  <span>MATCH {match?.matchNo}</span>
- 
+
 </div>
 
    </div>
-   
+
    {/* Player images - 4 players with proper gaps */}
-      {/* Debug info */}
-      <div className=" top-[300px] left-[-400px] text-white text-sm z-50 ">Debug: {topPlayers?.length || 0} players found</div>
-      
       {topPlayers && topPlayers.length > 0 && (
      <div className='flex justify-center items-end absolute top-[350px]  left-[490px]  w-[900px] h-[500px]'>
-       {topPlayers.slice(0, 4).map((player, index) => (
+       {topPlayers.slice(0, 4).map((player: any, index: number) => (
          <div key={player._id || index} className='flex flex-col items-center justify-center   w-[500px] h-[400px] ml-[10px]'>
            <img
              src={player.picUrl || "/def_char.png"}
              alt={player.playerName || "Player"}
              className='w-[600px] h-[250px]  bg-gray-800 z-20  '
            />
-           <div 
+           <div
               style={{
    backgroundImage: `linear-gradient(135deg, ${
  tournament.secondaryColor || '#000'
 }, #000)`,
- 
+
  }}
-           
+
            className='text-white text-[29px] font-[agencyb]  text-center w-full '>
              {player.playerName.toUpperCase()}
            </div>

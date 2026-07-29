@@ -1,6 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import api from '../../../login/api';
-
+import React, { useMemo } from 'react';
+// NOTE: api import and the own-REST matchData fallback removed —
+// PublicThemeRenderer always supplies `matchData` as a prop for this view.
+// `backpackInfo` is NOT passed for the 'MatchSummary' view (see the switch
+// in PublicThemeRenderer.tsx), so the backpack-item-based heals total is
+// replaced with the heals total already available per-player on matchData
+// (stats.totalHeals below).
 
 interface Tournament {
   _id: string;
@@ -64,24 +68,11 @@ interface MatchData {
   teams: Team[];
 }
 
-interface BackpackInfo {
-  userId: string;
-  tournamentId: string;
-  roundId: string;
-  matchId: string;
-  matchDataId: string;
-  teambackpackinfo: {
-    TeamBackPackList: any[];
-  };
-}
-
 interface MatchSummaryProps {
   tournament: Tournament;
   round?: Round | null;
   match?: Match | null;
-  matchData?: MatchData;
-  matchDataId?: string;
-  backpackInfo?: BackpackInfo | null;
+  matchData?: MatchData | null;
 }
 
 const StatBox: React.FC<{ header: string; value: string | number; color?: string; image?: string; secondaryColor?: string }> = ({
@@ -94,16 +85,16 @@ const StatBox: React.FC<{ header: string; value: string | number; color?: string
   return (
     <div className="flex items-center">
       {image && (
-        <img 
-          src={image} 
-          alt={header} 
-          className="w-[90px] h-[90px] object-contain mr-[-20px] z-10 relative left-[-60px]" 
+        <img
+          src={image}
+          alt={header}
+          className="w-[90px] h-[90px] object-contain mr-[-20px] z-10 relative left-[-60px]"
         />
       )}
       <div className={`relative w-[250px] h-[150px] m-[8px] ${image ? 'ml-[-20px]' : ''}`}>
         <div className="relative w-full h-full flex flex-col items-center justify-center p-2">
           <div
-          
+
           style={{
    backgroundImage: `linear-gradient(135deg, ${
   secondaryColor || '#000'
@@ -114,12 +105,12 @@ const StatBox: React.FC<{ header: string; value: string | number; color?: string
           className="relative z-10 text-[25px] font-[AGENCYB] text-black mb-[-25px] w-[300px] flex justify-center items-center">{header}</div>
           <div className="relative z-10 text-[70px] font-[AGENCYB] text-black">{value}</div>
         </div>
-        <div 
+        <div
           className="absolute inset-0 -z-0 transform -skew-x-[6deg] origin-left"
           style={{
             backgroundColor: color,
             boxShadow: `0 0 0 2px ${secondaryColor || '#000'}`,
-      
+
           }}
         >
           <div className="w-full h-full bg-white"></div>
@@ -130,62 +121,7 @@ const StatBox: React.FC<{ header: string; value: string | number; color?: string
 };
 
 
-const MatchSummary: React.FC<MatchSummaryProps> = ({ tournament, round, match, matchData: propMatchData, matchDataId, backpackInfo }) => {
-  const [matchData, setMatchData] = useState<MatchData | null>(propMatchData || null);
-  const [loading, setLoading] = useState(!propMatchData);
-  const [totalHeals, setTotalHeals] = useState(0);
-
-  useEffect(() => {
-    if (propMatchData) {
-      setMatchData(propMatchData);
-      setLoading(false);
-    } else if (match?._id && !matchData) {
-      const fetchMatchData = async () => {
-        try {
-          setLoading(true);
-          const res = await api.get(`/public/matches/${match._id}/matchdata`);
-          setMatchData(res.data);
-        } catch (err) {
-          console.error('Failed to fetch match data:', err);
-          setMatchData(null);
-        } finally {
-          setLoading(false);
-        }
-      };
-      fetchMatchData();
-    }
-  }, [match?._id, propMatchData, matchData]);
-
-useEffect(() => {
-  if (!backpackInfo) {
-    setTotalHeals(0);
-    return;
-  }
-
-  const calculateHeals = (data: any) => {
-    if (!data?.teambackpackinfo?.TeamBackPackList) {
-      setTotalHeals(0);
-      return;
-    }
-
-    let heals = 0;
-    const healIds = [601001, 601002, 601003, 601004, 601005, 601006];
-
-    data.teambackpackinfo.TeamBackPackList.forEach((player: any) => {
-      healIds.forEach(id => {
-        if (player[id]) {
-          const match = player[id].match(/Num:(\d+)/);
-          if (match) heals += Number(match[1]);
-        }
-      });
-    });
-
-    setTotalHeals(heals);
-  };
-
-  calculateHeals(backpackInfo);
-}, [backpackInfo]);
-
+const MatchSummary: React.FC<MatchSummaryProps> = ({ tournament, round, match, matchData }) => {
 const topTeams = useMemo(() => {
   if (!matchData) return [];
 
@@ -212,16 +148,16 @@ const TopTeamsBox: React.FC<{ teams: Team[], secondaryColor?: string }> = ({ tea
                     {team.teamTag}
                   </span>
                 </div>
-              
+
               </div>
             ))}
           </div>
         </div>
-        <div 
+        <div
           className="absolute inset-0 -z-0 transform -skew-x-[6deg] origin-left"
           style={{
             boxShadow: `0 0 0 2px ${secondaryColor || '#000'}`,
-           
+
           }}
         >
           <div className="w-full h-full bg-white"></div>
@@ -251,11 +187,7 @@ const TopTeamsBox: React.FC<{ teams: Team[], secondaryColor?: string }> = ({ tea
 
     // Find the team with placement points 10
     const teamWithPlacement10 = matchData.teams.find(team => team.placePoints === 10);
-    
-    // Find player with highest survival time
-    let maxSurvivalTime = 0;
-    let playerWithMaxSurvival: Player | null = null;
-    
+
     matchData.teams.forEach(team => {
       team.players.forEach(player => {
         totalHeals += Number(player.heals || 0);
@@ -268,30 +200,22 @@ const TopTeamsBox: React.FC<{ teams: Team[], secondaryColor?: string }> = ({ tea
           longestDistElim = player.maxKillDistance;
         }
         totalElims += Number(player.killNum || 0);
-        
-        // Track player with max survival time
-        const survivalTime = Number(player.survivalTime || 0);
-        if (survivalTime > maxSurvivalTime) {
-          maxSurvivalTime = survivalTime;
-          playerWithMaxSurvival = player;
-        }
       });
     });
-    
-    // Calculate match duration from team with placement points 10's survival time
-    // or from player with highest survival time
-if (teamWithPlacement10?.players.length) {
-  const maxSurvivalPlayer = teamWithPlacement10.players.reduce(
-    (max: Player, player: Player) => {
-      return (player.survivalTime ?? 0) > (max.survivalTime ?? 0)
-        ? player
-        : max;
-    },
-    teamWithPlacement10.players[0] as Player
-  );
 
-  matchDuration = formatToMinutes(maxSurvivalPlayer.survivalTime ?? 0);
-}
+    // Calculate match duration from team with placement points 10's survival time
+    if (teamWithPlacement10?.players.length) {
+      const maxSurvivalPlayer = teamWithPlacement10.players.reduce(
+        (max: Player, player: Player) => {
+          return (player.survivalTime ?? 0) > (max.survivalTime ?? 0)
+            ? player
+            : max;
+        },
+        teamWithPlacement10.players[0] as Player
+      );
+
+      matchDuration = formatToMinutes(maxSurvivalPlayer.survivalTime ?? 0);
+    }
 
     return {
       totalHeals,
@@ -305,14 +229,6 @@ if (teamWithPlacement10?.players.length) {
     };
   }, [matchData]);
 
-  if (loading) {
-    return (
-      <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div style={{ color: 'white', fontSize: '24px', fontFamily: 'Righteous' }}></div>
-      </div>
-    );
-  }
-
   if (!matchData || !stats) return null;
 
   // First row: logo, heal, knocks
@@ -320,14 +236,14 @@ if (teamWithPlacement10?.players.length) {
   // Third row: longest elims, total elims, match duration
   const statBoxes = [
     // First row
-    { header: 'TOTAL HEAL', value: totalHeals, image: '/theme4assets/health.png' },
+    { header: 'TOTAL HEAL', value: stats.totalHeals, image: '/theme4assets/health.png' },
     { header: 'TOTAL KNOCKS', value: stats.totalKnocks, image: '/theme4assets/knoc.png' },
-    
+
     // Second row
     { header: 'AIR DROPS LOOTED', value: stats.totalAirdrops, image: '/theme4assets/airdrop.png' },
     { header: 'TOTAL DAMAGE', value: stats.totalDamage, image: '/theme4assets/totaldamages.png' },
     { header: 'TOTAL REVIVES', value: stats.totalRevives, image: '/theme4assets/total revives.png' },
-    
+
     // Third row
     { header: 'LONGEST DIST. ELIMS', value: stats.longestDistElim, image: '/theme4assets/longest dist elims.png' },
     { header: 'TOTAL ELIMS', value: stats.totalElims, image: '/theme4assets/total elims.png' },
@@ -381,7 +297,7 @@ if (teamWithPlacement10?.players.length) {
       secondaryColor={tournament.secondaryColor}
     />
   </div>
-  
+
   {/* Second Row */}
   <div className="flex justify-center gap-[100px] mb-10">
     <StatBox
@@ -406,7 +322,7 @@ if (teamWithPlacement10?.players.length) {
       secondaryColor={tournament.secondaryColor}
     />
   </div>
-  
+
   {/* Third Row */}
   <div className="flex justify-center gap-[100px]">
     <StatBox
@@ -439,6 +355,3 @@ if (teamWithPlacement10?.players.length) {
 };
 
 export default MatchSummary;
-
-
-

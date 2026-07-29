@@ -1,5 +1,11 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import SocketManager from '../../../dashboard/socketManager.tsx';
+import React, { useMemo } from 'react';
+import { MatchData } from '../../shared/hooks/unsortteams';
+// NOTE: SocketManager import removed along with the three effects that
+// mirrored matchData into local state and opened/closed a socket to fetch
+// the first live tick. PublicThemeRenderer owns the single socket
+// connection and passes freshly-merged `matchData` down as a prop —
+// this component now just derives topPlayers from that prop directly,
+// same pattern as the Theme5 on-screen conversions.
 
 interface Tournament {
   _id: string;
@@ -15,7 +21,7 @@ interface Round {
   _id: string;
   roundName: string;
   apiEnable?: boolean;
-  day?:string
+  day?: string;
 }
 
 interface Match {
@@ -25,40 +31,6 @@ interface Match {
   _matchNo?: number;
 }
 
-interface Player {
-  _id: string;
-  playerName: string;
-  killNum: number;
-  bHasDied: boolean;
-  picUrl?: string;
-  damage?: string | number;
-  survivalTime?: number;
-  assists?: number;
-  // Live stats fields
-  health?: number;
-  healthMax?: number;
-  liveState?: number; // 0,1,2,3 = alive, 4 = knocked, 5 = dead
-  useSmokeGrenadeNum?: number;
-  useFragGrenadeNum?: number;
-  useBurnGrenadeNum?: number;
-  useFlashGrenadeNum?: number;
-}
-
-interface Team {
-  _id: string;
-  teamTag: string;
-  slot?: number;
-  placePoints: number;
-  players: Player[];
-  teamLogo: string;
-  teamName: string;
-}
-
-interface MatchData {
-  _id: string;
-  teams: Team[];
-}
-
 interface MatchFragrsProps {
   tournament: Tournament;
   round?: Round | null;
@@ -66,80 +38,12 @@ interface MatchFragrsProps {
   matchData?: MatchData | null;
 }
 
-
 const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, matchData }) => {
-   const [localMatchData, setLocalMatchData] = useState<MatchData | null>(matchData || null);
-   const [matchDataId, setMatchDataId] = useState<string | null>(matchData?._id?.toString() || null);
-   const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
-   const [dataReceived, setDataReceived] = useState<boolean>(false);
-   const [hasFetched, setHasFetched] = useState<boolean>(false);
-   const [selectedView, setSelectedView] = useState<'fragers' | 'teams'>('fragers');
-
-  useEffect(() => {
-    if (matchData && !dataReceived && !hasFetched) {
-      console.log('MatchFragrs: Received new matchData prop, updating local state');
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-      setLastUpdateTime(Date.now());
-      // Disconnect socket immediately after receiving prop data
-      const socketManager = SocketManager.getInstance();
-      socketManager.disconnect();
-    }
-  }, [matchData, dataReceived, hasFetched]);
-
-  useEffect(() => {
-    if (!match?._id || !matchDataId || hasFetched) return;
-
-    console.log('Setting up socket for initial data fetch - match:', match._id, 'matchData:', matchDataId);
-
-    // Get a fresh socket connection from the manager
-    const socketManager = SocketManager.getInstance();
-    const freshSocket = socketManager.connect();
-
-    console.log('Socket connected:', freshSocket?.connected);
-
-    // Test socket connection
-    freshSocket.emit('test', 'MatchFragrs component connected');
-
-    // Handler for live updates - only accept first data
-    const handleLiveUpdate = (data: any) => {
-      if (data._id?.toString() === matchDataId && !dataReceived) {
-        console.log('MatchFragrs: Received first live data, updating and disconnecting');
-        setLocalMatchData(data);
-        setLastUpdateTime(Date.now());
-        setDataReceived(true);
-        setHasFetched(true);
-        freshSocket.off('liveMatchUpdate', handleLiveUpdate);
-        freshSocket.disconnect();
-      }
-    };
-
-    freshSocket.on('liveMatchUpdate', handleLiveUpdate);
-
-    return () => {
-      console.log('MatchFragrs: Cleaning up socket listener');
-      freshSocket.off('liveMatchUpdate', handleLiveUpdate);
-      // Don't disconnect here to avoid triggering UI changes
-    };
-  }, [match?._id, matchDataId, hasFetched]);
-
-  // Add effect to handle prop changes and force re-render
-  useEffect(() => {
-    if (matchData && matchData._id?.toString() !== matchDataId && !dataReceived && !hasFetched) {
-      console.log('MatchData prop changed, updating local state');
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-    }
-  }, [matchData, matchDataId, dataReceived, hasFetched]);
-
-
-
-
-  // Get top 5 players by kills, then damage, then assists - recalculated on every localMatchData change
+  // Get top 5 players by kills, then damage, then assists - recalculated whenever matchData changes
   const topPlayers = useMemo(() => {
-    if (!localMatchData) return [];
+    if (!matchData) return [];
 
-    const allPlayers = localMatchData.teams.flatMap(team => {
+    const allPlayers = matchData.teams.flatMap(team => {
       const teamTotalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
       return team.players.map(player => ({
         ...player,
@@ -149,7 +53,7 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
         assists: Number((player as any).assists ?? 0) || 0,
         teamTag: team.teamTag,
         teamLogo: team.teamLogo,
-        teamName :team.teamName,
+        teamName: team.teamName,
         teamPoints: team.placePoints,
         teamTotalKills
       }));
@@ -163,10 +67,10 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
     });
 
     return sorted.slice(0, 5);
-  }, [localMatchData]);
+  }, [matchData]);
 
 
-  if (!localMatchData) {
+  if (!matchData) {
     return (
       <div className="w-[1920px] h-[1080px] flex items-center justify-center">
         <div className="text-white text-2xl font-[Righteous]"></div>
@@ -203,7 +107,7 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
         DAY {round?.day} MATCH {match?.matchNo}
       </div>
 
-     
+
       <div className='w-[1400px] h-[800px]  absolute left-[520px] top-[180px] flex'>
         {topPlayers.slice(0, 4).map((player, index) => (
           <div key={player._id} className='w-[353px] h-[110%] bg-white ml-[20px]'>
@@ -237,7 +141,7 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
               className='w-[99%] h-[70px] m-[2px] bg-black'>
               <div className='text-white font-[AGENCYB] flex justify-between items-center h-[83%] text-[3rem] px-4'>
                 <div>DAMAGE</div>
-                <div>{player?.damage}</div>
+                <div>{(player as any)?.damage}</div>
               </div>
             </div>
             <div
@@ -261,7 +165,7 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
               className='w-[99%] h-[70px] m-[2px] bg-black mt-[30px]'>
               <div className='text-white font-[AGENCYB] flex justify-between items-center h-[83%] text-[3rem] px-4'>
                 <div>THROWABLE</div>
-                <div>{(player?.useSmokeGrenadeNum || 0) + (player?.useFragGrenadeNum || 0) + (player?.useBurnGrenadeNum || 0) + (player?.useFlashGrenadeNum || 0)}</div>
+                <div>{((player as any)?.useSmokeGrenadeNum || 0) + ((player as any)?.useFragGrenadeNum || 0) + ((player as any)?.useBurnGrenadeNum || 0) + ((player as any)?.useFlashGrenadeNum || 0)}</div>
               </div>
             </div>
             <div
@@ -273,7 +177,7 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
               className='w-[99%] h-[70px] m-[2px] bg-black mt-[30px]'>
               <div className='text-white font-[AGENCYB] flex justify-between items-center h-[83%] text-[3rem] px-4'>
                 <div>DAMAGE</div>
-                <div>{player?.damage}</div>
+                <div>{(player as any)?.damage}</div>
               </div>
             </div>
           </div>
@@ -285,4 +189,3 @@ const MatchFragrs: React.FC<MatchFragrsProps> = ({ tournament, round, match, mat
 
 
 export default MatchFragrs;
-

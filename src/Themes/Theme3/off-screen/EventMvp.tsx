@@ -1,5 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import api from '../../../login/api.tsx';
+import React, { useMemo } from 'react';
 
 interface Tournament {
   _id: string;
@@ -51,57 +50,15 @@ interface OverallData {
 interface EventMvpProps {
   tournament: Tournament;
   round?: Round | null;
-  overallData?: any;
+  overallData?: OverallData | null;
+  // Not used by this component's current MVP-derivation logic (which only
+  // needs overallData), but PublicThemeRenderer passes these for the
+  // 'EventMvp' view — accepted here for interface completeness.
+  matches?: any[];
+  matchDatas?: any[];
 }
 
-const EventMvp: React.FC<EventMvpProps> = ({ tournament, round, overallData: propOverallData }) => {
-  const [overallData, setOverallData] = useState<OverallData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (propOverallData) {
-      setOverallData(propOverallData);
-      setLoading(false);
-    } else {
-      const fetchOverall = async () => {
-        if (!round) return;
-        try {
-          setLoading(true);
-
-          // Initialize empty overall data structure
-          const data: OverallData = {
-            tournamentId: tournament._id,
-            roundId: round._id,
-            userId: '',
-            teams: [],
-            createdAt: new Date().toISOString()
-          };
-
-          // Try to get overall data, but don't fail if it doesn't exist
-          try {
-            const overallUrl = `/public/tournaments/${tournament._id}/rounds/${round._id}/overall`;
-            const overallResponse = await api.get(overallUrl);
-            Object.assign(data, overallResponse.data);
-          } catch (overallError) {
-            console.log('Overall data not available, using empty data structure');
-          }
-
-          setOverallData(data);
-          setError(null);
-        } catch (err) {
-          console.error('Failed to fetch overall data:', err);
-          setError('Failed to load overall data');
-          setOverallData(null);
-        } finally {
-          setLoading(false);
-        }
-      };
-
-      if (tournament._id && round?._id) fetchOverall();
-    }
-  }, [tournament._id, round?._id, propOverallData]);
-
+const EventMvp: React.FC<EventMvpProps> = ({ tournament, round, overallData }) => {
   // Get top 5 players by kills, then damage, then assists from overall data
   const topPlayers = useMemo(() => {
     if (!overallData) return [];
@@ -169,28 +126,12 @@ const EventMvp: React.FC<EventMvpProps> = ({ tournament, round, overallData: pro
     return sorted.slice(0, 5);
   }, [overallData]);
 
-  if (loading) {
-    return (
-      <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">Loading...</div>
-      </div>
-    );
-  }
-
   const mvp = topPlayers[0];
 
-  if (loading) {
+  if (!overallData || !mvp) {
     return (
       <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">Loading...</div>
-      </div>
-    );
-  }
-
-  if (error || !overallData || !mvp) {
-    return (
-      <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">{error || 'No overall data available'}</div>
+        <div className="text-white text-2xl font-[Righteous]">No overall data available</div>
       </div>
     );
   }

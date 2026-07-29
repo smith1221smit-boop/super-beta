@@ -1,7 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
-import SocketManager from '../../../dashboard/socketManager.tsx';
-import Teams from 'dashboard/MainTeams.tsx';
+import React, { useMemo } from 'react';
+// NOTE: SocketManager import removed, along with the localMatchData mirror
+// state and its socket-handler block. PublicThemeRenderer owns the single
+// socket connection and passes freshly-merged `matchData` down as a prop —
+// this component now just reads that prop directly. `motion` and `Teams`
+// were unused in the original file's JSX and are dropped along with them.
 
 interface Tournament {
   _id: string;
@@ -66,121 +68,7 @@ interface WwcdSummaryProps {
 }
 
 const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, matchData }) => {
-  const [localMatchData, setLocalMatchData] = useState<MatchData | null>(matchData || null);
-  const [matchDataId, setMatchDataId] = useState<string | null>(matchData?._id?.toString() || null);
-  const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
-  const [socketStatus, setSocketStatus] = useState<'connected' | 'disconnected'>('disconnected');
-
-  useEffect(() => {
-    if (matchData) {
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString());
-      setLastUpdateTime(Date.now());
-    }
-  }, [matchData]);
-
-  useEffect(() => {
-    if (!match?._id || !matchDataId) return;
-
-    const socketManager = SocketManager.getInstance();
-    const socket = socketManager.connect();
-    setSocketStatus(socket?.connected ? 'connected' : 'disconnected');
-
-    const handlers = {
-      handleLiveUpdate: (data: any) => {
-        if (data._id?.toString() === matchDataId) {
-          setLocalMatchData(data);
-          setLastUpdateTime(Date.now());
-        }
-      },
-      handleMatchDataUpdate: (data: any) => {
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev) => {
-            if (!prev) return prev;
-            const updatedTeams = prev.teams.map((team: any) => {
-              if (team._id === data.teamId || team.teamId === data.teamId) {
-                const changes = data.changes || {};
-                const nextTeam: any = { ...team, ...changes };
-                if (Array.isArray(changes.players)) {
-                  const updatesById = new Map(
-                    changes.players.map((p: any) => [p._id?.toString?.() || p._id, p])
-                  );
-                  nextTeam.players = (team.players || []).map((p: Player) => {
-                    const key = (p as any)._id?.toString?.() || (p as any)._id;
-                    const upd = updatesById.get(key);
-                    return upd ? { ...p, ...upd } : p;
-                  });
-                }
-                return nextTeam;
-              }
-              return team;
-            });
-            return { ...prev, teams: updatedTeams };
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-      handlePlayerUpdate: (data: any) => {
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              teams: prev.teams.map((team: any) => {
-                if (team._id === data.teamId || team.teamId === data.teamId) {
-                  return {
-                    ...team,
-                    players: (team.players || []).map((player: Player) =>
-                      (player as any)._id === data.playerId ? { ...player, ...data.updates } : player
-                    ),
-                  };
-                }
-                return team;
-              }),
-            };
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-      handleTeamPointsUpdate: (data: any) => {
-        if (data.matchDataId === matchDataId) {
-          setLocalMatchData((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              teams: prev.teams.map((team: any) => {
-                if (team._id === data.teamId || team.teamId === data.teamId) {
-                  return { ...team, placePoints: data.changes?.placePoints ?? team.placePoints };
-                }
-                return team;
-              }),
-            };
-          });
-          setLastUpdateTime(Date.now());
-        }
-      },
-      handleConnect: () => setSocketStatus('connected'),
-      handleDisconnect: () => setSocketStatus('disconnected'),
-    };
-
-    socket.on('liveMatchUpdate', handlers.handleLiveUpdate);
-    socket.on('matchDataUpdated', handlers.handleMatchDataUpdate);
-    socket.on('playerStatsUpdated', handlers.handlePlayerUpdate);
-    socket.on('teamPointsUpdated', handlers.handleTeamPointsUpdate);
-    socket.on('connect', handlers.handleConnect);
-    socket.on('disconnect', handlers.handleDisconnect);
-
-    return () => {
-      socket.offAny();
-      socket.off('liveMatchUpdate', handlers.handleLiveUpdate);
-      socket.off('matchDataUpdated', handlers.handleMatchDataUpdate);
-      socket.off('playerStatsUpdated', handlers.handlePlayerUpdate);
-      socket.off('teamPointsUpdated', handlers.handleTeamPointsUpdate);
-      socket.off('connect', handlers.handleConnect);
-      socket.off('disconnect', handlers.handleDisconnect);
-      socketManager.disconnect();
-    };
-  }, [match?._id, matchDataId]);
+  const localMatchData = matchData ?? null;
 
   const teamsWithTotals = useMemo(() => {
     if (!localMatchData) return [] as Array<Team & { totalKills: number; total: number; totalDamage: number; totalAssists: number }>;
@@ -204,7 +92,7 @@ const WwcdSummary: React.FC<WwcdSummaryProps> = ({ tournament, round, match, mat
         if (b.placePoints !== a.placePoints) return (b.placePoints || 0) - (a.placePoints || 0);
         return (b.total || 0) - (a.total || 0);
       });
-  }, [localMatchData, lastUpdateTime]);
+  }, [localMatchData]);
 
   const winner = teamsWithTotals[0];
 

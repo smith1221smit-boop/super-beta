@@ -1,5 +1,18 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import SocketManager from '../../../dashboard/socketManager.tsx';
+import { MatchData, Player } from '../../shared/hooks/unsortteams';
+// NOTE: SocketManager import removed, along with handleSocketUpdate's
+// manual patch-shape merging. PublicThemeRenderer owns the single socket
+// connection and passes freshly-merged `matchData` down as a prop on every
+// 'bulkUpdate' — this component just reacts to that prop changing, same as
+// Theme2/on-screen/Dom.tsx and this theme's own Alerts.tsx/LiveStats.tsx.
+//
+// Player / MatchData are imported from useSortedTeams rather than
+// redeclared locally, same reason as the other converted theme files: two
+// same-named-but-different-shaped interfaces are unrelated types to
+// TypeScript. The shared Player interface has a `[key: string]: any`
+// fallback, so the extra fields this file reads (killNumByGrenade,
+// killNumInVehicle, damage, gotAirDropNum) still work without needing to
+// be declared on the shared type.
 
 interface Tournament {
   _id: string;
@@ -24,36 +37,6 @@ interface Match {
   _matchNo?: number;
 }
 
-interface Player {
-  _id: string;
-  playerName: string;
-  killNum: number;
-  bHasDied: boolean;
-  picUrl?: string;
-  health: number;
-  healthMax: number;
-  liveState: number;
-  killNumByGrenade?: number;
-  killNumInVehicle?: number;
-  damage?: number;
-  gotAirDropNum?: number;
-}
-
-interface Team {
-  _id: string;
-  teamTag: string;
-  teamId?: string;
-  slot?: number;
-  placePoints: number;
-  players: Player[];
-  teamLogo: string;
-}
-
-interface MatchData {
-  _id: string;
-  teams: Team[];
-}
-
 interface DomProps {
   tournament: Tournament;
   round?: Round | null;
@@ -65,21 +48,18 @@ const DISPLAY_MS = 6000;
 const EXIT_ANIM_MS = 500; // keep in sync with .dom-card transition duration below
 
 const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchData }) => {
-  const [localMatchData, setLocalMatchData] = useState<MatchData | null>(matchData || null);
-  const [matchDataId, setMatchDataId] = useState<string | null>(matchData?._id?.toString() || null);
-
   const [isVisible, setIsVisible] = useState(false); // drives CSS transition, not framer-motion
   const [displayedPlayer, setDisplayedPlayer] = useState<
     (Player & { teamTag: string; teamLogo: string; milestone: string }) | null
   >(null);
 
-  // Refs to prevent loops
+  // Refs to prevent loops / track "previous tick" values per player, so a
+  // milestone only fires once when a counter crosses a threshold.
   const prevDataRef = useRef<any[]>([]);
   const prevKillsMap = useRef<{ [key: string]: number }>({});
   const displayTimerRef = useRef<number | null>(null);
   const exitTimerRef = useRef<number | null>(null);
   const firstBloodTriggered = useRef(false);
-  const previousDeadPlayersRef = useRef<Player[]>([]);
 
   // Milestone tracking refs
   const prevGrenadeKillsMap = useRef<{ [key: string]: number }>({});
@@ -88,19 +68,9 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
   const prevAirDropMap = useRef<{ [key: string]: number }>({});
   const damageMilestoneTriggered = useRef<{ [key: string]: boolean }>({});
 
-  // ✅ Ref to always hold the latest match data (no re-renders)
-  const matchDataRef = useRef<MatchData | null>(matchData || null);
-  useEffect(() => {
-    matchDataRef.current = localMatchData;
-  }, [localMatchData]);
-
-  // Sync matchData prop -> state
-  useEffect(() => {
-    if (matchData) {
-      setLocalMatchData(matchData);
-      setMatchDataId(matchData._id?.toString() || null);
-    }
-  }, [matchData]);
+  // Track match id so trackers reset when the match itself changes, same
+  // as the queue-reset behavior in the Alerts.tsx conversion.
+  const matchDataIdRef = useRef<string | null>(matchData?._id?.toString() ?? null);
 
   const showAlert = useCallback((alertData: any) => {
     setDisplayedPlayer(alertData);
@@ -121,250 +91,178 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
     }, DISPLAY_MS);
   }, []);
 
-  // ✅ Socket update handler (no loop)
-  const handleSocketUpdate = useCallback(
-    (data: any) => {
-      const currentData = matchDataRef.current;
-      let updatedMatchData: MatchData | null = currentData;
-
-      if (data._id?.toString() === matchDataId && data.teams) {
-        updatedMatchData = data;
-      } else if (data.matchDataId === matchDataId && data.teamId && data.playerId && data.updates) {
-        // playerStatsUpdated: { matchDataId, teamId, playerId, updates }
-        if (currentData) {
-          updatedMatchData = {
-            ...currentData,
-            teams: currentData.teams.map(team =>
-              team._id === data.teamId || team.teamId === data.teamId
-                ? {
-                    ...team,
-                    players: team.players.map(player =>
-                      player._id === data.playerId || player._id?.toString() === data.playerId?.toString()
-                        ? { ...player, ...data.updates }
-                        : player
-                    ),
-                  }
-                : team
-            ),
-          };
-        }
-      } else if (data.matchDataId === matchDataId && data.teamId && data.players) {
-        if (currentData) {
-          updatedMatchData = {
-            ...currentData,
-            teams: currentData.teams.map(team =>
-              team._id === data.teamId || team.teamId === data.teamId
-                ? {
-                    ...team,
-                    players: team.players.map(player =>
-                      data.players.find((p: any) => p._id === player._id)
-                        ? { ...player, ...data.players.find((p: any) => p._id === player._id) }
-                        : player
-                    ),
-                  }
-                : team
-            ),
-          };
-        }
-      } else if (data.matchDataId === matchDataId && data.teamId && data.changes?.players) {
-        if (currentData) {
-          updatedMatchData = {
-            ...currentData,
-            teams: currentData.teams.map(team =>
-              team._id === data.teamId || team.teamId === data.teamId
-                ? {
-                    ...team,
-                    players: team.players.map(player => {
-                      const update = data.changes.players.find(
-                        (p: any) => p._id?.toString() === player._id?.toString()
-                      );
-                      return update ? { ...player, ...update } : player;
-                    }),
-                  }
-                : team
-            ),
-          };
-        }
-      }
-
-      if (!updatedMatchData) return;
-
-      const combinedData = updatedMatchData.teams
-        .flatMap(team =>
-          team.players.map(player => ({
-            _id: player._id,
-            killNum: player.killNum || 0,
-            killNumByGrenade: player.killNumByGrenade || 0,
-            killNumInVehicle: player.killNumInVehicle || 0,
-            damage: player.damage || 0,
-            gotAirDropNum: player.gotAirDropNum || 0,
-          }))
-        )
-        .sort((a, b) => a._id.localeCompare(b._id));
-
-      const prevDataSorted = prevDataRef.current.sort((a: any, b: any) => a._id.localeCompare(b._id));
-
-      if (JSON.stringify(combinedData) === JSON.stringify(prevDataSorted)) {
-        return; // unchanged, nothing to do
-      }
-
-      prevDataRef.current = combinedData;
-      setLocalMatchData(updatedMatchData);
-      matchDataRef.current = updatedMatchData;
-
-      let alertData: any = null;
-      let triggered = false;
-
-      // First blood
-      if (!firstBloodTriggered.current) {
-        outer: for (const team of updatedMatchData.teams) {
-          for (const player of team.players) {
-            const currentKills = player.killNum || 0;
-            const previousKills = prevKillsMap.current[player.playerName] || 0;
-            if (currentKills === 1 && previousKills === 0) {
-              alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'FIRST BLOOD' };
-              triggered = true;
-              firstBloodTriggered.current = true;
-              break outer;
-            }
-          }
-        }
-      }
-
-      // Kill streaks (most recent first)
-      if (!triggered) {
-        outer2: for (let ti = updatedMatchData.teams.length - 1; ti >= 0; ti--) {
-          const team = updatedMatchData.teams[ti];
-          for (let pi = team.players.length - 1; pi >= 0; pi--) {
-            const player = team.players[pi];
-            const currentKills = player.killNum || 0;
-            const previousKills = prevKillsMap.current[player.playerName] || 0;
-            if (currentKills > previousKills) {
-              if (currentKills >= 8 && previousKills < 8) {
-                alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'UNSTOPPABLE' };
-              } else if (currentKills >= 5 && previousKills < 5) {
-                alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'RAMPAGE' };
-              } else if (currentKills >= 3 && previousKills < 3) {
-                alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'DOMINATION' };
-              }
-              if (alertData) {
-                triggered = true;
-                break outer2;
-              }
-            }
-          }
-        }
-      }
-
-      // Grenade kills
-      if (!triggered) {
-        outer3: for (let ti = updatedMatchData.teams.length - 1; ti >= 0; ti--) {
-          const team = updatedMatchData.teams[ti];
-          for (let pi = team.players.length - 1; pi >= 0; pi--) {
-            const player = team.players[pi];
-            const current = player.killNumByGrenade || 0;
-            const previous = prevGrenadeKillsMap.current[player.playerName] || 0;
-            if (current > previous) {
-              alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'GRENADE KILL' };
-              triggered = true;
-              break outer3;
-            }
-          }
-        }
-      }
-
-      // Vehicle kills
-      if (!triggered) {
-        outer4: for (let ti = updatedMatchData.teams.length - 1; ti >= 0; ti--) {
-          const team = updatedMatchData.teams[ti];
-          for (let pi = team.players.length - 1; pi >= 0; pi--) {
-            const player = team.players[pi];
-            const current = player.killNumInVehicle || 0;
-            const previous = prevVehicleKillsMap.current[player.playerName] || 0;
-            if (current > previous) {
-              alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'VEHICLE KILL' };
-              triggered = true;
-              break outer4;
-            }
-          }
-        }
-      }
-
-      // 500+ damage
-      if (!triggered) {
-        outer5: for (let ti = updatedMatchData.teams.length - 1; ti >= 0; ti--) {
-          const team = updatedMatchData.teams[ti];
-          for (let pi = team.players.length - 1; pi >= 0; pi--) {
-            const player = team.players[pi];
-            const current = player.damage || 0;
-            const previous = prevDamageMap.current[player.playerName] || 0;
-            if (current >= 500 && previous < 500 && !damageMilestoneTriggered.current[player.playerName]) {
-              alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: '500+ DAMAGE' };
-              triggered = true;
-              damageMilestoneTriggered.current[player.playerName] = true;
-              break outer5;
-            }
-          }
-        }
-      }
-
-      // Airdrop loot
-      if (!triggered) {
-        outer6: for (let ti = updatedMatchData.teams.length - 1; ti >= 0; ti--) {
-          const team = updatedMatchData.teams[ti];
-          for (let pi = team.players.length - 1; pi >= 0; pi--) {
-            const player = team.players[pi];
-            const current = player.gotAirDropNum || 0;
-            const previous = prevAirDropMap.current[player.playerName] || 0;
-            if (current > previous) {
-              alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'AIRDROP LOOTED' };
-              triggered = true;
-              break outer6;
-            }
-          }
-        }
-      }
-
-      // Update all trackers
-      updatedMatchData.teams.forEach(team => {
-        team.players.forEach(player => {
-          prevKillsMap.current[player.playerName] = player.killNum || 0;
-          prevGrenadeKillsMap.current[player.playerName] = player.killNumByGrenade || 0;
-          prevVehicleKillsMap.current[player.playerName] = player.killNumInVehicle || 0;
-          prevDamageMap.current[player.playerName] = player.damage || 0;
-          prevAirDropMap.current[player.playerName] = player.gotAirDropNum || 0;
-        });
-      });
-
-      if (triggered && alertData) {
-        showAlert(alertData);
-      }
-    },
-    [matchDataId, showAlert]
-  );
-
-  // ✅ Socket setup — scoped to THIS component's handler only.
-  // Never call socket.off(event) with no handler (removes every listener
-  // for that event on the shared socket, including LiveStats/Alerts' own),
-  // and never call socketManager.disconnect() here — the socket is shared
-  // app-wide by other overlays.
+  // ── Milestone detection — runs whenever the matchData PROP changes,
+  // instead of inside a socket patch handler. Same detection logic as
+  // before, just triggered by prop updates rather than raw socket events. ──
   useEffect(() => {
-    if (!matchDataId) return;
+    if (!matchData) return;
 
-    const socketManager = SocketManager.getInstance();
-    const socket = socketManager.connect();
+    const newId = matchData._id?.toString() ?? null;
+    if (newId !== matchDataIdRef.current) {
+      // Match changed — reset every tracker so old-match counters can't
+      // leak into new-match milestone comparisons.
+      matchDataIdRef.current = newId;
+      prevDataRef.current = [];
+      prevKillsMap.current = {};
+      prevGrenadeKillsMap.current = {};
+      prevVehicleKillsMap.current = {};
+      prevDamageMap.current = {};
+      prevAirDropMap.current = {};
+      damageMilestoneTriggered.current = {};
+      firstBloodTriggered.current = false;
+    }
 
-    const events = ['liveMatchUpdate', 'matchDataUpdated', 'playerStatsUpdated', 'teamStatsUpdated', 'bulkTeamUpdate'];
+    const combinedData = matchData.teams
+      .flatMap(team =>
+        team.players.map(player => ({
+          _id: player._id,
+          killNum: player.killNum || 0,
+          killNumByGrenade: player.killNumByGrenade || 0,
+          killNumInVehicle: player.killNumInVehicle || 0,
+          damage: player.damage || 0,
+          gotAirDropNum: player.gotAirDropNum || 0,
+        }))
+      )
+      .sort((a, b) => a._id.localeCompare(b._id));
 
-    events.forEach(evt => socket.on(evt, handleSocketUpdate));
+    const prevDataSorted = [...prevDataRef.current].sort((a: any, b: any) => a._id.localeCompare(b._id));
 
-    return () => {
-      events.forEach(evt => socket.off(evt, handleSocketUpdate));
-      // Do NOT disconnect the shared socket here.
-    };
-  }, [matchDataId, handleSocketUpdate]);
+    if (JSON.stringify(combinedData) === JSON.stringify(prevDataSorted)) {
+      return; // unchanged, nothing to do
+    }
 
-  if (!localMatchData) return null;
+    prevDataRef.current = combinedData;
+
+    let alertData: any = null;
+    let triggered = false;
+
+    // First blood
+    if (!firstBloodTriggered.current) {
+      outer: for (const team of matchData.teams) {
+        for (const player of team.players) {
+          const currentKills = player.killNum || 0;
+          const previousKills = prevKillsMap.current[player.playerName] || 0;
+          if (currentKills === 1 && previousKills === 0) {
+            alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'FIRST BLOOD' };
+            triggered = true;
+            firstBloodTriggered.current = true;
+            break outer;
+          }
+        }
+      }
+    }
+
+    // Kill streaks (most recent first)
+    if (!triggered) {
+      outer2: for (let ti = matchData.teams.length - 1; ti >= 0; ti--) {
+        const team = matchData.teams[ti];
+        for (let pi = team.players.length - 1; pi >= 0; pi--) {
+          const player = team.players[pi];
+          const currentKills = player.killNum || 0;
+          const previousKills = prevKillsMap.current[player.playerName] || 0;
+          if (currentKills > previousKills) {
+            if (currentKills >= 8 && previousKills < 8) {
+              alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'UNSTOPPABLE' };
+            } else if (currentKills >= 5 && previousKills < 5) {
+              alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'RAMPAGE' };
+            } else if (currentKills >= 3 && previousKills < 3) {
+              alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'DOMINATION' };
+            }
+            if (alertData) {
+              triggered = true;
+              break outer2;
+            }
+          }
+        }
+      }
+    }
+
+    // Grenade kills
+    if (!triggered) {
+      outer3: for (let ti = matchData.teams.length - 1; ti >= 0; ti--) {
+        const team = matchData.teams[ti];
+        for (let pi = team.players.length - 1; pi >= 0; pi--) {
+          const player = team.players[pi];
+          const current = player.killNumByGrenade || 0;
+          const previous = prevGrenadeKillsMap.current[player.playerName] || 0;
+          if (current > previous) {
+            alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'GRENADE KILL' };
+            triggered = true;
+            break outer3;
+          }
+        }
+      }
+    }
+
+    // Vehicle kills
+    if (!triggered) {
+      outer4: for (let ti = matchData.teams.length - 1; ti >= 0; ti--) {
+        const team = matchData.teams[ti];
+        for (let pi = team.players.length - 1; pi >= 0; pi--) {
+          const player = team.players[pi];
+          const current = player.killNumInVehicle || 0;
+          const previous = prevVehicleKillsMap.current[player.playerName] || 0;
+          if (current > previous) {
+            alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'VEHICLE KILL' };
+            triggered = true;
+            break outer4;
+          }
+        }
+      }
+    }
+
+    // 500+ damage
+    if (!triggered) {
+      outer5: for (let ti = matchData.teams.length - 1; ti >= 0; ti--) {
+        const team = matchData.teams[ti];
+        for (let pi = team.players.length - 1; pi >= 0; pi--) {
+          const player = team.players[pi];
+          const current = player.damage || 0;
+          const previous = prevDamageMap.current[player.playerName] || 0;
+          if (current >= 500 && previous < 500 && !damageMilestoneTriggered.current[player.playerName]) {
+            alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: '500+ DAMAGE' };
+            triggered = true;
+            damageMilestoneTriggered.current[player.playerName] = true;
+            break outer5;
+          }
+        }
+      }
+    }
+
+    // Airdrop loot
+    if (!triggered) {
+      outer6: for (let ti = matchData.teams.length - 1; ti >= 0; ti--) {
+        const team = matchData.teams[ti];
+        for (let pi = team.players.length - 1; pi >= 0; pi--) {
+          const player = team.players[pi];
+          const current = player.gotAirDropNum || 0;
+          const previous = prevAirDropMap.current[player.playerName] || 0;
+          if (current > previous) {
+            alertData = { ...player, teamTag: team.teamTag, teamLogo: team.teamLogo, milestone: 'AIRDROP LOOTED' };
+            triggered = true;
+            break outer6;
+          }
+        }
+      }
+    }
+
+    // Update all trackers
+    matchData.teams.forEach(team => {
+      team.players.forEach(player => {
+        prevKillsMap.current[player.playerName] = player.killNum || 0;
+        prevGrenadeKillsMap.current[player.playerName] = player.killNumByGrenade || 0;
+        prevVehicleKillsMap.current[player.playerName] = player.killNumInVehicle || 0;
+        prevDamageMap.current[player.playerName] = player.damage || 0;
+        prevAirDropMap.current[player.playerName] = player.gotAirDropNum || 0;
+      });
+    });
+
+    if (triggered && alertData) {
+      showAlert(alertData);
+    }
+  }, [matchData, showAlert]);
+
+  if (!matchData) return null;
   if (!displayedPlayer) return null;
 
   return (

@@ -175,52 +175,71 @@ return (
             </span>
 
             {/* Player health bars */}
-            {team.players.slice(0, 4).map((player, i) => {
-              const barX = 230 + i * (BAR_W + 6);
-              const barY = 15;
+         {team.players.slice(0, 4).map((player, i) => {
+  const barX = 230 + i * (BAR_W + 6);
+  const barY = 15;
 
-              const isDead = player.liveState === 5 || player.bHasDied;
-              const isKnocked = player.liveState === 4;
-              const useApi = round?.apiEnable;
+  const isDead = player.liveState === 5 || player.bHasDied;
+  const isAlive = [0, 1, 2, 3].includes(player.liveState);
+  const isKnocked = player.liveState === 4;
+  const useApiHealth = round?.apiEnable === true;
 
-              let height = BAR_MAX;
-              let color = "#fff";
+  let height = 0;
+  let color = "transparent";
 
-              if (useApi) {
-                const ratio = Math.max(0, Math.min(1, player.health / (player.healthMax || 100)));
-                height = ratio * BAR_MAX;
-                color = isDead ? "#6b7280" : isKnocked ? "#ef4444" : "#fff";
-              } else {
-                color = isDead ? "#6b7280" : isKnocked ? "#ef4444" : "#fff";
-              }
+  if (useApiHealth) {
+    if (isDead) {
+      height = 0;
+      color = "transparent";
+    } else if (isKnocked) {
+      const healthRatio = Math.max(0, Math.min(1, player.health / (player.healthMax || 100)));
+      height = healthRatio * BAR_MAX;
+      color = "#ef4444"; // red — same as LiveStats
+    } else if (isAlive) {
+      const healthRatio = Math.max(0, Math.min(1, player.health / (player.healthMax || 100)));
+      height = healthRatio * BAR_MAX;
+      color = "#07e63f"; // green — same as LiveStats
+    }
+  } else {
+    if (isDead) {
+      height = 0;
+      color = "transparent";
+    } else if (isKnocked) {
+      height = BAR_MAX;
+      color = "#ef4444";
+    } else if (isAlive) {
+      height = BAR_MAX;
+      color = "#07e63f";
+    }
+  }
 
-              return (
-                <div key={player._id}>
-                  {/* Background bar */}
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: barX,
-                      top: barY,
-                      width: BAR_W,
-                      height: BAR_MAX,
-                      backgroundColor: "#4b5563",
-                    }}
-                  />
-                  {/* Foreground health bar */}
-                  <div
-                    style={{
-                      position: "absolute",
-                      left: barX,
-                      top: barY + (BAR_MAX - height),
-                      width: BAR_W,
-                      height: height,
-                      backgroundColor: color,
-                    }}
-                  />
-                </div>
-              );
-            })}
+  return (
+    <div key={player._id}>
+      {/* Background bar */}
+      <div
+        style={{
+          position: "absolute",
+          left: barX,
+          top: barY,
+          width: BAR_W,
+          height: BAR_MAX,
+          backgroundColor: "#4b5563",
+        }}
+      />
+      {/* Foreground health bar */}
+      <div
+        style={{
+          position: "absolute",
+          left: barX,
+          top: barY + (BAR_MAX - height),
+          width: BAR_W,
+          height: height,
+          backgroundColor: color,
+        }}
+      />
+    </div>
+  );
+})}
 
             {/* WWCD bar */}
             <div

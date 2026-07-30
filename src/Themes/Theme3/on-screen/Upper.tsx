@@ -175,7 +175,7 @@ return (
             </span>
 
             {/* Player health bars */}
-         {team.players.slice(0, 4).map((player, i) => {
+             {team.players.slice(0, 4).map((player, i) => {
   const barX = 230 + i * (BAR_W + 6);
   const barY = 15;
 

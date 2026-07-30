@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
+import { decode } from '@msgpack/msgpack';
 import api from '../login/api.tsx';
 import SocketManager from '../dashboard/socketManager.tsx';
 
@@ -234,6 +235,24 @@ const PublicThemeRenderer: React.FC = () => {
     return response;
   };
 
+  // The bulk endpoint now responds with a MessagePack-encoded body
+  // (backend: msgpackCacheMiddleware in middleware/cache.js), so it needs
+  // its own fetch that asks axios for a raw arraybuffer and decodes it,
+  // rather than letting axios auto-parse as JSON. Caches the decoded plain
+  // object, same as cachedGet does for its response, so repeated calls
+  // within ttlMs don't re-decode.
+  const cachedGetMsgpack = async (url: string, signal: AbortSignal, ttlMs = 5000) => {
+    const cache = cacheRef.current;
+    const hit = cache.get(url);
+    if (hit && Date.now() - hit.time < ttlMs) {
+      return hit.data;
+    }
+    const response = await api.get(url, { signal, responseType: 'arraybuffer' });
+    const data = decode(new Uint8Array(response.data)) as any;
+    cache.set(url, { data, time: Date.now() });
+    return data;
+  };
+
   const { tournamentId, roundId, matchId } = useParams<{
     tournamentId: string;
     roundId: string;
@@ -379,12 +398,11 @@ const PublicThemeRenderer: React.FC = () => {
         if (followSelected) params.set('followSelected', 'true');
         const query = `?${params.toString()}`;
 
-        const bulkRes = await cachedGet(
+        const bulk = await cachedGetMsgpack(
           `public/bulk/${tournamentId}/${roundId}/${matchId}${query}`,
           controller.signal,
           LIVE_TTL
         );
-        const bulk = bulkRes.data;
 
         if (cancelled) return;
         applyBulkPayload(bulk);
@@ -416,7 +434,12 @@ const PublicThemeRenderer: React.FC = () => {
 
     socket.emit('joinBulkRoom', { tournamentId, roundId });
 
-    const handleBulkUpdate = (bulk: any) => {
+    // The server now emits 'bulkUpdate' as a MessagePack-encoded binary
+    // payload (backend: encodeMsgpack in comsock.js) rather than a plain
+    // object — socket.io-client hands it back as an ArrayBuffer/Uint8Array
+    // in the browser, so decode it before touching any field on it.
+    const handleBulkUpdate = (raw: ArrayBuffer | Uint8Array) => {
+      const bulk = decode(new Uint8Array(raw as ArrayBuffer)) as any;
       setTournament(bulk.tournamentData);
       setRound(bulk.roundData);
 
@@ -433,9 +456,22 @@ const PublicThemeRenderer: React.FC = () => {
       overallDataRef.current = mergedOverallData;
       setOverallData(mergedOverallData);
 
-      setMatchDatas(
-        (bulk.matchDatasData ?? []).map((e: any) => e.matchData).filter(Boolean)
-      );
+      // Live ticks only ever carry a full matchDatasData list on rare
+      // includeAll-style pushes; the common case is a single-entry
+      // incremental update for just the match that changed (backend:
+      // Bulkpublic.controller.js). Merge by matchId instead of replacing
+      // the array outright — an empty/partial push means "no new
+      // information for the rest," not "clear everything" (that used to
+      // wipe Schedule/HighlightSchedule/OverAllData's WWCD data on every
+      // unrelated live tick).
+      const incomingMatchDatas = (bulk.matchDatasData ?? []).filter((e: any) => e?.matchData);
+      if (incomingMatchDatas.length > 0) {
+        setMatchDatas(prev => {
+          const map = new Map(prev.map((m: any) => [String(m.matchId ?? m._id), m]));
+          incomingMatchDatas.forEach((e: any) => map.set(String(e.matchId), e.matchData));
+          return Array.from(map.values());
+        });
+      }
 
       const pushedMatchId = bulk.matchesData?.effectiveMatchId || bulk.matchesData?.current?._id;
       const isOurMatch = followSelected || !pushedMatchId || pushedMatchId === matchId;

@@ -560,37 +560,49 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
   // silently truncating to 100 anyway. This initial load only seeds the
   // "no search yet" view of the grid; searching (below) re-queries the
   // server so results aren't limited to this initial page.
-  const loadInitialData = useCallback(async (signal: AbortSignal, forceRefresh = false) => {
-    if (!forceRefresh) {
-      const cachedGroups = sessionStorage.getItem(GROUPS_CACHE_KEY);
-      const cachedTeams = sessionStorage.getItem(TEAMS_CACHE_KEY);
-      if (cachedGroups) { try { setGroups(JSON.parse(cachedGroups)); } catch {} }
-      if (cachedTeams) { try { setTeams(JSON.parse(cachedTeams)); } catch {} }
+const loadInitialData = useCallback(async (signal: AbortSignal, forceRefresh = false) => {
+  if (!forceRefresh) {
+    const cachedGroups = sessionStorage.getItem(GROUPS_CACHE_KEY);
+    const cachedTeams = sessionStorage.getItem(TEAMS_CACHE_KEY);
+    if (cachedGroups) {
+      try {
+        const parsed = JSON.parse(cachedGroups);
+        if (Array.isArray(parsed)) setGroups(parsed);
+        else sessionStorage.removeItem(GROUPS_CACHE_KEY); // drop bad cache
+      } catch { sessionStorage.removeItem(GROUPS_CACHE_KEY); }
     }
-    try {
-      const [groupsRes, teamsRes] = await Promise.all([
-        api.get(`/tournaments/${tournamentId}/groups`, { signal }),
-        api.get("/teams", { signal, params: { limit: 100 } }),
-      ]);
-
-      setGroups(groupsRes.data);
-      sessionStorage.setItem(GROUPS_CACHE_KEY, JSON.stringify(groupsRes.data));
-
-      const teamList = (teamsRes.data.teams || []).map((team: any) => ({
-        _id: team._id,
-        teamFullName: team.teamFullName,
-        teamTag: team.teamTag,
-        logo: team.logo,
-      }));
-      setTeams(teamList);
-      sessionStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify(teamList));
-    } catch (err: any) {
-      if (isCanceled(err)) return;
-      console.error("Failed to load groups/teams:", err);
-      if (err.response?.status === 401) alert("Unauthorized. Please login.");
+    if (cachedTeams) {
+      try {
+        const parsed = JSON.parse(cachedTeams);
+        if (Array.isArray(parsed)) setTeams(parsed);
+        else sessionStorage.removeItem(TEAMS_CACHE_KEY);
+      } catch { sessionStorage.removeItem(TEAMS_CACHE_KEY); }
     }
-  }, [tournamentId, GROUPS_CACHE_KEY]);
+  }
+  try {
+    const [groupsRes, teamsRes] = await Promise.all([
+      api.get(`/tournaments/${tournamentId}/groups`, { signal }),
+      api.get("/teams", { signal, params: { limit: 100 } }),
+    ]);
 
+    const groupsData = Array.isArray(groupsRes.data) ? groupsRes.data : [];
+    setGroups(groupsData);
+    sessionStorage.setItem(GROUPS_CACHE_KEY, JSON.stringify(groupsData));
+
+    const teamList = (teamsRes.data.teams || []).map((team: any) => ({
+      _id: team._id,
+      teamFullName: team.teamFullName,
+      teamTag: team.teamTag,
+      logo: team.logo,
+    }));
+    setTeams(teamList);
+    sessionStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify(teamList));
+  } catch (err: any) {
+    if (isCanceled(err)) return;
+    console.error("Failed to load groups/teams:", err);
+    if (err.response?.status === 401) alert("Unauthorized. Please login.");
+  }
+}, [tournamentId, GROUPS_CACHE_KEY]);
   useEffect(() => {
     const controller = new AbortController();
     loadInitialData(controller.signal);

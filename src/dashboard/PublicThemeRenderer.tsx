@@ -440,21 +440,32 @@ const PublicThemeRenderer: React.FC = () => {
     // in the browser, so decode it before touching any field on it.
     const handleBulkUpdate = (raw: ArrayBuffer | Uint8Array) => {
       const bulk = decode(new Uint8Array(raw as ArrayBuffer)) as any;
-      setTournament(bulk.tournamentData);
-      setRound(bulk.roundData);
+
+      // The fast, in-memory live-tick emit (pubgApiMatchData.controller.js)
+      // reuses this same event/shape but only carries
+      // matchesData.effectiveMatchId + currentMatchData — every other field
+      // below is deliberately absent (not null) so it can be told apart
+      // from a real/DB-confirmed payload and left alone rather than wiping
+      // already-loaded state until the follow-up full bulkUpdate lands.
+      if (bulk.tournamentData) setTournament(bulk.tournamentData);
+      if (bulk.roundData) setRound(bulk.roundData);
 
       // matchesData.listUnchanged (backend: Bulkpublic.controller.js) means
       // the match list is identical to what was last sent for this round —
       // list comes back empty in that case, so keep what we already have
-      // instead of replacing it with nothing.
-      if (!bulk.matchesData?.listUnchanged) {
-        matchesRef.current = bulk.matchesData?.list ?? [];
+      // instead of replacing it with nothing. A fast partial payload omits
+      // `list` entirely (as opposed to sending it as `[]`), so only touch
+      // the list when the key was actually included.
+      if (bulk.matchesData?.list !== undefined && !bulk.matchesData?.listUnchanged) {
+        matchesRef.current = bulk.matchesData.list ?? [];
         setMatches(matchesRef.current);
       }
 
-      const mergedOverallData = mergeOverallTeams(overallDataRef.current, bulk.overallData ?? null);
-      overallDataRef.current = mergedOverallData;
-      setOverallData(mergedOverallData);
+      if (bulk.overallData !== undefined) {
+        const mergedOverallData = mergeOverallTeams(overallDataRef.current, bulk.overallData ?? null);
+        overallDataRef.current = mergedOverallData;
+        setOverallData(mergedOverallData);
+      }
 
       // Live ticks only ever carry a full matchDatasData list on rare
       // includeAll-style pushes; the common case is a single-entry
@@ -477,7 +488,7 @@ const PublicThemeRenderer: React.FC = () => {
       const isOurMatch = followSelected || !pushedMatchId || pushedMatchId === matchId;
 
       if (isOurMatch) {
-        setMatch(bulk.matchesData?.current ?? null);
+        if (bulk.matchesData?.current) setMatch(bulk.matchesData.current);
         const incomingMatchData = bulk.currentMatchData?.matchData ?? null;
         const mergedMatchData = mergeMatchDataTeams(matchDataRef.current, incomingMatchData);
         matchDataRef.current = mergedMatchData;

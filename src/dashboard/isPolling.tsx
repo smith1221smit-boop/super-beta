@@ -198,9 +198,9 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
 
   // Also reset the moment the socket actually drops. Without this, the
   // seconds-ago counter would otherwise keep counting up from the last real
-  // bulkUpdate even while the wire is down — a "fake" live indicator. Once
-  // reconnected, it should read "waiting for data" again until a fresh
-  // bulkUpdate is confirmed, not resume counting from stale data.
+  // liveMatchUpdate even while the wire is down — a "fake" live indicator.
+  // Once reconnected, it should read "waiting for data" again until a fresh
+  // liveMatchUpdate is confirmed, not resume counting from stale data.
   useEffect(() => {
     if (socketStatus !== "connected") {
       setLastDataAt(null);
@@ -209,9 +209,9 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
   }, [socketStatus]);
 
   // --- Live data confirmation ---
-  // Joins the same bulk room PublicThemeRenderer uses and listens for the
-  // actual 'bulkUpdate' event. Every time one arrives while polling is on,
-  // this flashes the indicator and updates "last data Xs ago" — a real
+  // Joins the same round room PublicThemeRenderer uses and listens for the
+  // actual 'liveMatchUpdate' event. Every time one arrives while polling is
+  // on, this flashes the indicator and updates "last data Xs ago" — a real
   // confirmation that match data is flowing, not just that the toggle is
   // switched on.
   //
@@ -219,26 +219,26 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
   // membership lives server-side and is dropped whenever the socket
   // disconnects, so simply reconnecting the transport does NOT re-join the
   // room by itself — without this dependency, a drop+reconnect would go
-  // quiet on bulkUpdate forever even though the wire looks healthy again.
+  // quiet on liveMatchUpdate forever even though the wire looks healthy again.
   useEffect(() => {
     if (!activeTournamentId || !activeRoundId || !buttonState || socketStatus !== "connected") return;
 
     const socketManager = SocketManager.getInstance();
     const socket = socketManager.connect();
-    socket.emit("joinBulkRoom", { tournamentId: activeTournamentId, roundId: activeRoundId });
+    socket.emit("joinRoundRoom", { tournamentId: activeTournamentId, roundId: activeRoundId });
 
-    const handleBulkUpdate = () => {
+    const handleLiveMatchUpdate = () => {
       setLastDataAt(Date.now());
       setPulsing(true);
       if (pulseTimeoutRef.current) clearTimeout(pulseTimeoutRef.current);
       pulseTimeoutRef.current = window.setTimeout(() => setPulsing(false), 900);
     };
 
-    socket.on("bulkUpdate", handleBulkUpdate);
+    socket.on("liveMatchUpdate", handleLiveMatchUpdate);
 
     return () => {
-      socket.off("bulkUpdate", handleBulkUpdate);
-      socket.emit("leaveBulkRoom", { tournamentId: activeTournamentId, roundId: activeRoundId });
+      socket.off("liveMatchUpdate", handleLiveMatchUpdate);
+      socket.emit("leaveRoundRoom", { tournamentId: activeTournamentId, roundId: activeRoundId });
       if (pulseTimeoutRef.current) clearTimeout(pulseTimeoutRef.current);
     };
   }, [activeTournamentId, activeRoundId, buttonState, socketStatus]);
@@ -299,7 +299,7 @@ const PollingManager: React.FC<PollingManagerProps> = ({ tournamentId, roundId, 
   //   - CONNECTING: never connected yet (cold start / first load)
   //   - DISCONNECTED: was connected, dropped — socket.io is retrying
   //   - PAUSED: connected, but polling toggled off
-  //   - LIVE (waiting): connected + polling on, no bulkUpdate confirmed yet
+  //   - LIVE (waiting): connected + polling on, no liveMatchUpdate confirmed yet
   //   - LIVE (Xs ago): connected + polling on + data confirmed flowing
   const statusLabel =
     socketStatus === "connecting"

@@ -130,11 +130,6 @@ interface MatchData {
   userId: string;
   teams: any[];
   deadTeamList?: DeadTeamListEntry[];
-  // Set by the backend's live-tick path (applyLiveTeamDiff in
-  // Bulkpublic.controller.js) when `teams` contains only the team(s) that
-  // changed since the last push, not the full roster — see
-  // mergeMatchDataTeams below.
-  isPartialTeams?: boolean;
 }
 
 interface OverallData {
@@ -143,11 +138,6 @@ interface OverallData {
   userId: string;
   teams: any[];
   createdAt: string;
-  // Set by the backend's live-tick path (applyLiveOverallDiff in
-  // Bulkpublic.controller.js) when `teams` contains only the team(s) whose
-  // cumulative stats changed since the last push, not the full round
-  // standings — see mergeOverallTeams below.
-  isPartialTeams?: boolean;
 }
 
 interface BackpackInfo {
@@ -161,15 +151,16 @@ interface BackpackInfo {
   };
 }
 
-// Shape of each entry the backend's updateDeadTeamList() computes and
-// attaches at matchData.deadTeamList — see Bulkpublic.controller.js.
+// Shape of each entry in the client-side-computed elimination list — see
+// isTeamAllDead/computeDeadTeamList below. No longer sourced from the
+// backend's matchData.deadTeamList field.
 interface DeadTeamListEntry {
   teamId: string;
   teamTag: string;
   teamName: string;
   teamLogo: string;
   placePoints: number;
-  rank: number;
+  rank: number | null;
   totalKills: number;
   deadAt: string;
 }
@@ -218,11 +209,119 @@ const sortDeadTeamList = (list?: DeadTeamListEntry[] | null): DeadTeamListEntry[
   });
 };
 
+// ============================================================================
+// Client-side team-elimination detection
+// ============================================================================
+// A team only counts as eliminated once its FULL 4-player roster is present
+// AND every player who actually appeared in the live feed has either
+// liveState === 5 or bHasDied === true — a short/partial player list (a
+// player's data not having arrived yet this tick) must never be mistaken
+// for a wipe.
+//
+// didNotPlay players (backend: pubgApiMatchData.controller.js pads a
+// team's roster with registered-but-never-observed players at 0 stats so
+// the team never displays short a player) are excluded from the "every"
+// check — they sit at liveState 0 forever since they never actually
+// played, so counting them would mean a team with even one bench player
+// could never be flagged eliminated. `played.length > 0` guards the
+// pathological case of an all-bench "team" (nobody ever actually played)
+// — there's no evidence anyone died, so it's never eliminated.
+const isTeamAllDead = (team: any): boolean => {
+  if (!Array.isArray(team.players) || team.players.length !== 4) return false;
+
+  const played = team.players.filter((p: any) => !p.didNotPlay);
+
+  return (
+    played.length > 0 &&
+    played.every(
+      (p: any) => p.liveState === 5 || p.bHasDied === true
+    )
+  );
+};
+
+interface DeadTeamSnapshot {
+  teamId: any;
+  teamTag: string;
+  teamName: string;
+  teamLogo: string;
+  placePoints: number;
+  rank: number | null;
+  totalKills: number;
+  deadAt: number; // epoch ms
+}
+
+// Persists across ticks (held in a ref) so a team's elimination
+// timestamp/locked stats are stamped ONCE, the first tick it's confirmed
+// dead — not recomputed (and drifting) on every subsequent tick, matching
+// what unsortteams.ts expects ("locked" points that stop changing after
+// death). Scoped per-match: `matchId` mismatch wipes the tracker so a
+// match switch (followSelected) never carries over a previous match's
+// dead teams.
+interface DeathTracker {
+  matchId: string | null;
+  dead: Map<string, DeadTeamSnapshot>;
+}
+
+const computeDeadTeamList = (
+  matchId: string | null | undefined,
+  teams: any[] | undefined,
+  trackerRef: React.MutableRefObject<DeathTracker>
+): DeadTeamListEntry[] => {
+  if (trackerRef.current.matchId !== (matchId ?? null)) {
+    trackerRef.current = { matchId: matchId ?? null, dead: new Map() };
+  }
+  const { dead } = trackerRef.current;
+
+  if (Array.isArray(teams)) {
+    for (const team of teams) {
+      const teamKey = String(team.teamId ?? team._id ?? '');
+      if (!teamKey || dead.has(teamKey)) continue;
+      if (isTeamAllDead(team)) {
+        const totalKills = (team.players || []).reduce((sum: number, p: any) => sum + (p.killNum || 0), 0);
+        dead.set(teamKey, {
+          teamId: team.teamId ?? team._id,
+          teamTag: team.teamTag,
+          teamName: team.teamName,
+          teamLogo: team.teamLogo,
+          placePoints: team.placePoints,
+          rank: team.rank ?? null,
+          totalKills,
+          deadAt: Date.now(),
+        });
+      }
+    }
+  }
+
+  return Array.from(dead.values()).map((snap) => ({
+    ...snap,
+    deadAt: new Date(snap.deadAt).toISOString(),
+  }));
+};
+
 const PublicThemeRenderer: React.FC = () => {
   // Module-level cache shared across all mounts of this component in the
   // current tab session — survives view switches and re-mounts, cleared
   // only on a hard page reload.
   const cacheRef = useRef<Map<string, any>>((PublicThemeRenderer as any)._cache ||= new Map());
+
+  // Backs computeDeadTeamList — see its comment above.
+  const deathTrackerRef = useRef<DeathTracker>({ matchId: null, dead: new Map() });
+
+  // computeDeadTeamList's backing Map only ever grows (an entry, once
+  // recorded, is never re-mutated — see its comment above), so the dead
+  // team list only actually CHANGES when its length changes. Tracking that
+  // lets the socket handler below skip sortDeadTeamList's copy+sort and the
+  // setDeadTeamList render on the vast majority of ticks where no team
+  // newly died.
+  const lastDeadTeamListLengthRef = useRef<number>(0);
+
+  // Mirrors the latest matchData outside of React's state so a burst of
+  // several chunk-carrying liveMatchUpdate pushes (see below) can merge each
+  // one against the truly-latest teams array, not a stale snapshot from
+  // before an earlier chunk in the same burst was applied — setState's
+  // result isn't readable synchronously, but this ref is.
+  const matchDataRef = useRef<MatchData | null>(null);
+
 
   const cachedGet = async (url: string, signal: AbortSignal, ttlMs = 5000) => {
     const cache = cacheRef.current;
@@ -281,80 +380,26 @@ const PublicThemeRenderer: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Mirrors `matchData` state so the socket listener below (registered once
-  // per [tournamentId, roundId], not re-registered on every matchData
-  // change) can merge against the LATEST value instead of a stale closure.
-  const matchDataRef = useRef<MatchData | null>(null);
-  useEffect(() => {
-    matchDataRef.current = matchData;
-  }, [matchData]);
-
-  // Same mirroring for overallData (round-wide standings) and matches (the
-  // round's match list), so the socket listener below can merge/preserve
-  // against the latest value rather than a stale closure.
-  const overallDataRef = useRef<OverallData | null>(null);
-  useEffect(() => {
-    overallDataRef.current = overallData;
-  }, [overallData]);
-
-  const matchesRef = useRef<Match[]>([]);
-  useEffect(() => {
-    matchesRef.current = matches;
-  }, [matches]);
-
-  // The live-tick socket path now sends only the team(s) that actually
-  // changed since the last push for this match (backend: applyLiveTeamDiff
-  // in Bulkpublic.controller.js), flagged via `isPartialTeams`. Merge those
-  // into the previously-known full matchData instead of replacing it
-  // outright — everything downstream (this component's own state, and the
-  // props it hands to LiveStats/Alerts/Dom) keeps seeing a complete object
-  // either way. A payload without the flag (initial load, manual refresh,
-  // or a backend that predates this change) is always a full snapshot and
-  // is used as-is — this is the safe default for every non-live-tick path.
-  const mergeMatchDataTeams = (prev: MatchData | null, incoming: any): MatchData | null => {
-    if (!incoming) return null;
-    if (!incoming.isPartialTeams || !prev || String((prev as any)._id) !== String(incoming._id)) {
-      return incoming;
-    }
-    const teamMap = new Map(
-      (prev.teams || []).map((t: any) => [String(t.teamId ?? t._id), t])
-    );
-    (incoming.teams || []).forEach((t: any) => {
-      teamMap.set(String(t.teamId ?? t._id), t);
-    });
-    return { ...incoming, teams: Array.from(teamMap.values()) };
-  };
-
-  // Same idea as mergeMatchDataTeams, but for the round-wide cumulative
-  // standings (backend: applyLiveOverallDiff). A partial push only carries
-  // the team(s) whose totals actually changed since the last push for this
-  // round; merge those into the previously-known full standings instead of
-  // replacing them outright.
-  const mergeOverallTeams = (prev: OverallData | null, incoming: any): OverallData | null => {
-    if (!incoming) return null;
-    if (
-      !incoming.isPartialTeams ||
-      !prev ||
-      String(prev.roundId) !== String(incoming.roundId)
-    ) {
-      return incoming;
-    }
-    const teamMap = new Map(
-      (prev.teams || []).map((t: any) => [String(t.teamId ?? t._id), t])
-    );
-    (incoming.teams || []).forEach((t: any) => {
-      teamMap.set(String(t.teamId ?? t._id), t);
-    });
-    return { ...incoming, teams: Array.from(teamMap.values()) };
-  };
-
   const applyBulkPayload = (bulk: any) => {
     setTournament(bulk.tournamentData);
     setRound(bulk.roundData);
     setMatch(bulk.matchesData?.current ?? null);
     setMatches(bulk.matchesData?.list ?? []);
-    setMatchData(bulk.currentMatchData?.matchData ?? null);
-    setDeadTeamList(sortDeadTeamList(bulk.currentMatchData?.matchData?.deadTeamList));
+
+    const initialMatchData = bulk.currentMatchData?.matchData ?? null;
+    // Computed client-side, not read off bulk.currentMatchData.matchData's
+    // own deadTeamList field — see isTeamAllDead/computeDeadTeamList above.
+    const computedDeadTeamList = computeDeadTeamList(
+      initialMatchData?.matchId,
+      initialMatchData?.teams,
+      deathTrackerRef
+    );
+    const fullMatchData = initialMatchData ? { ...initialMatchData, deadTeamList: computedDeadTeamList } : null;
+    matchDataRef.current = fullMatchData;
+    setMatchData(fullMatchData);
+    lastDeadTeamListLengthRef.current = computedDeadTeamList.length;
+    setDeadTeamList(sortDeadTeamList(computedDeadTeamList));
+
     setOverallData(bulk.overallData ?? null);
     setMatchDatas(
       (bulk.matchDatasData ?? [])
@@ -432,97 +477,125 @@ const PublicThemeRenderer: React.FC = () => {
     const socketManager = SocketManager.getInstance();
     const socket = socketManager.connect();
 
-    socket.emit('joinBulkRoom', { tournamentId, roundId });
+    // Room is scoped per ROUND (not per match) — backend:
+    // pubgApiMatchData.controller.js pushes whichever match is currently
+    // selected for this round into `round:${tournamentId}:${roundId}`, so a
+    // followSelected overlay keeps receiving updates across a match switch
+    // without needing to rejoin anything.
+    socket.emit('joinRoundRoom', { tournamentId, roundId });
 
-    // The server now emits 'bulkUpdate' as a MessagePack-encoded binary
-    // payload (backend: encodeMsgpack in comsock.js) rather than a plain
-    // object — socket.io-client hands it back as an ArrayBuffer/Uint8Array
-    // in the browser, so decode it before touching any field on it.
-    const handleBulkUpdate = (raw: ArrayBuffer | Uint8Array) => {
-      const bulk = decode(new Uint8Array(raw as ArrayBuffer)) as any;
-
-      // The fast, in-memory live-tick emit (pubgApiMatchData.controller.js)
-      // reuses this same event/shape but only carries
-      // matchesData.effectiveMatchId + currentMatchData — every other field
-      // below is deliberately absent (not null) so it can be told apart
-      // from a real/DB-confirmed payload and left alone rather than wiping
-      // already-loaded state until the follow-up full bulkUpdate lands.
-      if (bulk.tournamentData) setTournament(bulk.tournamentData);
-      if (bulk.roundData) setRound(bulk.roundData);
-
-      // matchesData.listUnchanged (backend: Bulkpublic.controller.js) means
-      // the match list is identical to what was last sent for this round —
-      // list comes back empty in that case, so keep what we already have
-      // instead of replacing it with nothing. A fast partial payload omits
-      // `list` entirely (as opposed to sending it as `[]`), so only touch
-      // the list when the key was actually included.
-      if (bulk.matchesData?.list !== undefined && !bulk.matchesData?.listUnchanged) {
-        matchesRef.current = bulk.matchesData.list ?? [];
-        setMatches(matchesRef.current);
+    // The server emits 'liveMatchUpdate'/'overallDataUpdate' into THIS room
+    // as MessagePack-encoded binary payloads (backend: encodeMsgpack in
+    // pubgApiMatchData.controller.js/overall.controller.js) — socket.io-
+    // client hands them back as an ArrayBuffer/Uint8Array, so decode before
+    // touching any field. Both are always FULL objects, never a diff — a
+    // missed tick is simply caught up by the next one.
+    //
+    // BUT: this same socket can ALSO be a member of a `user:${userId}`
+    // room at the same time — the backend auto-joins any socket carrying a
+    // valid session cookie into that room regardless of whether it's the
+    // dashboard or this public overlay (e.g. viewing the overlay in the
+    // same logged-in browser). Several PLAIN-JSON emits reuse these exact
+    // event names for that room (matchData.controller.js's
+    // emitOverallUpdateAsync, pubgApiMatchData.controller.js's dashboard
+    // liveMatchUpdate emit), so a plain object can legitimately arrive
+    // here too. Decode defensively instead of assuming binary — mirrors
+    // decodeTotalPlayerListPayload's same pass-through-if-not-binary
+    // pattern on the backend.
+    const decodeIncoming = (raw: unknown): any => {
+      if (raw instanceof ArrayBuffer || raw instanceof Uint8Array) {
+        return decode(new Uint8Array(raw as ArrayBuffer));
       }
-
-      if (bulk.overallData !== undefined) {
-        const mergedOverallData = mergeOverallTeams(overallDataRef.current, bulk.overallData ?? null);
-        overallDataRef.current = mergedOverallData;
-        setOverallData(mergedOverallData);
-      }
-
-      // Live ticks only ever carry a full matchDatasData list on rare
-      // includeAll-style pushes; the common case is a single-entry
-      // incremental update for just the match that changed (backend:
-      // Bulkpublic.controller.js). Merge by matchId instead of replacing
-      // the array outright — an empty/partial push means "no new
-      // information for the rest," not "clear everything" (that used to
-      // wipe Schedule/HighlightSchedule/OverAllData's WWCD data on every
-      // unrelated live tick).
-      const incomingMatchDatas = (bulk.matchDatasData ?? []).filter((e: any) => e?.matchData);
-      if (incomingMatchDatas.length > 0) {
-        setMatchDatas(prev => {
-          const map = new Map(prev.map((m: any) => [String(m.matchId ?? m._id), m]));
-          incomingMatchDatas.forEach((e: any) => map.set(String(e.matchId), e.matchData));
-          return Array.from(map.values());
-        });
-      }
-
-      const pushedMatchId = bulk.matchesData?.effectiveMatchId || bulk.matchesData?.current?._id;
-      const isOurMatch = followSelected || !pushedMatchId || pushedMatchId === matchId;
-
-      if (isOurMatch) {
-        if (bulk.matchesData?.current) setMatch(bulk.matchesData.current);
-        const incomingMatchData = bulk.currentMatchData?.matchData ?? null;
-        const mergedMatchData = mergeMatchDataTeams(matchDataRef.current, incomingMatchData);
-        matchDataRef.current = mergedMatchData;
-        setMatchData(mergedMatchData);
-        // deadTeamList is always computed server-side from the FULL team
-        // list before the live-tick trim happens, so it's complete on
-        // every push regardless of isPartialTeams — no merge needed here.
-        setDeadTeamList(sortDeadTeamList(incomingMatchData?.deadTeamList));
-        refreshBackpackInfo(bulk);
-
-        // Children still listen for the legacy 'liveMatchUpdate' socket
-        // event to detect eliminations. The backend now only emits
-        // 'bulkUpdate', so replay it locally to whatever listeners are
-        // already registered on this socket instance — replay the MERGED
-        // (complete) object, not the raw partial push, so a listener doing
-        // a full replace of its own (e.g. Dom.tsx's data.teams branch)
-        // never sees a truncated team list.
-        if (mergedMatchData) {
-          socket.listeners('liveMatchUpdate').forEach((listener: any) => {
-            try {
-              listener(mergedMatchData);
-            } catch (e) {
-              console.error('Error replaying liveMatchUpdate to listener', e);
-            }
-          });
-        }
-      }
+      return raw;
     };
 
-    socket.on('bulkUpdate', handleBulkUpdate);
+    // incoming.teams is only a SLICE of this match's teams now (backend:
+    // TEAMS_PER_LIVE_CHUNK) — merge by teamId into the latest known state
+    // instead of replacing it wholesale, so:
+    //   - a team not in THIS chunk keeps showing its last-known (still
+    //     correct, just not-yet-refreshed-this-tick) values rather than
+    //     being blanked out or reverted to something older/stale, and
+    //   - a team IS updated the instant its own chunk lands, instead of the
+    //     whole board waiting on the slowest chunk of the tick.
+    // Applied immediately, with no client-side throttling: the backend's
+    // own EVENT_DEBOUNCE_MS already guarantees at least ~150ms between
+    // actual ticks, so chunks arriving faster than that are always genuine,
+    // non-redundant pieces of the SAME tick — queuing/delaying them would
+    // only add latency for no coalescing benefit.
+    const processLiveMatchUpdate = (raw: ArrayBuffer | Uint8Array) => {
+      const incoming = decodeIncoming(raw);
+      if (!incoming) return;
+
+      // A followSelected overlay wants every push for this round (whichever
+      // match is currently selected); a fixed-match overlay only wants
+      // pushes for its own matchId.
+      const isOurMatch = followSelected || String(incoming.matchId) === String(matchId);
+      if (!isOurMatch) return;
+
+      const incomingTeams: any[] = Array.isArray(incoming.teams) ? incoming.teams : [];
+      const prevMatchData = matchDataRef.current;
+      const prevTeams: any[] =
+        prevMatchData && String(prevMatchData.matchId) === String(incoming.matchId)
+          ? prevMatchData.teams || []
+          : [];
+
+      const incomingById = new Map(incomingTeams.map((t) => [String(t.teamId ?? t._id), t]));
+      const mergedTeams = prevTeams.map((t) => {
+        const key = String(t.teamId ?? t._id);
+        return incomingById.has(key) ? incomingById.get(key) : t;
+      });
+      const knownIds = new Set(prevTeams.map((t) => String(t.teamId ?? t._id)));
+      for (const t of incomingTeams) {
+        const key = String(t.teamId ?? t._id);
+        if (!knownIds.has(key)) mergedTeams.push(t);
+      }
+
+      // Computed client-side, not read off incoming.deadTeamList — see
+      // isTeamAllDead/computeDeadTeamList above. Safe to call with just
+      // this chunk's teams: the backing Map only ever grows, and this
+      // always returns the full cumulative dead-list regardless of which
+      // teams were present in this particular call.
+      const computedDeadTeamList = computeDeadTeamList(incoming.matchId, incomingTeams, deathTrackerRef);
+
+      const nextMatchData = {
+        ...(prevMatchData || {}),
+        ...incoming,
+        teams: mergedTeams,
+        deadTeamList: computedDeadTeamList,
+      };
+      matchDataRef.current = nextMatchData;
+      setMatchData(nextMatchData);
+
+      // Skip the copy+sort and the extra render when no team newly died
+      // this tick (see lastDeadTeamListLengthRef above).
+      if (computedDeadTeamList.length !== lastDeadTeamListLengthRef.current) {
+        lastDeadTeamListLengthRef.current = computedDeadTeamList.length;
+        setDeadTeamList(sortDeadTeamList(computedDeadTeamList));
+      }
+
+      refreshBackpackInfo({
+        matchesData: { effectiveMatchId: incoming.matchId },
+        currentMatchData: { matchData: nextMatchData },
+      });
+    };
+
+    const handleLiveMatchUpdate = (raw: ArrayBuffer | Uint8Array) => {
+      processLiveMatchUpdate(raw);
+    };
+
+    const handleOverallDataUpdate = (raw: ArrayBuffer | Uint8Array) => {
+      const incoming = decodeIncoming(raw);
+      if (!incoming) return;
+      setOverallData(incoming);
+    };
+
+    socket.on('liveMatchUpdate', handleLiveMatchUpdate);
+    socket.on('overallDataUpdate', handleOverallDataUpdate);
 
     return () => {
-      socket.off('bulkUpdate', handleBulkUpdate);
-      socket.emit('leaveBulkRoom', { tournamentId, roundId });
+      socket.off('liveMatchUpdate', handleLiveMatchUpdate);
+      socket.off('overallDataUpdate', handleOverallDataUpdate);
+      socket.emit('leaveRoundRoom', { tournamentId, roundId });
       socketManager.disconnect();
     };
   }, [tournamentId, roundId]);

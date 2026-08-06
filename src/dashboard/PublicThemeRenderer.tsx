@@ -212,28 +212,19 @@ const sortDeadTeamList = (list?: DeadTeamListEntry[] | null): DeadTeamListEntry[
 // ============================================================================
 // Client-side team-elimination detection
 // ============================================================================
-// A team only counts as eliminated once its FULL 4-player roster is present
-// AND every player who actually appeared in the live feed has either
-// liveState === 5 or bHasDied === true — a short/partial player list (a
-// player's data not having arrived yet this tick) must never be mistaken
-// for a wipe.
-//
-// didNotPlay players (backend: pubgApiMatchData.controller.js pads a
-// team's roster with registered-but-never-observed players at 0 stats so
-// the team never displays short a player) are excluded from the "every"
-// check — they sit at liveState 0 forever since they never actually
-// played, so counting them would mean a team with even one bench player
-// could never be flagged eliminated. `played.length > 0` guards the
-// pathological case of an all-bench "team" (nobody ever actually played)
-// — there's no evidence anyone died, so it's never eliminated.
+// A team only counts as eliminated once every player actually reported live
+// this tick has either liveState === 5 or bHasDied === true — matchData no
+// longer pads teams with unobserved roster players, so `team.players` here
+// is exactly who the API reported. `length > 0` guards a team with no live
+// players yet (nothing to conclude from), and also means a short/partial
+// player list (a player's data not having arrived yet this tick) is never
+// mistaken for a wipe once that player's entry does arrive.
 const isTeamAllDead = (team: any): boolean => {
-  if (!Array.isArray(team.players) || team.players.length !== 4) return false;
-
-  const played = team.players.filter((p: any) => !p.didNotPlay);
+  if (!Array.isArray(team.players)) return false;
 
   return (
-    played.length > 0 &&
-    played.every(
+    team.players.length > 0 &&
+    team.players.every(
       (p: any) => p.liveState === 5 || p.bHasDied === true
     )
   );

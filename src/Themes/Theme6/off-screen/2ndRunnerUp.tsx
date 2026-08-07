@@ -227,7 +227,7 @@ const SecondRunnerUp: React.FC<ChampionsProps> = ({ tournament, round, matchData
        
        </div>
        <div className=''>
-   <div className='text-white text-[150px] font-[tungsten] absolute top-[780px] z-30 left-[800px] skew-x-[-6deg] rotate-[-2deg] opacity-100 '>
+   <div className='text-white text-[150px] font-[tungsten] absolute top-[780px] z-30 left-[700px] skew-x-[-6deg] rotate-[-2deg] opacity-100 '>
          {thirdPlace.teamName}
          </div>
          <div className='w-[300px] h-[300px] bg-[#000000ae] absolute top-[780px] z-40 left-[1640px] border-white border-[2px]'>

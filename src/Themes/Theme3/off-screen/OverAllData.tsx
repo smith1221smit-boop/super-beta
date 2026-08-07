@@ -90,11 +90,12 @@ interface AggregatedTeam {
   wwcd: number;
 }
 
+// Sort priority: TOTAL SCORE -> WWCD -> PLACE POINTS -> KILLS
 const sortByStandings = (a: AggregatedTeam, b: AggregatedTeam) => {
   if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+  if (b.wwcd !== a.wwcd) return b.wwcd - a.wwcd;
   if (b.totalPlacePoints !== a.totalPlacePoints) return b.totalPlacePoints - a.totalPlacePoints;
-  if (b.totalKills !== a.totalKills) return b.totalKills - a.totalKills;
-  return b.wwcd - a.wwcd;
+  return b.totalKills - a.totalKills;
 };
 
 /**
@@ -230,23 +231,23 @@ const OverAllData: React.FC<OverAllDataProps> = ({
     // there is genuinely nothing to diff against, so rankChange is null
     // rather than a misleading 0.
     if (overallData?.teams) {
-      const teams = overallData.teams.map((team) => {
+      const teams: (AggregatedTeam & { rankChange: number | null })[] = overallData.teams.map((team) => {
         const totalKills = team.players?.reduce((sum, p) => sum + (p.killNum || 0), 0) || 0;
+        const totalPlacePoints = team.placePoints || 0;
         return {
-          ...team,
+          teamId: team.teamId,
+          teamName: team.teamName,
+          teamTag: team.teamTag,
+          teamLogo: team.teamLogo,
           totalKills,
-          totalPlacePoints: team.placePoints || 0,
-          totalScore: totalKills + (team.placePoints || 0),
-          rankChange: null as number | null,
+          totalPlacePoints,
+          totalScore: totalKills + totalPlacePoints,
+          wwcd: team.wwcd || 0,
+          rankChange: null,
         };
       });
 
-      return teams.sort((a, b) => {
-        if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
-        if (b.totalPlacePoints !== a.totalPlacePoints) return b.totalPlacePoints - a.totalPlacePoints;
-        if (b.totalKills !== a.totalKills) return b.totalKills - a.totalKills;
-        return (b.wwcd || 0) - (a.wwcd || 0);
-      });
+      return teams.sort(sortByStandings);
     }
 
     return [];

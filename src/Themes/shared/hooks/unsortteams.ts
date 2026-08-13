@@ -89,8 +89,11 @@ export interface SortedTeam extends Team {
 //                locked values, not the still-ticking matchData ones).
 //                See thisMatchLiveContribution / thisMatchFinalContribution
 //                below. Used by LiveStats' "top team" hero panel.
-//  - 'liveUntilDead' → per-team hybrid: 'live' comparator while a team is
-//                still alive, 'overall' comparator once it's eliminated.
+//  - 'liveUntilDead' → always ranked by totalPoints (kills tiebreak).
+//                totalPoints itself only folds this match's points in once
+//                the team is confirmed dead (see priorBaseline below), so
+//                a still-alive team ranks on its prior cumulative total and
+//                doesn't jump around with in-match placePoints churn.
 //                Used by every theme's main LiveStats standings list.
 export function useSortedTeams(
   matchData: MatchData | null | undefined,
@@ -183,16 +186,14 @@ export function useSortedTeams(
     });
 
     if (sortBy === 'liveUntilDead') {
-      // Still fighting: ranked by THIS match's live points (placePoints,
-      // kills tiebreak) — same comparator as 'live' below. Eliminated:
-      // ranked by the real round-wide total (same totalPoints 'overall'
-      // exposes, which only folds this match in once deadTeamList
-      // confirms the team dead) — so a team's position locks into its
-      // actual tournament standing the moment it's out, instead of
-      // continuing to move with in-match placePoints churn.
+      // Always ranked by totalPoints, kills tiebreak. totalPoints only
+      // folds this match's points in once deadTeamList confirms the team
+      // dead, so a still-alive team ranks on its prior cumulative total
+      // and a team's position locks into its actual tournament standing
+      // the moment it's out, instead of moving with in-match placePoints
+      // churn while still fighting.
       return withDerived.sort((a, b) => {
-        const scoreOf = (t: typeof a) => t.isAllDead ? t.totalPoints : (t.placePoints ?? 0);
-        const diff = scoreOf(b) - scoreOf(a);
+        const diff = b.totalPoints - a.totalPoints;
         return diff !== 0 ? diff : b.totalKills - a.totalKills;
       });
     }

@@ -89,10 +89,13 @@ export interface SortedTeam extends Team {
 //                locked values, not the still-ticking matchData ones).
 //                See thisMatchLiveContribution / thisMatchFinalContribution
 //                below. Used by LiveStats' "top team" hero panel.
+//  - 'liveUntilDead' → per-team hybrid: 'live' comparator while a team is
+//                still alive, 'overall' comparator once it's eliminated.
+//                Used by every theme's main LiveStats standings list.
 export function useSortedTeams(
   matchData: MatchData | null | undefined,
   overallData?: OverallData | null,
-  sortBy: 'live' | 'overall' = 'live'
+  sortBy: 'live' | 'overall' | 'liveUntilDead' = 'live'
 ) {
   const overallMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -131,7 +134,10 @@ export function useSortedTeams(
       const teamDocKey = team._id?.toString();
       const lookupKey = teamIdKey ?? teamDocKey ?? '';
 
-      const totalKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
+      // Math.max(0, ...) guards against a raw negative killNum reaching the
+      // overlay (backend now clamps this at the source too, but this stays
+      // as cheap display-side insurance).
+      const totalKills = team.players.reduce((sum, p) => sum + Math.max(0, p.killNum || 0), 0);
       const aliveCount = team.players.filter(p => p.liveState !== 5 && !p.bHasDied).length;
 
       const deadEntry =
@@ -149,7 +155,12 @@ export function useSortedTeams(
           team.players.every(p => p.liveState === 5 || p.bHasDied);
 
       const hasOutsideBlueCircle = team.players.some(p => p.isOutsideBlueCircle === true);
-      const teamRank = team.players[0]?.rank || 0;
+      // Prefer deadTeamList's self-computed elimination-order rank (immune
+      // to PCOB's raw -1 "not placed yet" sentinel — same pattern already
+      // used for thisMatchFinalContribution above) and only fall back to
+      // the raw player field, sanitized, for a team not yet confirmed dead.
+      const rawRank = team.players[0]?.rank;
+      const teamRank = deadEntry?.rank ?? (typeof rawRank === 'number' && rawRank > 0 ? rawRank : 0);
 
       // What overallData currently attributes to THIS match, live, using
       // the same placePoints+kills formula the backend uses when it builds
@@ -170,6 +181,21 @@ export function useSortedTeams(
 
       return { ...team, totalKills, aliveCount, isAllDead, hasOutsideBlueCircle, teamRank, totalPoints };
     });
+
+    if (sortBy === 'liveUntilDead') {
+      // Still fighting: ranked by THIS match's live points (placePoints,
+      // kills tiebreak) — same comparator as 'live' below. Eliminated:
+      // ranked by the real round-wide total (same totalPoints 'overall'
+      // exposes, which only folds this match in once deadTeamList
+      // confirms the team dead) — so a team's position locks into its
+      // actual tournament standing the moment it's out, instead of
+      // continuing to move with in-match placePoints churn.
+      return withDerived.sort((a, b) => {
+        const scoreOf = (t: typeof a) => t.isAllDead ? t.totalPoints : (t.placePoints ?? 0);
+        const diff = scoreOf(b) - scoreOf(a);
+        return diff !== 0 ? diff : b.totalKills - a.totalKills;
+      });
+    }
 
     if (sortBy === 'overall') {
       return withDerived.sort((a, b) => b.totalPoints - a.totalPoints);

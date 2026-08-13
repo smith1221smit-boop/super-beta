@@ -1,10 +1,16 @@
-import React, { useMemo } from 'react';
+import React from 'react';
+import { useSortedTeams, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 // NOTE: SocketManager import removed, along with the localMatchData mirror
 // state, six manual socket event handlers, and the overallData socket
 // listener. PublicThemeRenderer owns the single socket connection, listens
 // to 'bulkUpdate', and passes freshly-merged `matchData` / `overallData`
 // down as props on every change — this component now reacts to those props
 // directly instead of maintaining its own copy.
+//
+// NOTE: Player / Team / MatchData are imported from useSortedTeams, NOT
+// redeclared here — two same-named-but-different-shaped interfaces are
+// unrelated types to TypeScript even with an identical name. See
+// Theme2/on-screen/LiveStats.tsx for the same pattern.
 
 interface Tournament {
   _id: string;
@@ -29,34 +35,6 @@ interface Match {
   _matchNo?: number;
 }
 
-interface Player {
-  _id: string;
-  playerName: string;
-  killNum: number;
-  bHasDied: boolean;
-  picUrl?: string;
-  
-  // Live stats fields
-  health: number;
-  healthMax: number;
-  liveState: number; // 0 = knocked, 5 = dead, etc.
-}
-
-interface Team {
-  _id: string;
-  teamId?: string;
-  teamTag: string;
-  slot?: number;
-  placePoints: number;
-  players: Player[];
-  teamLogo: string;
-}
-
-interface MatchData {
-  _id: string;
-  teams: Team[];
-}
-
 interface LiveStatsProps {
   tournament: Tournament;
   round?: Round | null;
@@ -71,53 +49,11 @@ const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchDa
   // PublicThemeRenderer's 'bulkUpdate' merge.
   const localMatchData = matchData || null;
 
-  const overallMap = useMemo(() => {
-    const map = new Map<string, any>();
-    if (overallData && Array.isArray(overallData.teams)) {
-      for (const t of overallData.teams) {
-        const key = t.teamId?.toString?.() || t.teamId;
-        if (!key) continue;
-        map.set(key, {
-          placePoints: t.placePoints || 0,
-          players: Array.isArray(t.players) ? t.players : [],
-        });
-      }
-    }
-    return map;
-  }, [overallData]);
-
-  // Sort teams by points first, then by kills - recalculated whenever
-  // matchData/overallMap change.
-  const sortedTeams = useMemo(() => {
-    if (!localMatchData) return [];
-
-    return localMatchData.teams
-      .map(team => {
-        const teamKey = (team as any).teamId?.toString?.() || (team as any).teamId || team._id;
-        const overall = overallMap.get(teamKey);
-        const liveKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
-        const overallKills = overall && Array.isArray(overall.players)
-          ? overall.players.reduce((s: number, p: any) => s + (p.killNum || 0), 0)
-          : 0;
-        const totalPoints = (overall?.placePoints || 0) + overallKills;
-        const isAllDead = team.players.every(player => player.liveState === 5 || player.bHasDied);
-
-        return {
-          ...team,
-          totalKills: liveKills,
-          alive: team.players.filter(p => p.liveState !== 5).length,
-          totalPoints,
-          isAllDead,
-        } as any;
-      })
-      .sort((a: any, b: any) => {
-        // Sort by total points first (descending), then by kills (descending)
-        if (b.totalPoints !== a.totalPoints) {
-          return b.totalPoints - a.totalPoints;
-        }
-        return b.totalKills - a.totalKills;
-      });
-  }, [localMatchData, overallMap]);
+  // 'liveUntilDead' sortBy: while a team is still alive, ranked by THIS
+  // match's live placePoints (kills tiebreak); once eliminated, ranked by
+  // cumulative event standings instead — its row locks into its true
+  // tournament position rather than continuing to shift in-match.
+  const sortedTeams: SortedTeam[] = useSortedTeams(localMatchData, overallData, 'liveUntilDead');
 
   if (!localMatchData) {
     return (

@@ -45,10 +45,14 @@ interface LiveStatsProps {
 const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchData, overallData }) => {
   // Matches the old behavior: matchNo 1 (first match of the round) never
   // folded in overall standings, only live in-match points/kills.
+  // 'liveUntilDead': ranked by THIS match's live placePoints (kills
+  // tiebreak) while a team is still alive; once eliminated, ranked by
+  // cumulative event standings instead, so its row locks into its true
+  // tournament position rather than continuing to shift in-match.
   const sortedTeams: SortedTeam[] = useSortedTeams(
     matchData,
     match?.matchNo === 1 ? null : overallData,
-    'overall'
+    'liveUntilDead'
   );
 
   const ROW_HEIGHT = 100;

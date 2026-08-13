@@ -1,11 +1,16 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
+import { useSortedTeams, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
 // NOTE: SocketManager import removed, along with the six manual socket
 // event handlers and the localMatchData mirror they wrote into.
 // PublicThemeRenderer owns the single socket connection, listens to
 // 'bulkUpdate', and passes freshly-merged `matchData` / `overallData` down
 // as props on every change — this component now derives everything
-// straight off those props via useMemo, same as the Theme2 conversion.
+// straight off those props via useSortedTeams, same as the Theme2 conversion.
+//
+// NOTE: Player / Team / MatchData are imported from useSortedTeams, NOT
+// redeclared here — two same-named-but-different-shaped interfaces are
+// unrelated types to TypeScript even with an identical name.
 
 interface Tournament {
   _id: string;
@@ -30,34 +35,6 @@ interface Match {
   _matchNo?: number;
 }
 
-interface Player {
-  _id: string;
-  playerName: string;
-  killNum: number;
-  bHasDied: boolean;
-  picUrl?: string;
-
-  // Live stats fields
-  health: number;
-  healthMax: number;
-  liveState: number; // 0 = knocked, 5 = dead, etc.
-}
-
-interface Team {
-  _id: string;
-  teamId?: string;
-  teamTag: string;
-  slot?: number;
-  placePoints: number;
-  players: Player[];
-  teamLogo: string;
-}
-
-interface MatchData {
-  _id: string;
-  teams: Team[];
-}
-
 interface LiveStatsProps {
   tournament: Tournament;
   round?: Round | null;
@@ -67,52 +44,17 @@ interface LiveStatsProps {
 }
 
 const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchData, overallData }) => {
-  // overallMap is derived straight from the overallData prop now, instead
-  // of being mirrored into its own state inside a useEffect.
-  const overallMap = useMemo(() => {
-    const map = new Map<string, any>();
-    if (overallData && Array.isArray(overallData.teams) && match?.matchNo !== 1) {
-      for (const t of overallData.teams) {
-        const key = t.teamId?.toString?.() || t.teamId;
-        if (!key) continue;
-        map.set(key, {
-          placePoints: t.placePoints || 0,
-          players: Array.isArray(t.players) ? t.players : [],
-        });
-      }
-    }
-    return map;
-  }, [overallData, match?.matchNo]);
-
-  const sortedTeams = useMemo(() => {
-    if (!matchData) return [];
-
-    return matchData.teams
-      .map(team => {
-        const teamKey = (team as any).teamId?.toString?.() || (team as any).teamId || team._id;
-        const overall = overallMap.get(teamKey);
-        const liveKills = team.players.reduce((sum, p) => sum + (p.killNum || 0), 0);
-        const overallKills = overall && Array.isArray(overall.players)
-          ? overall.players.reduce((s: number, p: any) => s + (p.killNum || 0), 0)
-          : 0;
-        const totalPoints = (match?.matchNo === 1 ? 0 : (overall?.placePoints || 0)) + (team.placePoints || 0) + liveKills + (match?.matchNo === 1 ? 0 : overallKills);
-        const isAllDead = team.players.every(player => player.liveState === 5 || player.bHasDied);
-
-        return {
-          ...team,
-          totalKills: liveKills,
-          alive: team.players.filter(p => p.liveState !== 5).length,
-          totalPoints,
-          isAllDead,
-        } as any;
-      })
-      .sort((a: any, b: any) => {
-        if (b.totalPoints !== a.totalPoints) {
-          return b.totalPoints - a.totalPoints;
-        }
-        return b.totalKills - a.totalKills;
-      });
-  }, [matchData, overallMap, match?.matchNo]);
+  // Matches the old behavior: matchNo 1 (first match of the round) never
+  // folded in overall standings, only live in-match points/kills.
+  // 'liveUntilDead': ranked by THIS match's live placePoints (kills
+  // tiebreak) while a team is still alive; once eliminated, ranked by
+  // cumulative event standings instead, so its row locks into its true
+  // tournament position rather than continuing to shift in-match.
+  const sortedTeams: SortedTeam[] = useSortedTeams(
+    matchData,
+    match?.matchNo === 1 ? null : overallData,
+    'liveUntilDead'
+  );
 
   const baseHealthBar = 36; // original health bar height
 

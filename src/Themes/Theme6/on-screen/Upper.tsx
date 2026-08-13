@@ -290,7 +290,7 @@ const Upper: React.FC<UpperProps> = ({ tournament, round, match, matchData }) =>
                     background: `linear-gradient(135deg, ${wwcdColor}, #fff2)`, // adds depth
                     transform: "skewX(-20deg)", // slanted diagonal
                     transformOrigin: "left",
-                    transition: "width 1s cubic-bezier(0.25, 1, 0.5, 1)", // smooth throttle
+                    transition: "width 300ms cubic-bezier(0.25, 1, 0.5, 1)", // matches the 300ms duration used everywhere else
                   }}
                 />
 

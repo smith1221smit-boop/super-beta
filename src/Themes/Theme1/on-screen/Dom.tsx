@@ -218,7 +218,7 @@ const Dom: React.FC<DomProps> = React.memo(({ tournament, round, match, matchDat
                 }}
                 className="text-4xl font-bold text-white relative top-[-140px]"
               >
-                {displayedPlayer.killNum} KILLS
+                {Math.max(0, displayedPlayer.killNum || 0)} KILLS
               </div>
             </div>
           </motion.div>

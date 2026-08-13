@@ -161,7 +161,7 @@ const LiveFrags: React.FC<LiveFragsProps> = ({ tournament, round, match, matchDa
                 {/* Kills/Damage Toggle */}
                 <div className='flex text-white text-2xl font-bold mr-4 flex-col font-[Righteous]'>
                   <div className='absolute left-[1860px] text-yellow-400 '>
-                    {showKills ? player.killNum : (player as any).damage}
+                    {Math.max(0, (showKills ? player.killNum : (player as any).damage) || 0)}
                   </div>
                   <div className='relative top-[25px]'>
                     {showKills ? 'KILLS' : 'DAMAGE'}

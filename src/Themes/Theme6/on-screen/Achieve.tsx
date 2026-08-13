@@ -91,13 +91,14 @@ type StatKey =
   const allPlayers = matchData.teams.flatMap(team =>
     team.players.map(player => ({
       ...player,
-      killNum: Number(player.killNum || 0),
-      damage: Number(player.damage || 0),
-      grenadeKills: Number((player as any).killNumByGrenade || 0),
-      killDistance: Number(player.maxKillDistance || 0),
-      travelDistance:
-        Number(player.driveDistance || 0) +
-        Number(player.marchDistance || 0),
+      killNum: Math.max(0, Number(player.killNum || 0)),
+      damage: Math.max(0, Number(player.damage || 0)),
+      grenadeKills: Math.max(0, Number((player as any).killNumByGrenade || 0)),
+      killDistance: Math.max(0, Number(player.maxKillDistance || 0)),
+      travelDistance: Math.max(
+        0,
+        Number(player.driveDistance || 0) + Number(player.marchDistance || 0)
+      ),
       teamLogo: team.teamLogo,
       teamName: team.teamName
     }))

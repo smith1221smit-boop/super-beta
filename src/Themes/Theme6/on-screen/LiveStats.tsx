@@ -7,6 +7,11 @@ import React, {
   memo,
 } from 'react';
 import { FaChevronRight } from 'react-icons/fa';
+import { useSortedTeams, Player, MatchData, SortedTeam } from '../../shared/hooks/unsortteams';
+// NOTE: Player / Team / MatchData are imported from useSortedTeams, NOT
+// redeclared here — two same-named-but-different-shaped interfaces are
+// unrelated types to TypeScript even with an identical name. See
+// Theme2/on-screen/LiveStats.tsx for the same pattern.
 // NOTE: SocketManager import removed, along with mergeMatchPatch /
 // mergePlayers and the six socket handlers (handleLiveUpdate,
 // handleMatchDataUpdated, handlePlayerStatsUpdated, handleTeamPointsUpdated,
@@ -41,35 +46,6 @@ interface Match {
   matchNo?: number;
   _matchNo?: number;
   map?: string;
-}
-
-interface Player {
-  _id: string;
-  playerName: string;
-  killNum: number;
-  isFiring?: boolean; // for firing indicator
-  bHasDied: boolean;
-  picUrl?: string;
-  health: number;
-  healthMax: number;
-  liveState: number;
-  isOutsideBlueCircle: boolean;
-}
-
-interface Team {
-  _id: string;
-  teamId?: string;
-  teamTag: string;
-  slot?: number;
-  placePoints: number;
-  totalKills?: number;
-  players: Player[];
-  teamLogo: string;
-}
-
-interface MatchData {
-  _id: string;
-  teams: Team[];
 }
 
 interface LiveStatsProps {
@@ -446,58 +422,12 @@ const LiveStats: React.FC<LiveStatsProps> = ({
   // mirror state, no socket handlers, no manual patch-merging needed.
   const matchData = propMatchData ?? null;
 
-  // ── overallMap — static, from prop only ──
-  const overallMap = useMemo((): Map<string, number> => {
-    const map = new Map<string, number>();
-    if (!propOverallData?.teams) return map;
-    for (const t of propOverallData.teams) {
-      const placePoints = t.placePoints ?? 0;
-      const overallKills = Array.isArray(t.players)
-        ? t.players.reduce((sum: number, p: any) => sum + (p.killNum || 0), 0)
-        : 0;
-      const total = placePoints + overallKills;
-      if (t.teamId) map.set(t.teamId.toString(), total);
-      if (t._id)    map.set(t._id.toString(), total);
-    }
-    return map;
-  }, [propOverallData]);
-
   // ── Sorted teams ──────────────────────────────
-const sortedTeams = useMemo(() => {
-  if (!matchData) return [];
-
-  return matchData.teams
-    .map(team => {
-      const teamKey =
-        (team as any).teamId?.toString?.() ??
-        team._id?.toString?.() ??
-        team._id;
-
-      const totalPoints = overallMap.get(teamKey) ?? 0;
-
-      const totalKills = team.players.reduce(
-        (sum, p) => sum + (p.killNum || 0),
-        0
-      );
-
-      const isAllDead = team.players.every(
-        p => p.liveState === 5 || p.bHasDied
-      );
-
-      const hasOutsideBlueCircle = team.players.some(
-        p => p.isOutsideBlueCircle === true
-      );
-
-      return {
-        ...team,
-        totalKills,
-        totalPoints,
-        isAllDead,
-        hasOutsideBlueCircle,
-      } as any;
-    })
-    .sort((a: any, b: any) => b.totalPoints - a.totalPoints); // ✅ only overall
-}, [matchData, overallMap]);
+  // 'liveUntilDead': ranked by THIS match's live placePoints (kills
+  // tiebreak) while a team is still alive; once eliminated, ranked by
+  // cumulative event standings instead, so its row locks into its true
+  // tournament position rather than continuing to shift in-match.
+  const sortedTeams: SortedTeam[] = useSortedTeams(matchData, propOverallData, 'liveUntilDead');
   // ── Layout constants ──────────────────────────
   const { baseRowHeight, baseHealthBar, scaleY } = useMemo(() => {
     const listTopOffset = 250;

@@ -18,8 +18,9 @@ import { useSortedTeams, Player, MatchData, SortedTeam } from '../../shared/hook
 // should ignore overallData, breaking ties by kills — used to live here
 // across six separate socket handlers. That derivation now lives once in
 // useSortedTeams (shared across every theme's Alerts/LiveStats/battlebar),
-// called below with mode 'overall' to match this panel's original sort
-// (cumulative totalPoints, tie-broken by totalKills).
+// called below with mode 'liveUntilDead': ranked by this match's live
+// points while a team is still alive, by cumulative totalPoints once
+// eliminated — tie-broken by totalKills either way.
 
 // ─────────────────────────────────────────────
 // Interfaces
@@ -324,11 +325,12 @@ const TeamRow = ({ team, index, round, rowHeight }: TeamRowProps) => {
 // isAllDead/hasOutsideBlueCircle, and sorting).
 // ─────────────────────────────────────────────
 const LiveStats: React.FC<LiveStatsProps> = ({ tournament, round, match, matchData, overallData }) => {
-  // 'overall' sortBy = cumulative event standings (placePoints + kills from
-  // overallData plus this match's placePoints + live kills), which is what
-  // this panel has always shown — matches the old sort
-  // (b.totalPoints - a.totalPoints, tie-broken by b.totalKills - a.totalKills).
-  const sortedTeams: SortedTeam[] = useSortedTeams(matchData, overallData, 'overall');
+  // 'liveUntilDead' sortBy: while a team is still alive, ranked by THIS
+  // match's live placePoints (kills tiebreak); the moment it's eliminated,
+  // ranked by the real cumulative event standings instead, so its row
+  // locks into its true tournament position rather than continuing to
+  // shift with in-match placePoints churn.
+  const sortedTeams: SortedTeam[] = useSortedTeams(matchData, overallData, 'liveUntilDead');
 
   const ROW_HEIGHT = 100;
   const START_Y = 50;

@@ -527,10 +527,11 @@ const LiveStats: React.FC<LiveStatsProps> = ({
   matchData,
   overallData,
 }) => {
-  // 'overall' sortBy = cumulative event standings (placePoints + kills from
-  // overallData), which is what this hero panel has always shown — matches
-  // the old sort (b.totalPoints - a.totalPoints) exactly.
-  const sortedTeams: SortedTeam[] = useSortedTeams(matchData, overallData, 'overall');
+  // 'liveUntilDead' sortBy: while a team is still alive, ranked by THIS
+  // match's live placePoints (kills tiebreak); once eliminated, ranked by
+  // cumulative event standings instead — its row locks into its true
+  // tournament position rather than continuing to shift in-match.
+  const sortedTeams: SortedTeam[] = useSortedTeams(matchData, overallData, 'liveUntilDead');
 
   // ── Layout constants ──────────────────────────
   const { baseRowHeight, baseHealthBar, scaleY } = useMemo(() => {

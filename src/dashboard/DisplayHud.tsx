@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef, useTransition, memo } from 'react';
 import api from '../login/api.tsx';
 import PollingManager from './isPolling.tsx';
-import { getOrFetch } from './cache';
+import { socket } from './socket.tsx';
+import { getOrFetch, clearCacheByPrefix } from './cache';
 import {
   FaDiscord, FaTrophy, FaUsers, FaEye, FaBars, FaTimes, FaSearch,
   FaBroadcastTower, FaCalendarAlt, FaExternalLinkAlt, FaCheckCircle,
@@ -445,6 +446,27 @@ const DisplayHud: React.FC = () => {
       .catch(err => { if (!isCanceled(err)) setMatches([]); })
       .finally(() => { if (!controller.signal.aborted) setMatchesLoading(false); });
   }, [tournamentId]);
+
+  // Match.tsx writes new/edited/deleted matches into this same cache key, but
+  // only inside its own tab's sessionStorage — it never reaches this tab's
+  // cache. The backend already broadcasts these mutations over the user's
+  // socket room, so listen for them here, bust the stale entries, and force
+  // a real re-fetch of whatever round is currently selected (mirrors the
+  // roundUpdated handling in Round.tsx).
+  useEffect(() => {
+    const handleMatchChanged = () => {
+      clearCacheByPrefix('cache:v1:matches:', 'session');
+      if (tournamentId && roundId) handleRoundChange(roundId);
+    };
+    socket.on('matchCreated', handleMatchChanged);
+    socket.on('matchUpdated', handleMatchChanged);
+    socket.on('matchDeleted', handleMatchChanged);
+    return () => {
+      socket.off('matchCreated', handleMatchChanged);
+      socket.off('matchUpdated', handleMatchChanged);
+      socket.off('matchDeleted', handleMatchChanged);
+    };
+  }, [tournamentId, roundId, handleRoundChange]);
 
   const toggleLiveMatch = useCallback(async (mId: string, checked: boolean) => {
     if (!roundKey) return;

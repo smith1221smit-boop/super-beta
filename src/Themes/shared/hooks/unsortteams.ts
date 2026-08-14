@@ -163,7 +163,10 @@ export function useSortedTeams(
       // used for thisMatchFinalContribution above) and only fall back to
       // the raw player field, sanitized, for a team not yet confirmed dead.
       const rawRank = team.players[0]?.rank;
-      const teamRank = deadEntry?.rank ?? (typeof rawRank === 'number' && rawRank > 0 ? rawRank : 0);
+      const teamRank =
+        (typeof deadEntry?.rank === 'number' && deadEntry.rank > 0)
+          ? deadEntry.rank
+          : (typeof rawRank === 'number' && rawRank > 0 ? rawRank : 0);
 
       // What overallData currently attributes to THIS match, live, using
       // the same placePoints+kills formula the backend uses when it builds
@@ -178,7 +181,13 @@ export function useSortedTeams(
         : thisMatchLiveContribution;
 
       const liveOverallTotal = overallMap.get(lookupKey) ?? 0;
-      const priorBaseline = liveOverallTotal - thisMatchLiveContribution;
+      // Clamped: overallData (from the separate `overallDataUpdate` socket
+      // stream) can momentarily lag behind matchData's live in-match
+      // contribution (e.g. right after a kill ticks totalKills up before the
+      // next overall push catches up), which would otherwise underflow this
+      // subtraction into a negative "prior standing" and flash as -1 on the
+      // overlay.
+      const priorBaseline = Math.max(0, liveOverallTotal - thisMatchLiveContribution);
 
       const totalPoints = priorBaseline + (isAllDead ? thisMatchFinalContribution : 0);
 

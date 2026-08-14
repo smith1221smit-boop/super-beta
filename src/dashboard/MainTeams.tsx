@@ -9,6 +9,10 @@ import {
 import { useTranslation } from 'react-i18next';
 import api from '../login/api.tsx';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload.tsx';
+import { getOrFetch, setCache, removeCache } from './cache';
+
+const TEAMS_LIST_CACHE_KEY = 'cache:v1:teams:list';
+const teamByIdKey = (teamId: string) => `cache:v1:teams:byId:${teamId}`;
 
 interface Player {
   _id?: string;
@@ -654,14 +658,22 @@ const Teams: React.FC = () => {
   // to whatever happened to be on the first page.
   const fetchTeams = useCallback(async (search: string) => {
     try {
-      const res = await api.get('/teams', { params: { search, limit: 100 } });
-      const normalized: Team[] = res.data.teams.map((team: any) => ({
+      // The unfiltered baseline list is cache-first and shared with
+      // GroupsData.tsx's team picker; live searches always hit the network.
+      const data = search
+        ? (await api.get('/teams', { params: { search, limit: 100 } })).data
+        : await getOrFetch(
+            TEAMS_LIST_CACHE_KEY,
+            () => api.get('/teams', { params: { limit: 100 } }).then(r => r.data),
+            { maxAge: 5 * 60 * 1000, storage: 'session' }
+          );
+      const normalized: Team[] = data.teams.map((team: any) => ({
         ...team,
         players: Array.isArray(team.players) ? team.players : [],
         playersCount: team.playersCount ?? (Array.isArray(team.players) ? team.players.length : 0),
       }));
       setTeams(normalized);
-      setTotalTeams(res.data.total ?? normalized.length);
+      setTotalTeams(data.total ?? normalized.length);
     } catch (err) {
       console.error(err);
     }
@@ -669,7 +681,8 @@ const Teams: React.FC = () => {
 
   // Initial load (user + unfiltered team list)
   useEffect(() => {
-    api.get('/users/me').then(({ data }) => setUser(data)).catch(() => {});
+    getOrFetch('auth_user', () => api.get('/users/me').then(r => r.data), { maxAge: 5 * 60 * 1000, storage: 'local' })
+      .then(setUser).catch(() => {});
     fetchTeams('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -704,7 +717,11 @@ const Teams: React.FC = () => {
     setDeletingTeamIds(prev => new Set(prev).add(id));
     setTeams(prev => prev.filter(t => t._id !== id));
     setTotalTeams(prev => Math.max(0, prev - 1));
-    try { await api.delete(`/teams/${id}`); }
+    try {
+      await api.delete(`/teams/${id}`);
+      removeCache(TEAMS_LIST_CACHE_KEY, 'session');
+      removeCache(teamByIdKey(id), 'session');
+    }
     catch { alert('Failed to delete team'); fetchTeams(searchQuery); }
     finally { setDeletingTeamIds(prev => { const c = new Set(prev); c.delete(id); return c; }); }
   }, [fetchTeams, searchQuery]);
@@ -717,6 +734,8 @@ const Teams: React.FC = () => {
       setTeams(prev => prev.map(t => t._id === teamId
         ? { ...t, players: t.players.filter(p => p._id !== playerId), playersCount: (t.playersCount ?? t.players.length) - 1 }
         : t));
+      removeCache(teamByIdKey(teamId), 'session');
+      removeCache(TEAMS_LIST_CACHE_KEY, 'session');
     } catch { alert('Failed to delete player'); }
     finally { setDeletingPlayerIds(prev => { const c = new Set(prev); c.delete(playerId); return c; }); }
   }, []);
@@ -727,6 +746,8 @@ const Teams: React.FC = () => {
       setTeams(prev => prev.map(t => t._id === teamId
         ? { ...t, players: t.players.filter(p => !playerIds.includes(p._id!)), playersCount: (t.playersCount ?? t.players.length) - playerIds.length }
         : t));
+      removeCache(teamByIdKey(teamId), 'session');
+      removeCache(TEAMS_LIST_CACHE_KEY, 'session');
     } catch { alert('Failed to delete selected players'); throw new Error('delete failed'); }
   }, []);
 
@@ -741,7 +762,11 @@ const Teams: React.FC = () => {
     setViewingTeamId(t2._id);
     setDetailLoading(true);
     try {
-      const { data } = await api.get(`/teams/${t2._id}`);
+      const data = await getOrFetch(
+        teamByIdKey(t2._id),
+        () => api.get(`/teams/${t2._id}`).then(r => r.data),
+        { maxAge: 2 * 60 * 1000, storage: 'session' }
+      );
       setTeams(prev => prev.map(t => t._id === data._id ? { ...t, ...data, playersCount: data.players?.length ?? 0 } : t));
     } catch {
       alert('Failed to load team roster');
@@ -751,9 +776,16 @@ const Teams: React.FC = () => {
     }
   }, []);
 
+  // Shares the `teams:byId` cache with openDetail (and with
+  // matchDataController.tsx's roster editor) — opening detail then
+  // immediately editing the same team is now a cache hit, not a refetch.
   const openEdit = useCallback(async (t2: Team) => {
     try {
-      const { data } = await api.get(`/teams/${t2._id}`);
+      const data = await getOrFetch(
+        teamByIdKey(t2._id),
+        () => api.get(`/teams/${t2._id}`).then(r => r.data),
+        { maxAge: 2 * 60 * 1000, storage: 'session' }
+      );
       const fullTeam: Team = { ...data, playersCount: data.players?.length ?? 0 };
       setTeams(prev => prev.map(t => t._id === fullTeam._id ? { ...t, ...fullTeam } : t));
       setFormTeam(fullTeam);
@@ -768,6 +800,8 @@ const Teams: React.FC = () => {
       return prev.map(t => t._id === saved._id ? saved : t);
     });
     if (isNew) setTotalTeams(prev => prev + 1);
+    setCache(teamByIdKey(saved._id), saved, 'session');
+    removeCache(TEAMS_LIST_CACHE_KEY, 'session');
   }, []);
 
   return (

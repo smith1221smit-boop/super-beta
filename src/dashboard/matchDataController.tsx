@@ -5,11 +5,15 @@ import api from '../login/api';
 import { socket } from './socket';
 import SocketManager from './socketManager';
 import { requestQueue, UpdateBatcher } from './requestQueue';
+import { getOrFetch, setCache, removeCache } from './cache';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload';
 import {
   FaUpload, FaEdit, FaTimes, FaPlus, FaCheck,
   FaSearch, FaExclamationTriangle, FaCheckCircle, FaInfoCircle,
 } from 'react-icons/fa';
+
+// Shared with MainTeams.tsx's team-by-id cache — same backend resource.
+const teamByIdKey = (teamId: string) => `cache:v1:teams:byId:${teamId}`;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Same control-room visual language as the marketing site:
@@ -647,7 +651,11 @@ const MatchDataViewer: React.FC = () => {
     setRosterSearch(''); setRosterWarning(null);
     setPlayersLoading(true);
     try {
-      const { data: teamData } = await api.get(`/teams/${teamId}`);
+      const teamData = await getOrFetch(
+        teamByIdKey(teamId),
+        () => api.get(`/teams/${teamId}`).then(r => r.data),
+        { maxAge: 2 * 60 * 1000, storage: 'session' }
+      );
       const playersForTeam = (teamData.players || []).filter((p: any) => p && p.playerName && p._id);
       const teamOnBoard = matchDataRef.current?.teams.find(t => (t.teamId || t._id) === teamId);
       const preselected = (teamOnBoard?.players || []).filter((p: any) => p && p.playerName && p._id);
@@ -694,11 +702,20 @@ const MatchDataViewer: React.FC = () => {
     try {
       let photoUrl = '';
       if (newPlayerPhoto) photoUrl = await uploadToCloudinary(newPlayerPhoto, 'players/photos', 'player_photo');
-      const { data: team }        = await api.get(`/teams/${editingTeam.teamId}`);
+      // Forced-fresh read: this is a read-modify-write (PUT the full team
+      // back with an appended player), so a cached/stale roster here could
+      // silently drop players added elsewhere in the meantime.
+      const team = await getOrFetch(
+        teamByIdKey(editingTeam.teamId),
+        () => api.get(`/teams/${editingTeam.teamId}`).then(r => r.data),
+        { maxAge: 2 * 60 * 1000, storage: 'session', forceRefresh: true }
+      );
       const { data: updatedTeam } = await api.put(`/teams/${editingTeam.teamId}`, {
         ...team,
         players: [...team.players, { playerName: newPlayerName.trim(), playerId: newPlayerId.trim() || undefined, photo: photoUrl || undefined }],
       });
+      setCache(teamByIdKey(editingTeam.teamId), updatedTeam, 'session');
+      removeCache('cache:v1:teams:list', 'session');
       const newPlayer = updatedTeam.players.find((p: any) => p.playerName === newPlayerName.trim() && (!newPlayerId.trim() || p.playerId === newPlayerId.trim()));
       if (!newPlayer) throw new Error('Failed to find newly added player');
       setAvailablePlayers(prev => [...prev, newPlayer]);

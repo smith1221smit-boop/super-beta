@@ -1,9 +1,11 @@
 // src/pages/lower/Lower.tsx
-import { decode } from "@msgpack/msgpack"; // npm install @msgpack/msgpack
-import React, { useEffect, useState } from "react";
-import { getCache, setCache, removeCache } from "../../../dashboard/cache.tsx";
-import { useParams, useSearchParams } from "react-router-dom";
-import api from "../../../login/api.tsx";
+// NOTE: the own useParams-driven fetch (selected-match, the msgpack
+// lowerData/:t/:r/:m endpoint, rounds/:id/matches) and its dashboard/
+// cache.tsx localStorage cache have been removed. PublicThemeRenderer
+// already does the one shared fetch — and now has its own global cache,
+// see publicCache.ts — and passes `tournament`/`round`/`match`/
+// `totalMatches` down as props for the 'Lower' view.
+import React from "react";
 
 interface Tournament {
   _id: string;
@@ -14,82 +16,16 @@ interface Tournament {
   overlayBg?: string;
 }
 interface Round { _id: string; roundName: string; day?: string; }
-interface Slot { team: string; slot: number; _id: string; }
-interface Group { _id: string; groupName: string; slots: Slot[]; }
-interface Match { _id: string; matchName?: string; matchNo?: number; _matchNo?: number; map?: string; groups?: Group[]; }
-interface LowerData { tournament: Tournament; round: Round; match: Match; }
+interface Match { _id: string; matchName?: string; matchNo?: number; _matchNo?: number; map?: string; }
 
-export default function Lower() {
-  const { tournamentId, roundId, matchId } = useParams<{ tournamentId: string; roundId: string; matchId: string }>();
-  const [searchParams] = useSearchParams();
-  const followSelected = (searchParams.get("followSelected") || "false").toLowerCase() === "true";
+interface LowerProps {
+  tournament: Tournament;
+  round?: Round | null;
+  match?: Match | null;
+  totalMatches?: number;
+}
 
-  const [data, setData] = useState<LowerData | null>(null);
-  const [totalMatches, setTotalMatches] = useState<number>(0);
-
-  const fetchData = async () => {
-    if (!tournamentId || !roundId) return;
-
-    try {
-      // Determine effective matchId
-      let effectiveMatchId = matchId;
-      if (followSelected) {
-        try {
-          const selectedRes = await api.get(`public/tournaments/${tournamentId}/rounds/${roundId}/selected-match`);
-          if (selectedRes.data?.matchId) effectiveMatchId = selectedRes.data.matchId;
-        } catch {
-          console.warn("Could not fetch selected match, falling back to URL matchId");
-        }
-      }
-      if (!effectiveMatchId) return;
-
-      const cacheKey = `lowerData-${tournamentId}-${roundId}-${effectiveMatchId}`;
-
-      // Load from cache immediately
-      const cachedData = getCache(cacheKey, 1000 * 60 * 5); // 5 min
-      if (cachedData) {
-        console.log("Using cached Lower data:", cacheKey);
-        setData(cachedData.lowerData);
-        setTotalMatches(cachedData.totalMatches);
-      } else {
-        console.log("No cache found, fetching fresh Lower data:", cacheKey);
-      }
-
-      // Fetch fresh data (binary MessagePack)
-      const [lowerRes, matchesRes] = await Promise.all([
-        api.get(`lowerData/${tournamentId}/${roundId}/${effectiveMatchId}`, { responseType: "arraybuffer" }),
-        api.get(`public/rounds/${roundId}/matches`),
-      ]);
-
-      // Decode MessagePack binary
-      const lowerData = decode(new Uint8Array(lowerRes.data)) as LowerData;
-      const newData = { lowerData, totalMatches: matchesRes.data?.length ?? 0 };
-
-      // Only update cache if data changed
-      if (JSON.stringify(cachedData) !== JSON.stringify(newData)) {
-        console.log("Data changed, updating cache:", cacheKey);
-        removeCache(cacheKey);
-        setCache(cacheKey, newData);
-        setData(newData.lowerData);
-        setTotalMatches(newData.totalMatches);
-      } else {
-        console.log("Data unchanged, keeping existing cache:", cacheKey);
-      }
-    } catch (err) {
-      console.error("Failed to fetch Lower data:", err);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, [tournamentId, roundId, matchId, followSelected]);
-
-  // Use fallback values if no data yet
-  const { tournament, round, match } = data || {
-    tournament: { tournamentName: "", primaryColor: "#FFD000", secondaryColor: "transparent", torLogo: "" },
-    round: { roundName: "" },
-    match: { matchNo: 0, _matchNo: 0 },
-  };
+export default function Lower({ tournament, round, match, totalMatches = 0 }: LowerProps) {
   const matchNumber = match?.matchNo ?? match?._matchNo ?? "N/A";
 
   return (

@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate } from 'react-router-dom';
 import { FaEdit, FaTrash, FaClock, FaMap, FaChevronRight, FaPlus } from 'react-icons/fa';
 import api from '../login/api.tsx';
+import { getOrFetch, setCache } from './cache';
 
 interface Match {
   _id: string;
@@ -360,9 +361,6 @@ const Match: React.FC = () => {
   const [editMap, setEditMap]           = useState<MapName | ''>('');
   const [isCreating, setIsCreating]     = useState(false);
 
-  const matchesCache = useRef<Record<string, Match[]>>({});
-  const groupsCache  = useRef<Record<string, GroupData[]>>({});
-
   const to24Hour = (time: string) => {
     if (!time) return '00:00';
     if (!time.includes('AM') && !time.includes('PM')) return time;
@@ -373,27 +371,27 @@ const Match: React.FC = () => {
     return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`;
   };
 
+  // Matches key is shared with DisplayHud.tsx; groups key is shared with
+  // GroupsData.tsx/DisplayHud.tsx — cache-first, so revisiting a tournament
+  // already loaded elsewhere skips the network entirely.
   const fetchData = async () => {
     if (!tournamentId || !roundId) return;
-    const key = `${tournamentId}-${roundId}`;
     setLoading(true);
-    if (matchesCache.current[key]) {
-      setMatches(matchesCache.current[key]);
-      if (groupsCache.current[tournamentId]) setGroups(groupsCache.current[tournamentId]);
-      setLoading(false);
-      return;
-    }
     try {
-      const [mRes, gRes] = await Promise.all([
-        api.get(`/tournaments/${tournamentId}/rounds/${roundId}/matches`),
-        groupsCache.current[tournamentId]
-          ? Promise.resolve({ data: groupsCache.current[tournamentId] })
-          : api.get(`/tournaments/${tournamentId}/groups`)
+      const [matchesData, groupsData] = await Promise.all([
+        getOrFetch(
+          `cache:v1:matches:${tournamentId}:${roundId}`,
+          () => api.get(`/tournaments/${tournamentId}/rounds/${roundId}/matches`).then(r => r.data),
+          { maxAge: 10 * 60 * 1000, storage: 'session' }
+        ),
+        getOrFetch(
+          `cache:v1:groups:${tournamentId}`,
+          () => api.get(`/tournaments/${tournamentId}/groups`).then(r => r.data),
+          { maxAge: 5 * 60 * 1000, storage: 'session' }
+        ),
       ]);
-      setMatches(mRes.data);
-      setGroups(gRes.data);
-      matchesCache.current[key] = mRes.data;
-      groupsCache.current[tournamentId] = gRes.data;
+      setMatches(matchesData);
+      setGroups(groupsData);
       setError(null);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch data');
@@ -415,8 +413,9 @@ const Match: React.FC = () => {
         matchNo: newMatchNo, time: newTime, map: newMap, groupIds: selectedGroupIds,
       });
       const added = { ...res.data.match, groups: groups.filter(g => selectedGroupIds.includes(g._id)) };
-      delete matchesCache.current[`${tournamentId}-${roundId}`];
-      setMatches(prev => [...prev, added]);
+      const next = [...matches, added];
+      setMatches(next);
+      setCache(`cache:v1:matches:${tournamentId}:${roundId}`, next, 'session');
       setNewMatchNo(newMatchNo + 1);
       setNewTime('00:00'); setNewMap(''); setSelectedGroupIds([]);
       setShowAddForm(false);
@@ -441,8 +440,9 @@ const Match: React.FC = () => {
       const res = await api.put(`/tournaments/${tournamentId}/rounds/${roundId}/matches/${matchId}`, {
         matchNo: editMatchNo, time: editTime, map: editMap, groupIds: selectedGroupIds,
       });
-      delete matchesCache.current[`${tournamentId}-${roundId}`];
-      setMatches(prev => prev.map(m => m._id === matchId ? res.data : m));
+      const next = matches.map(m => m._id === matchId ? res.data : m);
+      setMatches(next);
+      setCache(`cache:v1:matches:${tournamentId}:${roundId}`, next, 'session');
       setEditMatchId(null);
     } catch (err: any) {
       alert(err.message || 'Error updating match');
@@ -453,8 +453,9 @@ const Match: React.FC = () => {
     if (!window.confirm('Delete this match?')) return;
     try {
       await api.delete(`/tournaments/${tournamentId}/rounds/${roundId}/matches/${matchId}`);
-      delete matchesCache.current[`${tournamentId}-${roundId}`];
-      setMatches(prev => prev.filter(m => m._id !== matchId));
+      const next = matches.filter(m => m._id !== matchId);
+      setMatches(next);
+      setCache(`cache:v1:matches:${tournamentId}:${roundId}`, next, 'session');
     } catch (err: any) {
       alert(err.message || 'Error deleting match');
     }

@@ -2,6 +2,9 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { FaTrash, FaEdit, FaTimes, FaSearch, FaChevronDown, FaChevronUp, FaUsers, FaPlus, FaCheck, FaLayerGroup, FaSpinner } from "react-icons/fa";
 import { useParams } from "react-router-dom";
 import api from "../login/api.tsx";
+import { getOrFetch, setCache } from "./cache";
+
+const TEAMS_LIST_CACHE_KEY = "cache:v1:teams:list";
 
 interface Team {
   _id: string;
@@ -518,8 +521,7 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submittingRef = useRef(false); // synchronous guard, closes the double-click race that state alone can't
   const [groupSearchTerm, setGroupSearchTerm] = useState("");
-  const GROUPS_CACHE_KEY = `groups_cache_${tournamentId}`;
-  const TEAMS_CACHE_KEY = `teams_cache`;
+  const GROUPS_CACHE_KEY = `cache:v1:groups:${tournamentId}`;
 
   // Cache of every team object the user has ever selected (or is editing
   // into a group), keyed by _id. Server-side search means `teams` only
@@ -555,54 +557,55 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
   const isCanceled = (err: any) => err?.name === 'CanceledError' || err?.name === 'AbortError' || err?.code === 'ERR_CANCELED';
 
   // Fetch teams + groups together, in parallel, so opening the panel never waits.
+  // Cache-first: a fresh cache entry means no network call at all. Groups use
+  // a per-tournament key; the teams baseline list is shared with
+  // MainTeams.tsx's/matchDataController.tsx's team cache, so opening this
+  // panel after visiting the Teams page (or vice versa) is a cache hit.
   // NOTE: limit is 100 to match the backend's hard cap (Math.min(limit, 100)
   // in getAllTeams) — asking for more just wasted a param, the server was
   // silently truncating to 100 anyway. This initial load only seeds the
   // "no search yet" view of the grid; searching (below) re-queries the
   // server so results aren't limited to this initial page.
-const loadInitialData = useCallback(async (signal: AbortSignal, forceRefresh = false) => {
-  if (!forceRefresh) {
-    const cachedGroups = sessionStorage.getItem(GROUPS_CACHE_KEY);
-    const cachedTeams = sessionStorage.getItem(TEAMS_CACHE_KEY);
-    if (cachedGroups) {
-      try {
-        const parsed = JSON.parse(cachedGroups);
-        if (Array.isArray(parsed)) setGroups(parsed);
-        else sessionStorage.removeItem(GROUPS_CACHE_KEY); // drop bad cache
-      } catch { sessionStorage.removeItem(GROUPS_CACHE_KEY); }
-    }
-    if (cachedTeams) {
-      try {
-        const parsed = JSON.parse(cachedTeams);
-        if (Array.isArray(parsed)) setTeams(parsed);
-        else sessionStorage.removeItem(TEAMS_CACHE_KEY);
-      } catch { sessionStorage.removeItem(TEAMS_CACHE_KEY); }
-    }
-  }
-  try {
-    const [groupsRes, teamsRes] = await Promise.all([
-      api.get(`/tournaments/${tournamentId}/groups`, { signal }),
-      api.get("/teams", { signal, params: { limit: 100 } }),
-    ]);
+  const loadInitialData = useCallback(async (
+    signal: AbortSignal,
+    options: { forceGroups?: boolean; forceTeams?: boolean } = {}
+  ) => {
+    const { forceGroups = false, forceTeams = false } = options;
+    try {
+      const [groupsData, teamsData] = await Promise.all([
+        getOrFetch(
+          GROUPS_CACHE_KEY,
+          () => api.get(`/tournaments/${tournamentId}/groups`, { signal }).then(r => (Array.isArray(r.data) ? r.data : [])),
+          { maxAge: 5 * 60 * 1000, storage: 'session', forceRefresh: forceGroups }
+        ),
+        getOrFetch(
+          TEAMS_LIST_CACHE_KEY,
+          () => api.get("/teams", { signal, params: { limit: 100 } }).then(r => r.data),
+          { maxAge: 5 * 60 * 1000, storage: 'session', forceRefresh: forceTeams }
+        ),
+      ]);
 
-    const groupsData = Array.isArray(groupsRes.data) ? groupsRes.data : [];
-    setGroups(groupsData);
-    sessionStorage.setItem(GROUPS_CACHE_KEY, JSON.stringify(groupsData));
+      // Defensive re-check: getOrFetch's cache-hit path returns whatever was
+      // previously serialized under GROUPS_CACHE_KEY as-is, without re-running
+      // the fetcher's own Array.isArray guard — a stale sessionStorage entry
+      // written before that guard existed (or from a differently-shaped API
+      // response) would otherwise reach setGroups() as a non-array and crash
+      // filteredGroups' groups.filter() below.
+      setGroups(Array.isArray(groupsData) ? groupsData : []);
 
-    const teamList = (teamsRes.data.teams || []).map((team: any) => ({
-      _id: team._id,
-      teamFullName: team.teamFullName,
-      teamTag: team.teamTag,
-      logo: team.logo,
-    }));
-    setTeams(teamList);
-    sessionStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify(teamList));
-  } catch (err: any) {
-    if (isCanceled(err)) return;
-    console.error("Failed to load groups/teams:", err);
-    if (err.response?.status === 401) alert("Unauthorized. Please login.");
-  }
-}, [tournamentId, GROUPS_CACHE_KEY]);
+      const teamList = (teamsData.teams || []).map((team: any) => ({
+        _id: team._id,
+        teamFullName: team.teamFullName,
+        teamTag: team.teamTag,
+        logo: team.logo,
+      }));
+      setTeams(teamList);
+    } catch (err: any) {
+      if (isCanceled(err)) return;
+      console.error("Failed to load groups/teams:", err);
+      if (err.response?.status === 401) alert("Unauthorized. Please login.");
+    }
+  }, [tournamentId, GROUPS_CACHE_KEY]);
   useEffect(() => {
     const controller = new AbortController();
     loadInitialData(controller.signal);
@@ -632,7 +635,7 @@ const loadInitialData = useCallback(async (signal: AbortSignal, forceRefresh = f
           logo: t.logo,
         }));
         setTeams(list);
-        if (!q) sessionStorage.setItem(TEAMS_CACHE_KEY, JSON.stringify(list));
+        if (!q) setCache(TEAMS_LIST_CACHE_KEY, { teams: res.data.teams, total: res.data.total }, 'session');
       } catch (err: any) {
         if (!isCanceled(err)) console.error("Team search failed:", err);
       } finally {
@@ -709,7 +712,7 @@ const loadInitialData = useCallback(async (signal: AbortSignal, forceRefresh = f
     if (invalid.length > 0) {
       alert("Some teams no longer exist. Refresh and try again.");
       const controller = new AbortController();
-      loadInitialData(controller.signal, true);
+      loadInitialData(controller.signal, { forceGroups: true, forceTeams: true });
       return;
     }
 
@@ -725,14 +728,14 @@ const loadInitialData = useCallback(async (signal: AbortSignal, forceRefresh = f
       clearForm();
       setShowForm(false);
       const controller = new AbortController();
-      loadInitialData(controller.signal, true);
+      loadInitialData(controller.signal, { forceGroups: true });
     } catch (err: any) {
       const msg = err.response?.data?.message || "Failed to submit group.";
       const missing = err.response?.data?.missingTeamIds;
       if (missing?.length > 0) {
         alert(`${msg}\nMissing: ${missing.join(', ')}`);
         const controller = new AbortController();
-        loadInitialData(controller.signal, true);
+        loadInitialData(controller.signal, { forceGroups: true, forceTeams: true });
       } else {
         alert(msg);
       }
@@ -747,7 +750,7 @@ const loadInitialData = useCallback(async (signal: AbortSignal, forceRefresh = f
     try {
       await api.delete(`/tournaments/${tournamentId}/groups/${groupId}`);
       const controller = new AbortController();
-      loadInitialData(controller.signal, true);
+      loadInitialData(controller.signal, { forceGroups: true });
     } catch (err: any) {
       alert(err.response?.data?.message || "Failed to delete group.");
     }

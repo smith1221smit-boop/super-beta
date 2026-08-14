@@ -5,6 +5,7 @@ import { FaTrash, FaEdit, FaPlus, FaTimes, FaCalendarAlt, FaBroadcastTower } fro
 import Group, { GroupRef } from './GroupsData.tsx';
 import api from '../login/api.tsx';
 import { socket } from './socket.tsx';
+import { getOrFetch, setCache, clearCacheByPrefix } from './cache';
 
 interface RoundData {
   _id: string;
@@ -145,7 +146,7 @@ const Round: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const cacheKey = tournamentId ? `rounds-${tournamentId}` : 'rounds-user';
+  const cacheKey = `cache:v1:rounds:${tournamentId ?? 'user'}`;
   const groupRef = useRef<GroupRef>(null);
 
   // Modal & form states
@@ -173,9 +174,8 @@ const Round: React.FC = () => {
       let url = tournamentId
         ? `/tournaments/${tournamentId}/rounds`
         : '/user/rounds';
-      const { data } = await api.get(url);
+      const data = await getOrFetch(cacheKey, () => api.get(url).then(r => r.data), { maxAge: 10 * 60 * 1000, storage: 'session' });
       setRounds(data);
-      sessionStorage.setItem(cacheKey, JSON.stringify(data));
       setError(null);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch rounds');
@@ -186,12 +186,22 @@ const Round: React.FC = () => {
 
   useEffect(() => {
     fetchRounds();
-    socket.on('roundUpdated', () => {
-      sessionStorage.removeItem(cacheKey);
+    // The event carries no tournament id, and rounds are now genuinely
+    // read from cache (not a dead write-only cache) — so a stale entry for
+    // a *different* tournament than the one currently mounted must also be
+    // cleared, or it could be served as fresh on the next visit.
+    const handleRoundUpdated = () => {
+      clearCacheByPrefix('cache:v1:rounds:', 'session');
       fetchRounds();
-    });
+    };
+    socket.on('roundUpdated', handleRoundUpdated);
     return () => {
-      socket.off('roundUpdated', fetchRounds);
+      // Must pass the SAME reference that was registered above — off()
+      // silently no-ops on a mismatched reference (this used to pass
+      // fetchRounds here, which was never the listener that got added, so
+      // the real handler was never actually removed and leaked a
+      // stale-closure listener on every remount).
+      socket.off('roundUpdated', handleRoundUpdated);
     };
   }, [tournamentId, cacheKey, fetchRounds]);
 
@@ -225,7 +235,7 @@ const Round: React.FC = () => {
       setRounds(prev => {
         const base = apiEnable ? prev.map(r => ({ ...r, apiEnable: false })) : prev;
         const next = [newRound, ...base];
-        sessionStorage.setItem(cacheKey, JSON.stringify(next));
+        setCache(cacheKey, next, 'session');
         return next;
       });
 
@@ -247,7 +257,7 @@ const Round: React.FC = () => {
       await api.delete(url);
       const updatedRounds = rounds.filter(r => r._id !== roundId);
       setRounds(updatedRounds);
-      sessionStorage.setItem(cacheKey, JSON.stringify(updatedRounds));
+      setCache(cacheKey, updatedRounds, 'session');
     } catch (err: any) {
       alert(err.message || 'Error deleting round');
     } finally {
@@ -291,7 +301,7 @@ const Round: React.FC = () => {
           if (updated.apiEnable && r.apiEnable) return { ...r, apiEnable: false };
           return r;
         });
-        sessionStorage.setItem(cacheKey, JSON.stringify(next));
+        setCache(cacheKey, next, 'session');
         return next;
       });
 

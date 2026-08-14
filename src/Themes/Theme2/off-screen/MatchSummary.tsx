@@ -1,4 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
+// NOTE: the own fetch(...) call to /matches/:id/matchdata has been removed.
+// PublicThemeRenderer already does the one shared fetch and passes
+// `matchData` down as a prop for the 'MatchSummary' view.
 
 interface Tournament {
   _id: string;
@@ -57,36 +60,10 @@ interface MatchSummaryProps {
   tournament: Tournament;
   round?: Round | null;
   match?: Match | null;
+  matchData?: MatchData | null;
 }
 
-const MatchSummary: React.FC<MatchSummaryProps> = ({ tournament, round, match }) => {
-  const [matchData, setMatchData] = useState<MatchData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchMatchData = async () => {
-      if (!match) return;
-      try {
-        setLoading(true);
-        const url = `https://backend-prod-530t.onrender.com/api/public/matches/${match._id}/matchdata`;
-        const res = await fetch(url, { credentials: 'include' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: MatchData = await res.json();
-        setMatchData(data);
-        setError(null);
-      } catch (err) {
-        console.error('Failed to fetch match data:', err);
-        setError('Failed to load match data');
-        setMatchData(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (match?._id) fetchMatchData();
-  }, [match?._id]);
-
+const MatchSummary: React.FC<MatchSummaryProps> = ({ tournament, round, match, matchData }) => {
   const stats = useMemo(() => {
     if (!matchData) return null;
 
@@ -118,18 +95,10 @@ const MatchSummary: React.FC<MatchSummaryProps> = ({ tournament, round, match })
     };
   }, [matchData]);
 
-  if (loading) {
+  if (!matchData || !stats) {
     return (
       <div style={{ width: '1920px', height: '1080px', backgroundColor: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ color: 'white', fontSize: '24px', fontFamily: 'Righteous' }}>Loading...</div>
-      </div>
-    );
-  }
-
-  if (error || !matchData || !stats) {
-    return (
-      <div style={{ width: '1920px', height: '1080px', backgroundColor: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ color: 'white', fontSize: '24px', fontFamily: 'Righteous' }}>{error || 'No match data available'}</div>
+        <div style={{ color: 'white', fontSize: '24px', fontFamily: 'Righteous' }}>No match data available</div>
       </div>
     );
   }

@@ -1,5 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
+// NOTE: the own fetch(...) calls (rounds/:id/matches, selected-match, and
+// one matchdata call per match) have been removed. PublicThemeRenderer
+// always supplies `matches`/`matchDatas` as props now, so the teams-per-
+// match zip is a pure derivation instead of an effect. The "UP NEXT" badge
+// (needed a selected-match fetch not reproducible from props alone) has
+// been dropped, mirroring the same simplification already made in
+// Theme5/off-screen/Schedule.tsx.
 
 interface Tournament {
   _id: string;
@@ -42,6 +49,9 @@ interface Match {
 interface ScheduleProps {
   tournament: Tournament;
   round?: Round | null;
+  matches?: Match[];
+  matchDatas?: any[];
+  selectedScheduleMatches?: string[];
 }
 
 const getMapImage = (mapName?: string) => {
@@ -69,79 +79,32 @@ const getMapImage = (mapName?: string) => {
   }
 };
 
-const Schedule: React.FC<ScheduleProps> = ({ tournament, round }) => {
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const run = async () => {
-      if (!round?._id) return;
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await fetch(`https://backend-prod-530t.onrender.com/api/public/rounds/${round._id}/matches`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const matchesData: Match[] = await res.json();
-
-        // Fetch selected match
-        const selectedRes = await fetch(`https://backend-prod-530t.onrender.com/api/public/tournaments/${tournament._id}/rounds/${round._id}/selected-match`);
-        let selectedMatchId = null;
-        if (selectedRes.ok) {
-          const selectedData = await selectedRes.json();
-          selectedMatchId = selectedData.matchId;
-        }
-        setSelectedMatchId(selectedMatchId);
-
-        // Fetch matchData for each match to get teams
-        const matchDataPromises = matchesData.map(match =>
-          fetch(`https://backend-prod-530t.onrender.com/api/public/matches/${match._id}/matchdata`)
-            .then(res => res.ok ? res.json() : null)
-            .catch(() => null)
-        );
-        const matchDatas = await Promise.all(matchDataPromises);
-
-        // Attach teams to matches
-        const matchesWithTeams = matchesData.map((match, idx) => ({
-          ...match,
-          teams: matchDatas[idx]?.teams || []
-        }));
-
-        setMatches(matchesWithTeams);
-      } catch (e: any) {
-        console.error('Schedule: failed to fetch matches', e);
-        setError('Failed to load matches');
-      } finally {
-        setLoading(false);
-      }
-    };
-    run();
-  }, [round?._id, tournament._id]);
+const Schedule: React.FC<ScheduleProps> = ({ tournament, round, matches: propMatches, matchDatas: propMatchDatas, selectedScheduleMatches }) => {
+  const matches = useMemo<Match[]>(() => {
+    if (!propMatches) return [];
+    return propMatches.map((match, idx) => ({
+      ...match,
+      teams: propMatchDatas?.[idx]?.teams || []
+    }));
+  }, [propMatches, propMatchDatas]);
 
   const sortedMatches = useMemo(() => {
+    // Filter to only selected matches if any are selected
+    let filteredMatches = matches;
+    if (selectedScheduleMatches && selectedScheduleMatches.length > 0) {
+      filteredMatches = matches.filter(match => selectedScheduleMatches.includes(match._id));
+    }
+
     // Remove duplicates by matchNo
-    const uniqueMatches = matches.filter((match, index, self) =>
+    const uniqueMatches = filteredMatches.filter((match, index, self) =>
       index === self.findIndex(m => (m.matchNo || m._matchNo) === (match.matchNo || match._matchNo))
     );
     return uniqueMatches.sort((a, b) => (a.matchNo || a._matchNo || 0) - (b.matchNo || b._matchNo || 0));
-  }, [matches]);
+  }, [matches, selectedScheduleMatches]);
 
   if (!round) {
     return (
       <div className="w-[1920px] h-[1080px]  text-white flex items-center justify-center">No round selected</div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="w-[1920px] h-[1080px]  text-white flex items-center justify-center">Loading schedule...</div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="w-[1920px] h-[1080px]  text-red-400 flex items-center justify-center">{error}</div>
     );
   }
 
@@ -246,20 +209,9 @@ const Schedule: React.FC<ScheduleProps> = ({ tournament, round }) => {
                   const winningTeams = m.teams?.filter(team => team.placePoints === 10) || [];
                   const hasWinner = winningTeams.length > 0;
 
-                  // Check if this is the next match after selected
-                  const isUpNext = (() => {
-                    if (!selectedMatchId) return false;
-                    const selectedIndex = sortedMatches.findIndex(match => match._id === selectedMatchId);
-                    if (selectedIndex === -1) return false;
-                    const currentIndex = sortedMatches.findIndex(match => match._id === m._id);
-                    return currentIndex === selectedIndex + 1;
-                  })();
-
                   let displayText = m.time || '-';
                   if (hasWinner) {
                     displayText = `BOOYAH | ${winningTeams[0].teamTag}`;
-                  } else if (isUpNext) {
-                    displayText = 'UP NEXT';
                   }
 
                   return (

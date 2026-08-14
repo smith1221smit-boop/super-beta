@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { decode } from '@msgpack/msgpack';
 import api from '../login/api.tsx';
 import SocketManager from '../dashboard/socketManager.tsx';
+import { readCachedBulk, writeCachedBulk } from './publicCache.ts';
 
 /* ============================================================================
    THEME COMPONENT REGISTRY
@@ -313,6 +314,13 @@ const PublicThemeRenderer: React.FC = () => {
   // result isn't readable synchronously, but this ref is.
   const matchDataRef = useRef<MatchData | null>(null);
 
+  // Tracks whether the fetch effect below has ever run for this mount, so
+  // its setLoading(true) can be skipped exactly once — only when a cache
+  // hit already seeded real data (initialCache) on the very first run.
+  // Every later run (a view/match/followSelected change within the same
+  // tab session) still flips loading true while refetching, same as today.
+  const firstFetchRef = useRef(true);
+
 
   const cachedGet = async (url: string, signal: AbortSignal, ttlMs = 5000) => {
     const cache = cacheRef.current;
@@ -359,16 +367,45 @@ const PublicThemeRenderer: React.FC = () => {
   const theme = AVAILABLE_THEMES.includes(requestedTheme) ? requestedTheme : 'Theme1';
   const getComp = (key: string) => resolveComponent(theme, key);
 
-  const [tournament, setTournament] = useState<Tournament | null>(null);
-  const [round, setRound] = useState<Round | null>(null);
-  const [match, setMatch] = useState<Match | null>(null);
-  const [matchData, setMatchData] = useState<MatchData | null>(null);
+  // Read once, synchronously, on mount — the lazy-initializer form runs
+  // exactly once and never again on re-render, so this never re-reads/
+  // re-parses localStorage on a socket-driven tick. Survives a hard OBS
+  // browser-source refresh (unlike the in-memory cacheRef below), letting
+  // the view paint immediately from last-known data instead of a blank
+  // frame while the real fetch (always run regardless, see below) resolves.
+  const [initialCache] = useState(() => {
+    const cached = tournamentId && roundId
+      ? readCachedBulk(tournamentId, roundId, matchId, view, followSelected)
+      : null;
+    // Prime matchDataRef too, not just matchData state — the socket
+    // handler below merges incoming chunks against matchDataRef.current,
+    // and if it stayed null a socket tick arriving before the first real
+    // fetch resolves would merge against an empty team list, making the
+    // just-painted cached teams disappear instead of merely being briefly
+    // stale. Safe here since this initializer runs exactly once, on mount.
+    if (cached?.currentMatchData?.matchData) {
+      matchDataRef.current = cached.currentMatchData.matchData;
+    }
+    return cached;
+  });
+
+  const [tournament, setTournament] = useState<Tournament | null>(() => initialCache?.tournamentData ?? null);
+  const [round, setRound] = useState<Round | null>(() => initialCache?.roundData ?? null);
+  const [match, setMatch] = useState<Match | null>(() => initialCache?.matchesData?.current ?? null);
+  const [matchData, setMatchData] = useState<MatchData | null>(() => initialCache?.currentMatchData?.matchData ?? null);
+  // Not seeded from cache: elimination banners must never show a stale
+  // "already eliminated" state from an old cached tick — it starts empty
+  // and fills in correctly the moment the real fetch/socket data arrives.
   const [deadTeamList, setDeadTeamList] = useState<DeadTeamListEntry[]>([]);
-  const [overallData, setOverallData] = useState<OverallData | null>(null);
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [matchDatas, setMatchDatas] = useState<MatchData[]>([]);
+  const [overallData, setOverallData] = useState<OverallData | null>(() => initialCache?.overallData ?? null);
+  const [matches, setMatches] = useState<Match[]>(() => initialCache?.matchesData?.list ?? []);
+  const [matchDatas, setMatchDatas] = useState<MatchData[]>(() =>
+    (initialCache?.matchDatasData ?? []).map((entry: any) => entry.matchData).filter(Boolean)
+  );
+  // Not seeded from cache: Upper-only, fetched separately keyed off a
+  // matchDataId that only exists after the real fetch resolves.
   const [backpackInfo, setBackpackInfo] = useState<BackpackInfo | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !initialCache);
   const [error, setError] = useState<string | null>(null);
 
   const applyBulkPayload = (bulk: any) => {
@@ -426,7 +463,15 @@ const PublicThemeRenderer: React.FC = () => {
 
     const fetchData = async () => {
       try {
-        setLoading(true);
+        // Skip the loading flip exactly once: the first run of this effect,
+        // when a cache hit already seeded real data into initial state (see
+        // initialCache above) — showing the placeholder here would just
+        // reintroduce the blank-frame-on-refresh symptom the cache exists to
+        // fix. Every subsequent run (or a first run with no cache hit)
+        // behaves exactly as before.
+        const isFirstFetch = firstFetchRef.current;
+        firstFetchRef.current = false;
+        if (!isFirstFetch || !initialCache) setLoading(true);
         setError(null);
 
         const params = new URLSearchParams();
@@ -442,6 +487,10 @@ const PublicThemeRenderer: React.FC = () => {
 
         if (cancelled) return;
         applyBulkPayload(bulk);
+        // Write-through: keeps the global cache warm for the next refresh
+        // or the next OBS source hitting this same round. Only from a real,
+        // non-aborted fetch — never from the socket handlers below.
+        writeCachedBulk(tournamentId, roundId, matchId, view, followSelected, bulk);
 
         await refreshBackpackInfo(bulk, controller.signal);
         if (cancelled) return;

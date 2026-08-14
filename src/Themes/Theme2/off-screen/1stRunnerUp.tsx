@@ -1,4 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
+// NOTE: the own fetch(...) call to /tournaments/:tid/rounds/:rid/overall
+// has been removed. PublicThemeRenderer already does the one shared fetch
+// and passes `overallData` down as a prop for the '1stRunnerUp' view.
 
 interface Tournament {
   _id: string;
@@ -41,36 +44,10 @@ interface OverallData {
 interface RunnerUpProps {
   tournament: Tournament;
   round?: Round | null;
+  overallData?: OverallData | null;
 }
 
-const FirstRunnerUp: React.FC<RunnerUpProps> = ({ tournament, round }) => {
-  const [overallData, setOverallData] = useState<OverallData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchOverall = async () => {
-      if (!round) return;
-      try {
-        setLoading(true);
-        const url = `https://backend-prod-530t.onrender.com/api/public/tournaments/${tournament._id}/rounds/${round._id}/overall`;
-        const res = await fetch(url, { credentials: 'include' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: OverallData = await res.json();
-        setOverallData(data);
-        setError(null);
-      } catch (err) {
-        console.error('Failed to fetch overall data:', err);
-        setError('Failed to load overall data');
-        setOverallData(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (tournament._id && round?._id) fetchOverall();
-  }, [tournament._id, round?._id]);
-
+const FirstRunnerUp: React.FC<RunnerUpProps> = ({ tournament, round, overallData }) => {
   const second = useMemo(() => {
     if (!overallData) return null;
 
@@ -85,18 +62,10 @@ const FirstRunnerUp: React.FC<RunnerUpProps> = ({ tournament, round }) => {
     return enriched[1] || null;
   }, [overallData]);
 
-  if (loading) {
+  if (!overallData || !second) {
     return (
       <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">Loading...</div>
-      </div>
-    );
-  }
-
-  if (error || !overallData || !second) {
-    return (
-      <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">{error || 'Not enough data'}</div>
+        <div className="text-white text-2xl font-[Righteous]">Not enough data</div>
       </div>
     );
   }

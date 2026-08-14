@@ -1,4 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
+// NOTE: the own fetch(...) call to /tournaments/:tid/rounds/:rid/overall
+// has been removed. PublicThemeRenderer already does the one shared fetch
+// and passes `overallData` (plus `matches`/`matchDatas`, unused by this
+// theme's simpler MVP derivation) down as props for the 'EventMvp' view.
 
 interface Tournament {
   _id: string;
@@ -48,36 +52,12 @@ interface OverallData {
 interface EventMvpProps {
   tournament: Tournament;
   round?: Round | null;
+  overallData?: OverallData | null;
+  matches?: any[];
+  matchDatas?: any[];
 }
 
-const EventMvp: React.FC<EventMvpProps> = ({ tournament, round }) => {
-  const [overallData, setOverallData] = useState<OverallData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchOverall = async () => {
-      if (!round) return;
-      try {
-        setLoading(true);
-        const url = `https://backend-prod-530t.onrender.com/api/public/tournaments/${tournament._id}/rounds/${round._id}/overall`;
-        const res = await fetch(url, { credentials: 'include' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: OverallData = await res.json();
-        setOverallData(data);
-        setError(null);
-      } catch (err) {
-        console.error('Failed to fetch overall data:', err);
-        setError('Failed to load overall data');
-        setOverallData(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (tournament._id && round?._id) fetchOverall();
-  }, [tournament._id, round?._id]);
-
+const EventMvp: React.FC<EventMvpProps> = ({ tournament, round, overallData }) => {
   const mvp = useMemo(() => {
     if (!overallData) return null;
     const allPlayers = overallData.teams.flatMap(team =>
@@ -105,18 +85,10 @@ const EventMvp: React.FC<EventMvpProps> = ({ tournament, round }) => {
     return allPlayers[0];
   }, [overallData]);
 
-  if (loading) {
+  if (!overallData || !mvp) {
     return (
       <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">Loading...</div>
-      </div>
-    );
-  }
-
-  if (error || !overallData || !mvp) {
-    return (
-      <div className="w-[1920px] h-[1080px] flex items-center justify-center">
-        <div className="text-white text-2xl font-[Righteous]">{error || 'No overall data available'}</div>
+        <div className="text-white text-2xl font-[Righteous]">No overall data available</div>
       </div>
     );
   }

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef, useTransition, memo } from 'react';
 import api from '../login/api.tsx';
 import PollingManager from './isPolling.tsx';
+import { getOrFetch } from './cache';
 import {
   FaDiscord, FaTrophy, FaUsers, FaEye, FaBars, FaTimes, FaSearch,
   FaBroadcastTower, FaCalendarAlt, FaExternalLinkAlt, FaCheckCircle,
@@ -339,13 +340,13 @@ const DisplayHud: React.FC = () => {
 
   // ── Rounds/matches caching + in-flight cancellation ──────────────────────
   // Rounds and matches rarely change mid-broadcast, so once fetched for a
-  // given tournament/round they're kept for the rest of the session —
-  // switching back to a tournament you already looked at is instant instead
-  // of re-hitting the API. Each fetch also cancels whatever fetch of the
-  // same kind was still in flight, so rapid clicking through tournaments
-  // can't have a slow, stale response land after a faster, newer one.
-  const roundsCacheRef = useRef<Map<string, Round[]>>(new Map());
-  const matchesCacheRef = useRef<Map<string, Match[]>>(new Map());
+  // given tournament/round they're kept fresh for a while — switching back
+  // to a tournament you already looked at is instant instead of re-hitting
+  // the API. These keys are shared with Round.tsx/Match.tsx (cache.tsx,
+  // sessionStorage), so navigating here after visiting those pages for the
+  // same tournament is also a cache hit. Each fetch also cancels whatever
+  // fetch of the same kind was still in flight, so rapid clicking through
+  // tournaments can't have a slow, stale response land after a faster one.
   const roundsAbortRef = useRef<AbortController | null>(null);
   const matchesAbortRef = useRef<AbortController | null>(null);
 
@@ -374,8 +375,21 @@ const DisplayHud: React.FC = () => {
   const liveMatchObj = liveMatchId ? matches.find(m => m._id === liveMatchId) : null;
 
   useEffect(() => {
-    api.get('/users/me').then(r => setUser(r.data)).catch(() => {});
-    api.get('/tournaments').then(r => setTournaments(r.data)).catch(() => setTournaments([]));
+    // Tournaments are fetched only once the user is known, since the shared
+    // `tournaments_<userId>` cache key (also used by dashboard/page.tsx) is
+    // scoped per user.
+    getOrFetch('auth_user', () => api.get('/users/me').then(r => r.data), { maxAge: 5 * 60 * 1000, storage: 'local' })
+      .then(userData => {
+        setUser(userData);
+        return getOrFetch(
+          `tournaments_${userData._id}`,
+          () => api.get('/tournaments').then(r => r.data),
+          { maxAge: 10 * 60 * 1000, storage: 'local' }
+        );
+      })
+      .then(data => setTournaments(data))
+      .catch(() => setTournaments([]));
+
     api.get('/matchSelection/selected').then(r => {
       const map: Record<string, string> = {};
       r.data.forEach((s: any) => {
@@ -397,22 +411,17 @@ const DisplayHud: React.FC = () => {
     setMatches([]);
     if (!id) return;
 
-    const cached = roundsCacheRef.current.get(id);
-    if (cached) {
-      setRounds(cached);
-      return;
-    }
-
     roundsAbortRef.current?.abort();
     const controller = new AbortController();
     roundsAbortRef.current = controller;
 
     setRoundsLoading(true);
-    api.get(`/tournaments/${id}/rounds`, { signal: controller.signal })
-      .then(r => {
-        roundsCacheRef.current.set(id, r.data);
-        setRounds(r.data);
-      })
+    getOrFetch(
+      `cache:v1:rounds:${id}`,
+      () => api.get(`/tournaments/${id}/rounds`, { signal: controller.signal }).then(r => r.data),
+      { maxAge: 10 * 60 * 1000, storage: 'session' }
+    )
+      .then(data => { if (!controller.signal.aborted) setRounds(data); })
       .catch(err => { if (!isCanceled(err)) setRounds([]); })
       .finally(() => { if (!controller.signal.aborted) setRoundsLoading(false); });
   }, []);
@@ -422,23 +431,17 @@ const DisplayHud: React.FC = () => {
     setMatches([]);
     if (!id || !tournamentId) return;
 
-    const cacheKey = `${tournamentId}_${id}`;
-    const cached = matchesCacheRef.current.get(cacheKey);
-    if (cached) {
-      setMatches(cached);
-      return;
-    }
-
     matchesAbortRef.current?.abort();
     const controller = new AbortController();
     matchesAbortRef.current = controller;
 
     setMatchesLoading(true);
-    api.get(`/tournaments/${tournamentId}/rounds/${id}/matches`, { signal: controller.signal })
-      .then(r => {
-        matchesCacheRef.current.set(cacheKey, r.data);
-        setMatches(r.data);
-      })
+    getOrFetch(
+      `cache:v1:matches:${tournamentId}:${id}`,
+      () => api.get(`/tournaments/${tournamentId}/rounds/${id}/matches`, { signal: controller.signal }).then(r => r.data),
+      { maxAge: 10 * 60 * 1000, storage: 'session' }
+    )
+      .then(data => { if (!controller.signal.aborted) setMatches(data); })
       .catch(err => { if (!isCanceled(err)) setMatches([]); })
       .finally(() => { if (!controller.signal.aborted) setMatchesLoading(false); });
   }, [tournamentId]);

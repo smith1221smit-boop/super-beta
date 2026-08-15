@@ -665,7 +665,7 @@ const Teams: React.FC = () => {
         : await getOrFetch(
             TEAMS_LIST_CACHE_KEY,
             () => api.get('/teams', { params: { limit: 100 } }).then(r => r.data),
-            { maxAge: 5 * 60 * 1000, storage: 'session' }
+            { maxAge: 90 * 1000, storage: 'session' }
           );
       const normalized: Team[] = data.teams.map((team: any) => ({
         ...team,

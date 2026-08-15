@@ -385,7 +385,7 @@ const DisplayHud: React.FC = () => {
         return getOrFetch(
           `tournaments_${userData._id}`,
           () => api.get('/tournaments').then(r => r.data),
-          { maxAge: 10 * 60 * 1000, storage: 'local' }
+          { maxAge: 90 * 1000, storage: 'local' }
         );
       })
       .then(data => setTournaments(data))
@@ -417,12 +417,17 @@ const DisplayHud: React.FC = () => {
     roundsAbortRef.current = controller;
 
     setRoundsLoading(true);
+    // No `signal` on this request: the cache key is shared with Round.tsx's
+    // getOrFetch call via the same in-flight-promise dedup, so aborting here
+    // would cancel Round.tsx's request too if it's still mounted and waiting
+    // on the same in-flight promise. Staleness is guarded via `.aborted`
+    // checks below instead.
     getOrFetch(
       `cache:v1:rounds:${id}`,
-      () => api.get(`/tournaments/${id}/rounds`, { signal: controller.signal }).then(r => r.data),
-      { maxAge: 10 * 60 * 1000, storage: 'session' }
+      () => api.get(`/tournaments/${id}/rounds`).then(r => r.data),
+      { maxAge: 90 * 1000, storage: 'session' }
     )
-      .then(data => { if (!controller.signal.aborted) setRounds(data); })
+      .then(data => { if (!controller.signal.aborted) setRounds(Array.isArray(data) ? data : []); })
       .catch(err => { if (!isCanceled(err)) setRounds([]); })
       .finally(() => { if (!controller.signal.aborted) setRoundsLoading(false); });
   }, []);
@@ -437,12 +442,15 @@ const DisplayHud: React.FC = () => {
     matchesAbortRef.current = controller;
 
     setMatchesLoading(true);
+    // No `signal` on this request: the cache key is shared with Match.tsx's
+    // getOrFetch call via the same in-flight-promise dedup — see the rounds
+    // fetch above for why.
     getOrFetch(
       `cache:v1:matches:${tournamentId}:${id}`,
-      () => api.get(`/tournaments/${tournamentId}/rounds/${id}/matches`, { signal: controller.signal }).then(r => r.data),
-      { maxAge: 10 * 60 * 1000, storage: 'session' }
+      () => api.get(`/tournaments/${tournamentId}/rounds/${id}/matches`).then(r => r.data),
+      { maxAge: 90 * 1000, storage: 'session' }
     )
-      .then(data => { if (!controller.signal.aborted) setMatches(data); })
+      .then(data => { if (!controller.signal.aborted) setMatches(Array.isArray(data) ? data : []); })
       .catch(err => { if (!isCanceled(err)) setMatches([]); })
       .finally(() => { if (!controller.signal.aborted) setMatchesLoading(false); });
   }, [tournamentId]);

@@ -10,10 +10,15 @@
 // LiveStats, Alerts, etc. — can share it), and a "live" slice scoped to the
 // exact match/view/followSelected combo, short-TTL, only ever used to paint
 // the very first frame after a reload before the real fetch lands.
-import { getCache, setCache } from './cache.tsx';
+import { getCache, setCache, clearCacheByPrefix } from './cache.tsx';
 
-const STATIC_TTL_MS = 10 * 60 * 1000; // tournament/round/matches list rarely change
-const LIVE_TTL_MS = 45 * 1000; // just long enough to paint a refresh moments after the last update
+// Kept short deliberately: these only ever gate the very-first-paint seed
+// (the real fetch always runs regardless of what's cached), and the
+// backend's own bulk-response cache is already only a 3s TTL
+// (Bulkpublic.route.js), so holding onto a local copy much longer than that
+// just widens how stale that first frame can look after a reload.
+const STATIC_TTL_MS = 90 * 1000;
+const LIVE_TTL_MS = 8 * 1000;
 
 const staticKey = (tournamentId: string, roundId: string) =>
   `pubCache:v1:static:${tournamentId}:${roundId}`;
@@ -49,6 +54,16 @@ export interface CachedBulk {
   overallData: any;
 }
 
+export interface CachedBulkResult {
+  bulk: CachedBulk;
+  // Whether the LIVE tier specifically hit, as opposed to matchDatasData/
+  // currentMatchData/overallData/matchesData.current merely defaulting to
+  // null/[] because that tier missed. Callers that need live-tier fields for
+  // the current view must not treat a static-only hit as a complete result —
+  // see PublicThemeRenderer.tsx's use of this flag.
+  liveHit: boolean;
+}
+
 // Reassembles a bulk-shaped object from whichever tier(s) are still fresh —
 // the same shape applyBulkPayload() already expects from a live fetch, so
 // PublicThemeRenderer can seed its state from this with no special-casing.
@@ -59,7 +74,7 @@ export function readCachedBulk(
   matchId: string | undefined,
   view: string,
   followSelected: boolean
-): CachedBulk | null {
+): CachedBulkResult | null {
   const staticSlice = getCache(staticKey(tournamentId, roundId), STATIC_TTL_MS) as StaticSlice | null;
   const liveSlice = getCache(
     liveKey(tournamentId, roundId, matchId, view, followSelected),
@@ -69,17 +84,33 @@ export function readCachedBulk(
   if (!staticSlice && !liveSlice) return null;
 
   return {
-    tournamentData: staticSlice?.tournamentData ?? null,
-    roundData: staticSlice?.roundData ?? null,
-    matchesData: {
-      list: staticSlice?.matchesList ?? [],
-      current: liveSlice?.matchesCurrent ?? null,
-      effectiveMatchId: liveSlice?.effectiveMatchId ?? null,
+    bulk: {
+      tournamentData: staticSlice?.tournamentData ?? null,
+      roundData: staticSlice?.roundData ?? null,
+      matchesData: {
+        list: staticSlice?.matchesList ?? [],
+        current: liveSlice?.matchesCurrent ?? null,
+        effectiveMatchId: liveSlice?.effectiveMatchId ?? null,
+      },
+      matchDatasData: liveSlice?.matchDatasData ?? [],
+      currentMatchData: liveSlice?.currentMatchData ?? null,
+      overallData: liveSlice?.overallData ?? null,
     },
-    matchDatasData: liveSlice?.matchDatasData ?? [],
-    currentMatchData: liveSlice?.currentMatchData ?? null,
-    overallData: liveSlice?.overallData ?? null,
+    liveHit: liveSlice != null,
   };
+}
+
+// General-purpose invalidation: clears both tiers for a round (every
+// match/view/followSelected combo the live tier's key scheme can produce),
+// so the next readCachedBulk/writeCachedBulk pair starts from a clean slate
+// instead of waiting out the TTL. Not currently called from a live event
+// (the backend doesn't broadcast round/match mutations into this round's
+// socket room), but kept as the primitive any future caller needs — e.g. a
+// same-tab mutation path, or a future event listener — to bust this cache
+// on demand rather than only ever passively expiring.
+export function invalidatePublicCache(tournamentId: string, roundId: string): void {
+  clearCacheByPrefix(`pubCache:v1:static:${tournamentId}:${roundId}`, 'local');
+  clearCacheByPrefix(`pubCache:v1:live:${tournamentId}:${roundId}:`, 'local');
 }
 
 // Write-through after a real fetch succeeds. Deliberately never called from
@@ -94,6 +125,7 @@ export function writeCachedBulk(
   followSelected: boolean,
   bulk: CachedBulk
 ): void {
+  
   setCache(staticKey(tournamentId, roundId), {
     tournamentData: bulk.tournamentData ?? null,
     roundData: bulk.roundData ?? null,

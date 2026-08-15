@@ -139,6 +139,8 @@ const STYLES = `
 }
 `;
 
+const isCanceled = (err: any) => err?.name === 'CanceledError' || err?.name === 'AbortError' || err?.code === 'ERR_CANCELED';
+
 const Round: React.FC = () => {
   const { t } = useTranslation();
   const { tournamentId } = useParams<{ tournamentId?: string }>();
@@ -174,10 +176,14 @@ const Round: React.FC = () => {
       let url = tournamentId
         ? `/tournaments/${tournamentId}/rounds`
         : '/user/rounds';
-      const data = await getOrFetch(cacheKey, () => api.get(url).then(r => r.data), { maxAge: 10 * 60 * 1000, storage: 'session' });
-      setRounds(data);
+      const data = await getOrFetch(cacheKey, () => api.get(url).then(r => r.data), { maxAge: 90 * 1000, storage: 'session' });
+      // A cached or live response can be a non-array (e.g. a backend error
+      // body that slipped through as a 200) — degrade to empty rather than
+      // crash the .filter/.map calls below.
+      setRounds(Array.isArray(data) ? data : []);
       setError(null);
     } catch (err: any) {
+      if (isCanceled(err)) return;
       setError(err.message || 'Failed to fetch rounds');
     } finally {
       setLoading(false);

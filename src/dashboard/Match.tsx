@@ -340,6 +340,8 @@ const STYLES = `
   }
 `;
 
+const isCanceled = (err: any) => err?.name === 'CanceledError' || err?.name === 'AbortError' || err?.code === 'ERR_CANCELED';
+
 // ── Component ──────────────────────────────────────────────────────────────────
 const Match: React.FC = () => {
   const { t } = useTranslation();
@@ -382,18 +384,22 @@ const Match: React.FC = () => {
         getOrFetch(
           `cache:v1:matches:${tournamentId}:${roundId}`,
           () => api.get(`/tournaments/${tournamentId}/rounds/${roundId}/matches`).then(r => r.data),
-          { maxAge: 10 * 60 * 1000, storage: 'session' }
+          { maxAge: 90 * 1000, storage: 'session' }
         ),
         getOrFetch(
           `cache:v1:groups:${tournamentId}`,
           () => api.get(`/tournaments/${tournamentId}/groups`).then(r => r.data),
-          { maxAge: 5 * 60 * 1000, storage: 'session' }
+          { maxAge: 90 * 1000, storage: 'session' }
         ),
       ]);
-      setMatches(matchesData);
-      setGroups(groupsData);
+      // A cached or live response can be a non-array (e.g. a backend error
+      // body that slipped through as a 200) — degrade to empty rather than
+      // crash the .map/.filter calls below.
+      setMatches(Array.isArray(matchesData) ? matchesData : []);
+      setGroups(Array.isArray(groupsData) ? groupsData : []);
       setError(null);
     } catch (err: any) {
+      if (isCanceled(err)) return;
       setError(err.message || 'Failed to fetch data');
     } finally {
       setLoading(false);

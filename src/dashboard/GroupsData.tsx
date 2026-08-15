@@ -58,9 +58,14 @@ export interface GroupRef {
 //   already-selected teams, a small selectedTeamsCache keeps a copy of any
 //   team the user has picked (or is editing into a group) so chips/slot
 //   rows never go blank just because a later search replaced the grid.
-// - Every network call carries an AbortController signal and is cancelled
-//   on unmount / tournament change, so a slow response from a previous
-//   tournament (or a stale keystroke) can never clobber the current one.
+// - Every network call is guarded against a slow response from a previous
+//   tournament (or a stale keystroke) clobbering the current one, via an
+//   AbortController signal checked after the await. The initial groups/teams
+//   load (loadInitialData) deliberately does NOT pass that signal into the
+//   request itself, since GROUPS_CACHE_KEY/TEAMS_LIST_CACHE_KEY are shared
+//   with other components' getOrFetch calls (e.g. Match.tsx) via the same
+//   in-flight-promise dedup — aborting the request on unmount here would
+//   cancel it for those other callers too, even if they're still mounted.
 // - Team cards, slot rows and group cards are extracted into their own
 //   React.memo'd components. Selecting one team previously re-rendered the
 //   entire grid; now only the affected card re-renders.
@@ -572,18 +577,26 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
   ) => {
     const { forceGroups = false, forceTeams = false } = options;
     try {
+      // No `signal` on these two requests: GROUPS_CACHE_KEY/TEAMS_LIST_CACHE_KEY
+      // are shared with other components' getOrFetch calls (Match.tsx,
+      // MainTeams.tsx, matchDataController.tsx) via the same in-flight-promise
+      // dedup, so aborting here on unmount would cancel the underlying request
+      // for whichever other caller is also waiting on it. Staleness after
+      // unmount is instead guarded below via `signal.aborted`.
       const [groupsData, teamsData] = await Promise.all([
         getOrFetch(
           GROUPS_CACHE_KEY,
-          () => api.get(`/tournaments/${tournamentId}/groups`, { signal }).then(r => (Array.isArray(r.data) ? r.data : [])),
-          { maxAge: 5 * 60 * 1000, storage: 'session', forceRefresh: forceGroups }
+          () => api.get(`/tournaments/${tournamentId}/groups`).then(r => (Array.isArray(r.data) ? r.data : [])),
+          { maxAge: 90 * 1000, storage: 'session', forceRefresh: forceGroups }
         ),
         getOrFetch(
           TEAMS_LIST_CACHE_KEY,
-          () => api.get("/teams", { signal, params: { limit: 100 } }).then(r => r.data),
-          { maxAge: 5 * 60 * 1000, storage: 'session', forceRefresh: forceTeams }
+          () => api.get("/teams", { params: { limit: 100 } }).then(r => r.data),
+          { maxAge: 90 * 1000, storage: 'session', forceRefresh: forceTeams }
         ),
       ]);
+
+      if (signal.aborted) return;
 
       // Defensive re-check: getOrFetch's cache-hit path returns whatever was
       // previously serialized under GROUPS_CACHE_KEY as-is, without re-running

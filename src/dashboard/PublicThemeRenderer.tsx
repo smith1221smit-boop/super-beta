@@ -168,6 +168,31 @@ interface DeadTeamListEntry {
 
 const VIEWS_NEEDING_BACKPACK = new Set(['Upper']);
 
+// Mirrors buildBulkPayload's view -> data-requirement tables
+// (Bulkpublic.controller.js) — kept in sync manually, same convention as
+// VIEWS_NEEDING_BACKPACK above. Used only to decide whether a cache seed
+// that's missing the LIVE tier (matchDatasData/currentMatchData/overallData/
+// matchesData.current) is actually usable for the current view, or whether
+// it should be treated as incomplete instead of painted as final — see
+// liveTierUsable below.
+const VIEWS_NEEDING_OVERALL = new Set([
+  'OverAllData', 'OverallFrags', 'LiveStats', '1stRunnerUp', '2ndRunnerUp', 'EventMvp', 'highlightPoints',
+  'Champions',
+]);
+const VIEWS_NEEDING_MATCH_DATA = new Set([
+  'Upper', 'Dom', 'Alerts', 'LiveStats', 'LiveFrags', 'MatchData', 'Achive', 'MatchFragrs',
+  'WwcdSummary', 'WwcdStats', 'playerH2H', 'mapPreview', 'slots', 'TeamH2H', 'mvp',
+  'RosterShowCase', 'MatchSummary', 'Champions', '1stRunnerUp', '2ndRunnerUp', 'EventMvp',
+  'PlayerSwitch', 'LiveData',
+]);
+const VIEWS_NEEDING_ALL_MATCH_DATAS = new Set([
+  'Schedule', 'highlightPoints', 'HighlightSchedule', 'OverAllData', 'OverallFrags',
+  'EventMvp',
+]);
+
+const viewNeedsLiveTier = (view: string) =>
+  VIEWS_NEEDING_OVERALL.has(view) || VIEWS_NEEDING_MATCH_DATA.has(view) || VIEWS_NEEDING_ALL_MATCH_DATAS.has(view);
+
 const PLACEHOLDER_STYLE: React.CSSProperties = {
   width: '100%',
   height: '100%',
@@ -383,29 +408,40 @@ const PublicThemeRenderer: React.FC = () => {
     // fetch resolves would merge against an empty team list, making the
     // just-painted cached teams disappear instead of merely being briefly
     // stale. Safe here since this initializer runs exactly once, on mount.
-    if (cached?.currentMatchData?.matchData) {
-      matchDataRef.current = cached.currentMatchData.matchData;
+    if (cached?.bulk?.currentMatchData?.matchData) {
+      matchDataRef.current = cached.bulk.currentMatchData.matchData;
     }
     return cached;
   });
+  const initialBulk = initialCache?.bulk ?? null;
 
-  const [tournament, setTournament] = useState<Tournament | null>(() => initialCache?.tournamentData ?? null);
-  const [round, setRound] = useState<Round | null>(() => initialCache?.roundData ?? null);
-  const [match, setMatch] = useState<Match | null>(() => initialCache?.matchesData?.current ?? null);
-  const [matchData, setMatchData] = useState<MatchData | null>(() => initialCache?.currentMatchData?.matchData ?? null);
+  // A static-only cache hit (live tier expired/missing) still returns a
+  // non-null result, but with matchDatasData/currentMatchData/overallData/
+  // matchesData.current all defaulted to null/[] — NOT a real "nothing
+  // changed since last time", just a gap in what's cached. Painting that as
+  // final for a view that actually reads those fields is what produced the
+  // "previous match info disappeared" flash reported on Schedule/
+  // HighlightSchedule/MatchSummary: treat it as incomplete instead and keep
+  // the normal loading state until the real fetch fills it in.
+  const liveTierUsable = !initialCache || initialCache.liveHit || !viewNeedsLiveTier(view);
+
+  const [tournament, setTournament] = useState<Tournament | null>(() => initialBulk?.tournamentData ?? null);
+  const [round, setRound] = useState<Round | null>(() => initialBulk?.roundData ?? null);
+  const [match, setMatch] = useState<Match | null>(() => initialBulk?.matchesData?.current ?? null);
+  const [matchData, setMatchData] = useState<MatchData | null>(() => initialBulk?.currentMatchData?.matchData ?? null);
   // Not seeded from cache: elimination banners must never show a stale
   // "already eliminated" state from an old cached tick — it starts empty
   // and fills in correctly the moment the real fetch/socket data arrives.
   const [deadTeamList, setDeadTeamList] = useState<DeadTeamListEntry[]>([]);
-  const [overallData, setOverallData] = useState<OverallData | null>(() => initialCache?.overallData ?? null);
-  const [matches, setMatches] = useState<Match[]>(() => initialCache?.matchesData?.list ?? []);
+  const [overallData, setOverallData] = useState<OverallData | null>(() => initialBulk?.overallData ?? null);
+  const [matches, setMatches] = useState<Match[]>(() => initialBulk?.matchesData?.list ?? []);
   const [matchDatas, setMatchDatas] = useState<MatchData[]>(() =>
-    (initialCache?.matchDatasData ?? []).map((entry: any) => entry.matchData).filter(Boolean)
+    (initialBulk?.matchDatasData ?? []).map((entry: any) => entry.matchData).filter(Boolean)
   );
   // Not seeded from cache: Upper-only, fetched separately keyed off a
   // matchDataId that only exists after the real fetch resolves.
   const [backpackInfo, setBackpackInfo] = useState<BackpackInfo | null>(null);
-  const [loading, setLoading] = useState(() => !initialCache);
+  const [loading, setLoading] = useState(() => !initialCache || !liveTierUsable);
   const [error, setError] = useState<string | null>(null);
 
   const applyBulkPayload = (bulk: any) => {
@@ -461,18 +497,29 @@ const PublicThemeRenderer: React.FC = () => {
     let cancelled = false;
     const LIVE_TTL = 3000;
 
-    const fetchData = async () => {
+    // `silent`: used by the poll below (see pollTimer) — a background
+    // refresh that must never flip on the placeholder or the error screen
+    // just because one tick was slow/failed. Only a real user-visible
+    // trigger (mount, or a route/query param change re-running this whole
+    // effect) goes through the loading/error states.
+    const fetchData = async (silent = false) => {
       try {
-        // Skip the loading flip exactly once: the first run of this effect,
-        // when a cache hit already seeded real data into initial state (see
-        // initialCache above) — showing the placeholder here would just
-        // reintroduce the blank-frame-on-refresh symptom the cache exists to
-        // fix. Every subsequent run (or a first run with no cache hit)
-        // behaves exactly as before.
-        const isFirstFetch = firstFetchRef.current;
-        firstFetchRef.current = false;
-        if (!isFirstFetch || !initialCache) setLoading(true);
-        setError(null);
+        if (!silent) {
+          // Skip the loading flip exactly once: the first run of this effect,
+          // when a cache hit already seeded real, complete-enough data into
+          // initial state (see initialCache/liveTierUsable above) — showing
+          // the placeholder here would just reintroduce the blank-frame-on-
+          // refresh symptom the cache exists to fix. A static-only hit for a
+          // view that needs live-tier data is NOT complete enough (liveTierUsable
+          // is false), so this still flips loading on rather than painting an
+          // empty matchDatas/overallData as if it were final. Every subsequent
+          // run (or a first run with no usable cache hit) behaves exactly as
+          // before.
+          const isFirstFetch = firstFetchRef.current;
+          firstFetchRef.current = false;
+          if (!isFirstFetch || !initialCache || !liveTierUsable) setLoading(true);
+          setError(null);
+        }
 
         const params = new URLSearchParams();
         params.set('view', view);
@@ -497,17 +544,34 @@ const PublicThemeRenderer: React.FC = () => {
       } catch (err: any) {
         if (controller.signal.aborted) return;
         console.error('Failed to fetch data:', err);
-        if (!cancelled) setError('Failed to load tournament data');
+        if (!cancelled && !silent) setError('Failed to load tournament data');
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && !silent) setLoading(false);
       }
     };
 
     fetchData();
 
+    // No backend event tells this overlay when a round/match/schedule
+    // changes (roundUpdated/matchCreated/Updated/Deleted/matchSelected are
+    // only broadcast to the operator's own user room, never into this
+    // round's room — see publicCache.ts's invalidatePublicCache comment).
+    // Without that push, the only way structural fields (matches list,
+    // match selection, per-match summaries) ever refresh is this poll —
+    // otherwise a long-running OBS browser source that never remounts would
+    // show whatever was true at mount time forever. Interval, not a fixed
+    // countdown: naturally self-throttles around whatever fetchData's own
+    // latency is, and the backend's own bulk-response cache is already only
+    // a 3s TTL, so polling much faster than this wouldn't buy freshness,
+    // just load.
+    const pollTimer = setInterval(() => {
+      if (!cancelled) fetchData(true);
+    }, 6000);
+
     return () => {
       cancelled = true;
       controller.abort();
+      clearInterval(pollTimer);
     };
   }, [tournamentId, roundId, matchId, followSelected, view]);
 

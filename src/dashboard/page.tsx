@@ -425,7 +425,7 @@ const Dashboard: React.FC = () => {
 
     const key = tournamentsKey(userData._id);
 
-    const cached = getCache(key, 1000 * 60 * 10);
+    const cached = getCache(key, 1000 * 90);
     if (cached) {
       setTournaments(cached);
       return;

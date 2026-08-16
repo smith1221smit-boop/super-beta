@@ -17,6 +17,11 @@ export interface Player {
   isOutsideBlueCircle?: boolean;
   isFiring?: boolean;
   picUrl?: string;
+  // Join key used by localPcobManager/useLocalVitalsMerge to match a raw
+  // PCOB telemetry record onto this player when local-vitals mode is on
+  // (?localVitals=true) — same uId namespace PCOB itself uses, persisted
+  // through by the backend's live-sync path.
+  uId?: string | number;
   [key: string]: any;
 }
 

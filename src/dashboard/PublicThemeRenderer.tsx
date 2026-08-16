@@ -1,8 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { decode } from '@msgpack/msgpack';
 import api from '../login/api.tsx';
 import SocketManager from '../dashboard/socketManager.tsx';
+import LocalPcobManager, { RawPlayerInfo } from '../dashboard/localPcobManager.ts';
+import { mergeLocalVitals } from '../Themes/shared/hooks/useLocalVitalsMerge.ts';
 import { readCachedBulk, writeCachedBulk } from './publicCache.ts';
 
 /* ============================================================================
@@ -346,6 +348,20 @@ const PublicThemeRenderer: React.FC = () => {
   // tab session) still flips loading true while refetching, same as today.
   const firstFetchRef = useRef(true);
 
+  // Local-PCOB vitals mode (?localVitals=true) — see the dedicated useEffect
+  // below. Kept as a Map keyed by String(uId) so a player not present in the
+  // latest local tick simply keeps its last-known local value instead of
+  // being blanked. Cleared whenever the live matchId changes (see the
+  // matchId-watch effect below) so a previous match's vitals never leak into
+  // a freshly-selected one — PCOB itself has no concept of "match".
+  const [localVitalsByUid, setLocalVitalsByUid] = useState<Map<string, RawPlayerInfo>>(new Map());
+  // True only while the local socket is both connected/enabled AND not
+  // stale (no tick within LocalPcobManager's staleness window) — see
+  // onStaleChange below. Drives automatic fallback to remote-only vitals.
+  const [localStale, setLocalStale] = useState(true);
+  const lastLocalVitalsMatchIdRef = useRef<string | null>(null);
+  const lastVitalsLogRef = useRef<string>('');
+
 
   const cachedGet = async (url: string, signal: AbortSignal, ttlMs = 5000) => {
     const cache = cacheRef.current;
@@ -386,6 +402,11 @@ const PublicThemeRenderer: React.FC = () => {
   const view = searchParams.get('view') || 'Lower';
   const followSelected = (searchParams.get('followSelected') || 'false').toLowerCase() === 'true';
   const selectedScheduleMatchIds = searchParams.get('scheduleMatches')?.split(',') || [];
+  // Opt-in only: set on the ONE OBS Browser Source URL running on the same
+  // host PC as PCOB (?localVitals=true). Every overlay URL that doesn't set
+  // this behaves byte-for-byte as before — see the local-vitals effect and
+  // mergedMatchData below.
+  const localVitalsEnabled = (searchParams.get('localVitals') || 'false').toLowerCase() === 'true';
 
   // Silently fall back to Theme1 for an unknown/unbuilt theme (e.g. a stale
   // ?theme=Theme2 link) rather than rendering nothing.
@@ -704,6 +725,85 @@ const PublicThemeRenderer: React.FC = () => {
     };
   }, [tournamentId, roundId]);
 
+  // Local-PCOB vitals mode — opt-in via ?localVitals=true (see above). Only
+  // ever active on the one OBS Browser Source running on the same host PC
+  // as PCOB; every other overlay never enters this effect at all, so its
+  // network behavior is completely unaffected. Connects directly to PCOB
+  // (localhost:10086, plain socket.io-client — see localPcobManager.ts, same
+  // approach proven by desktop-app\src\dashboard\Component2.tsx) and keeps
+  // localVitalsByUid updated for the merge below. The remote socket effect
+  // above is untouched and keeps running in parallel the whole time — it
+  // stays authoritative for points/rank/team-meta and is the automatic
+  // fallback the moment local goes stale/disconnects.
+  useEffect(() => {
+    if (!tournamentId || !roundId || !localVitalsEnabled) return;
+
+    const manager = LocalPcobManager.getInstance();
+    manager.connect();
+    setLocalStale(manager.isStale());
+
+    const unsubscribeData = manager.onTotalPlayerList((players) => {
+      setLocalVitalsByUid((prev) => {
+        const next = new Map(prev);
+        for (const p of players) {
+          if (p.uId !== undefined) next.set(String(p.uId), p);
+        }
+        return next;
+      });
+    });
+    const unsubscribeStale = manager.onStaleChange(setLocalStale);
+
+    return () => {
+      unsubscribeData();
+      unsubscribeStale();
+      manager.disconnect();
+    };
+  }, [tournamentId, roundId, localVitalsEnabled]);
+
+  // PCOB has no concept of "match" — without this, a stale uId->vitals
+  // entry from a previous match could briefly leak into a freshly-selected
+  // one (relevant for followSelected overlays). Mirrors the matchId-scoped
+  // reset already used by deathTrackerRef/computeDeadTeamList above.
+  useEffect(() => {
+    const currentMatchId = matchData?.matchId ?? null;
+    if (lastLocalVitalsMatchIdRef.current !== currentMatchId) {
+      lastLocalVitalsMatchIdRef.current = currentMatchId;
+      setLocalVitalsByUid(new Map());
+    }
+  }, [matchData?.matchId]);
+
+  const localVitalsFresh = localVitalsEnabled && !localStale;
+
+  // Additive, render-only overlay on top of the pure-remote `matchData` —
+  // deliberately never fed back into computeDeadTeamList, writeCachedBulk,
+  // or refreshBackpackInfo above, all of which keep consuming `matchData`
+  // directly. publicCache.ts's cache is shared across every concurrent OBS
+  // Browser Source on this machine/profile, so leaking locally-merged vitals
+  // into it could bleed into a DIFFERENT, non-opted-in browser source.
+  const mergedMatchData = useMemo(() => {
+    if (!localVitalsFresh || localVitalsByUid.size === 0) return matchData;
+    return mergeLocalVitals(matchData, localVitalsByUid);
+  }, [matchData, localVitalsByUid, localVitalsFresh]);
+
+  // Debug-only visibility into which source this specific overlay
+  // (theme/view) is actually drawing vitals from right now — logs once per
+  // actual change, not per tick. Skipped entirely when localVitals isn't
+  // set, so a non-opted-in overlay's console output is unchanged.
+  useEffect(() => {
+    if (!localVitalsEnabled) return;
+    const totalPlayers = (matchData?.teams || []).reduce(
+      (sum: number, t: any) => sum + (t.players?.length || 0),
+      0
+    );
+    const playersFromLocal = localVitalsFresh ? localVitalsByUid.size : 0;
+    const source = localVitalsFresh ? 'local' : 'remote (local stale/unreachable)';
+    const summary = `${source}|${playersFromLocal}/${totalPlayers}`;
+    if (lastVitalsLogRef.current !== summary) {
+      lastVitalsLogRef.current = summary;
+      console.log(`[Overlay:${theme}/${view}] vitals source: ${source} — ${playersFromLocal}/${totalPlayers} players`);
+    }
+  }, [localVitalsEnabled, localVitalsFresh, localVitalsByUid, matchData, theme, view]);
+
   const renderView = () => {
     if (loading) return <div style={PLACEHOLDER_STYLE} />;
 
@@ -729,35 +829,35 @@ const PublicThemeRenderer: React.FC = () => {
       case 'Lower':
         return renderComp('Lower', { tournament, round, match, totalMatches: matches.length, matches });
       case 'Upper':
-        return renderComp('Upper', { tournament, round, match, matchData, backpackInfo });
+        return renderComp('Upper', { tournament, round, match, matchData: mergedMatchData, backpackInfo });
       case 'Dom':
-        return renderComp('Dom', { tournament, round, match, matchData });
+        return renderComp('Dom', { tournament, round, match, matchData: mergedMatchData });
       case 'Achive':
-        return renderComp('Achive', { tournament, round, match, matchData });
+        return renderComp('Achive', { tournament, round, match, matchData: mergedMatchData });
       case 'Alerts':
-        return renderComp('Alerts', { tournament, round, match, matchData, deadTeamList });
+        return renderComp('Alerts', { tournament, round, match, matchData: mergedMatchData, deadTeamList });
       case 'LiveStats':
-        return renderComp('LiveStats', { tournament, round, match, matchData, overallData });
+        return renderComp('LiveStats', { tournament, round, match, matchData: mergedMatchData, overallData });
       case 'LiveFrags':
-        return renderComp('LiveFrags', { tournament, round, match, matchData });
+        return renderComp('LiveFrags', { tournament, round, match, matchData: mergedMatchData });
       case 'MatchData':
-        return renderComp('MatchData', { tournament, round, match, matchData });
+        return renderComp('MatchData', { tournament, round, match, matchData: mergedMatchData });
       case 'MatchFragrs':
-        return renderComp('MatchFragrs', { tournament, round, match, matchData });
+        return renderComp('MatchFragrs', { tournament, round, match, matchData: mergedMatchData });
       case 'WwcdSummary':
-        return renderComp('WwcdSummary', { tournament, round, match, matchData });
+        return renderComp('WwcdSummary', { tournament, round, match, matchData: mergedMatchData });
       case 'WwcdStats':
-        return renderComp('WwcdStats', { tournament, round, match, matchData });
+        return renderComp('WwcdStats', { tournament, round, match, matchData: mergedMatchData });
       case 'OverAllData':
-        return renderComp('OverallData', { tournament, round, match, matchData, overallData, matches, matchDatas });
+        return renderComp('OverallData', { tournament, round, match, matchData: mergedMatchData, overallData, matches, matchDatas });
       case 'OverallFrags':
-        return renderComp('OverallFrags', { tournament, round, match, matchData, overallData, matches, matchDatas });
+        return renderComp('OverallFrags', { tournament, round, match, matchData: mergedMatchData, overallData, matches, matchDatas });
       case 'Schedule':
         return renderComp('Schedule', { tournament, round, matches, matchDatas, selectedScheduleMatches: selectedScheduleMatchIds });
       case 'CommingUpNext':
         return renderComp('CommingUpNext', { tournament, round, match, matches });
       case 'Champions':
-        return renderComp('Champions', { tournament, round, matchData, overallData });
+        return renderComp('Champions', { tournament, round, matchData: mergedMatchData, overallData });
       case '1stRunnerUp':
         return renderComp('FirstRunnerUp', { tournament, round, overallData });
       case '2ndRunnerUp':
@@ -765,29 +865,29 @@ const PublicThemeRenderer: React.FC = () => {
       case 'EventMvp':
         return renderComp('EventMvp', { tournament, round, overallData, matches, matchDatas });
       case 'MatchSummary':
-        return renderComp('MatchSummary', { tournament, round, match, matchData });
+        return renderComp('MatchSummary', { tournament, round, match, matchData: mergedMatchData });
       case 'playerH2H':
-        return renderComp('PlayerH2H', { tournament, round, match, matchData });
+        return renderComp('PlayerH2H', { tournament, round, match, matchData: mergedMatchData });
       case 'TeamH2H':
-        return renderComp('TeamH2H', { tournament, round, match, matchData });
+        return renderComp('TeamH2H', { tournament, round, match, matchData: mergedMatchData });
       case 'intro':
-        return renderComp('Intro', { tournament, round, match, matchData });
+        return renderComp('Intro', { tournament, round, match, matchData: mergedMatchData });
       case 'mapPreview':
-        return renderComp('MapPreview', { tournament, round, match, matchData });
+        return renderComp('MapPreview', { tournament, round, match, matchData: mergedMatchData });
       case 'slots':
-        return renderComp('Slots', { tournament, round, match, matchData });
+        return renderComp('Slots', { tournament, round, match, matchData: mergedMatchData });
       case 'mvp':
-        return renderComp('Mvp', { tournament, round, match, matchData, backpackInfo });
+        return renderComp('Mvp', { tournament, round, match, matchData: mergedMatchData, backpackInfo });
       case 'highlightPoints':
-        return renderComp('HighlightPoints', { tournament, round, match, matchData, overallData, matches, matchDatas });
+        return renderComp('HighlightPoints', { tournament, round, match, matchData: mergedMatchData, overallData, matches, matchDatas });
       case 'HighlightSchedule':
         return renderComp('HighlightSchedule', { tournament, round, matches, matchDatas, selectedScheduleMatches: selectedScheduleMatchIds });
       case 'RosterShowCase':
-        return renderComp('RosterShowCase', { tournament, round, match, matchData });
+        return renderComp('RosterShowCase', { tournament, round, match, matchData: mergedMatchData });
       case 'PlayerSwitch':
-        return renderComp('PlayerSwitch', { match, matchData, loading, error });
+        return renderComp('PlayerSwitch', { match, matchData: mergedMatchData, loading, error });
       case 'LiveData':
-        return renderComp('LiveData', { tournament, round, match, matchData, overallData });
+        return renderComp('LiveData', { tournament, round, match, matchData: mergedMatchData, overallData });
       default:
         return <div style={PLACEHOLDER_STYLE}>View "{view}" not implemented yet.</div>;
     }

@@ -1,10 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { decode } from '@msgpack/msgpack';
+import { overlay as overlayProto } from '../proto/overlay.pb';
 import api from '../login/api.tsx';
 import SocketManager from '../dashboard/socketManager.tsx';
-import LocalPcobManager, { RawPlayerInfo } from '../dashboard/localPcobManager.ts';
-import { mergeLocalVitals } from '../Themes/shared/hooks/useLocalVitalsMerge.ts';
 import { readCachedBulk, writeCachedBulk } from './publicCache.ts';
 
 /* ============================================================================
@@ -317,6 +316,66 @@ const computeDeadTeamList = (
   }));
 };
 
+// ============================================================================
+// Protobuf decode support (bandwidth: round:${id}:${id}:matchData/overall
+// rooms now negotiate protobuf per-socket — see socketManager.tsx's
+// wireFormat query param and joinRoundRoom below).
+// ============================================================================
+// Backend (protobufCodec.js) prefixes every protobuf payload with this byte
+// so the client can tell it apart from a plain msgpack payload arriving on
+// the SAME event name from the user:${userId} room (a socket can be in both
+// rooms at once, e.g. an operator viewing the overlay in their own logged-in
+// tab) — 0xC1 is formally reserved/"never used" by the msgpack spec, so no
+// genuine msgpack stream this codebase produces can ever start with it.
+const PROTOBUF_MARKER_BYTE = 0xc1;
+
+// Proto field names can't start with `_` (grammar requires a leading
+// letter), so the wire calls the Mongoose subdoc id `docId` — remap back to
+// `_id` (and, for teams, keep `teamId` as its own separate field) so
+// protobuf-decoded objects are byte-for-byte shape-compatible with what
+// msgpack/JSON already deliver. See overlay.proto's comments on Player.docId
+// / Team.docId for why these are two distinct Mongo ObjectIds, not one.
+const remapProtoPlayer = (p: any) => {
+  const { docId, ...rest } = p;
+  return { ...rest, _id: docId };
+};
+const remapProtoTeam = (t: any) => {
+  const { docId, players, ...rest } = t;
+  return { ...rest, _id: docId, players: Array.isArray(players) ? players.map(remapProtoPlayer) : [] };
+};
+
+// decodeWireMessage(raw, overlayProto.MatchDataPayload) /
+// decodeWireMessage(raw, overlayProto.OverallDataPayload) — each event
+// handler knows its own message type, so the type is passed in rather than
+// inferred (protobuf bytes carry no self-describing type tag the way
+// msgpack's leading byte does).
+const decodeWireMessage = (raw: unknown, ProtoType: any): any => {
+  if (raw instanceof ArrayBuffer || raw instanceof Uint8Array) {
+    const bytes = raw instanceof ArrayBuffer ? new Uint8Array(raw) : raw;
+    if (bytes.length > 0 && bytes[0] === PROTOBUF_MARKER_BYTE) {
+      try {
+        const decoded = ProtoType.decode(bytes.subarray(1));
+        const obj: any = ProtoType.toObject(decoded, { defaults: true, longs: String });
+        if (Array.isArray(obj.teams)) obj.teams = obj.teams.map(remapProtoTeam);
+        return obj;
+      } catch (err) {
+        console.error('[bw][PublicThemeRenderer] protobuf decode failed:', err, bytes);
+        return null;
+      }
+    }
+    // Not protobuf-marked -> msgpack, either because this socket hasn't
+    // negotiated protobuf for this room yet, or because it's arriving via
+    // the user:${userId} room's separately-negotiated msgpack path.
+    try {
+      return decode(bytes);
+    } catch (err) {
+      console.error('[bw][PublicThemeRenderer] msgpack decode failed:', err, bytes);
+      return null;
+    }
+  }
+  return raw;
+};
+
 const PublicThemeRenderer: React.FC = () => {
   // Module-level cache shared across all mounts of this component in the
   // current tab session — survives view switches and re-mounts, cleared
@@ -341,27 +400,19 @@ const PublicThemeRenderer: React.FC = () => {
   // result isn't readable synchronously, but this ref is.
   const matchDataRef = useRef<MatchData | null>(null);
 
+  // Mirrors matchDataRef, same reason: overallDataUpdate is now a team-level
+  // delta (backend: pubgApiMatchData.controller.js's emitOverallUpdate), so
+  // the socket handler needs the truly-latest standings to merge each
+  // incoming chunk against, not a stale snapshot from before React applied
+  // an earlier setOverallData in the same burst.
+  const overallDataRef = useRef<OverallData | null>(null);
+
   // Tracks whether the fetch effect below has ever run for this mount, so
   // its setLoading(true) can be skipped exactly once — only when a cache
   // hit already seeded real data (initialCache) on the very first run.
   // Every later run (a view/match/followSelected change within the same
   // tab session) still flips loading true while refetching, same as today.
   const firstFetchRef = useRef(true);
-
-  // Local-PCOB vitals mode (?localVitals=true) — see the dedicated useEffect
-  // below. Kept as a Map keyed by String(uId) so a player not present in the
-  // latest local tick simply keeps its last-known local value instead of
-  // being blanked. Cleared whenever the live matchId changes (see the
-  // matchId-watch effect below) so a previous match's vitals never leak into
-  // a freshly-selected one — PCOB itself has no concept of "match".
-  const [localVitalsByUid, setLocalVitalsByUid] = useState<Map<string, RawPlayerInfo>>(new Map());
-  // True only while the local socket is both connected/enabled AND not
-  // stale (no tick within LocalPcobManager's staleness window) — see
-  // onStaleChange below. Drives automatic fallback to remote-only vitals.
-  const [localStale, setLocalStale] = useState(true);
-  const lastLocalVitalsMatchIdRef = useRef<string | null>(null);
-  const lastVitalsLogRef = useRef<string>('');
-
 
   const cachedGet = async (url: string, signal: AbortSignal, ttlMs = 5000) => {
     const cache = cacheRef.current;
@@ -402,11 +453,6 @@ const PublicThemeRenderer: React.FC = () => {
   const view = searchParams.get('view') || 'Lower';
   const followSelected = (searchParams.get('followSelected') || 'false').toLowerCase() === 'true';
   const selectedScheduleMatchIds = searchParams.get('scheduleMatches')?.split(',') || [];
-  // Opt-in only: set on the ONE OBS Browser Source URL running on the same
-  // host PC as PCOB (?localVitals=true). Every overlay URL that doesn't set
-  // this behaves byte-for-byte as before — see the local-vitals effect and
-  // mergedMatchData below.
-  const localVitalsEnabled = (searchParams.get('localVitals') || 'false').toLowerCase() === 'true';
 
   // Silently fall back to Theme1 for an unknown/unbuilt theme (e.g. a stale
   // ?theme=Theme2 link) rather than rendering nothing.
@@ -431,6 +477,9 @@ const PublicThemeRenderer: React.FC = () => {
     // stale. Safe here since this initializer runs exactly once, on mount.
     if (cached?.bulk?.currentMatchData?.matchData) {
       matchDataRef.current = cached.bulk.currentMatchData.matchData;
+    }
+    if (cached?.bulk?.overallData) {
+      overallDataRef.current = cached.bulk.overallData;
     }
     return cached;
   });
@@ -485,6 +534,7 @@ const PublicThemeRenderer: React.FC = () => {
     lastDeadTeamListLengthRef.current = computedDeadTeamList.length;
     setDeadTeamList(sortDeadTeamList(computedDeadTeamList));
 
+    overallDataRef.current = bulk.overallData ?? null;
     setOverallData(bulk.overallData ?? null);
     setMatchDatas(
       (bulk.matchDatasData ?? [])
@@ -552,7 +602,9 @@ const PublicThemeRenderer: React.FC = () => {
           controller.signal,
           LIVE_TTL
         );
-
+console.log(
+  `[DATA SOURCE] 🌐 REMOTE HTTP | bulk data received | match=${matchId}`
+);
         if (cancelled) return;
         applyBulkPayload(bulk);
         // Write-through: keeps the global cache warm for the next refresh
@@ -587,7 +639,7 @@ const PublicThemeRenderer: React.FC = () => {
     // just load.
     const pollTimer = setInterval(() => {
       if (!cancelled) fetchData(true);
-    }, 6000);
+    }, 600000);
 
     return () => {
       cancelled = true;
@@ -604,36 +656,43 @@ const PublicThemeRenderer: React.FC = () => {
 
     // Room is scoped per ROUND (not per match) — backend:
     // pubgApiMatchData.controller.js pushes whichever match is currently
-    // selected for this round into `round:${tournamentId}:${roundId}`, so a
+    // selected for this round into round:${tournamentId}:${roundId}:*, so a
     // followSelected overlay keeps receiving updates across a match switch
     // without needing to rejoin anything.
-    socket.emit('joinRoundRoom', { tournamentId, roundId });
+    //
+    // `view` tells the server which round:...:matchData / :overall
+    // sub-room(s) this socket actually needs (a view using neither, e.g.
+    // Lower/CommingUpNext, joins nothing and gets zero live-tick bytes) —
+    // see utils/viewDataTiers.js server-side. `wireFormat: 'protobuf'`
+    // negotiates the denser encoding for this socket, permanently (not a
+    // one-time migration flag) — an old/unreloaded tab that never sends
+    // this keeps working via msgpack forever, see decodeWireMessage above.
+    console.log(`[bw][overlay] joinRoundRoom tournamentId=${tournamentId} roundId=${roundId} view=${view} wireFormat=protobuf`);
+    socket.emit('joinRoundRoom', { tournamentId, roundId, view, wireFormat: 'protobuf' });
 
     // The server emits 'liveMatchUpdate'/'overallDataUpdate' into THIS room
-    // as MessagePack-encoded binary payloads (backend: encodeMsgpack in
-    // pubgApiMatchData.controller.js/overall.controller.js) — socket.io-
+    // as MessagePack- or protobuf-encoded binary payloads depending on this
+    // socket's negotiated format (see decodeWireMessage above) — socket.io-
     // client hands them back as an ArrayBuffer/Uint8Array, so decode before
-    // touching any field. Both are always FULL objects, never a diff — a
-    // missed tick is simply caught up by the next one.
+    // touching any field. Both are now TEAM-LEVEL DELTAS — incoming.teams is
+    // only the teams that changed since the backend's last tick, which is
+    // exactly why the merge-by-teamId logic below (mergedTeams) keeps a
+    // team's last-known value when it's absent from a given payload, rather
+    // than replacing wholesale. A client that misses a delta entirely isn't
+    // stranded: the HTTP bulk-fetch effect (applyBulkPayload, above) does
+    // an unconditional full replace on mount/view-change/match-switch,
+    // independent of the socket.
     //
     // BUT: this same socket can ALSO be a member of a `user:${userId}`
     // room at the same time — the backend auto-joins any socket carrying a
     // valid session cookie into that room regardless of whether it's the
     // dashboard or this public overlay (e.g. viewing the overlay in the
-    // same logged-in browser). Several PLAIN-JSON emits reuse these exact
-    // event names for that room (matchData.controller.js's
-    // emitOverallUpdateAsync, pubgApiMatchData.controller.js's dashboard
-    // liveMatchUpdate emit), so a plain object can legitimately arrive
-    // here too. Decode defensively instead of assuming binary — mirrors
-    // decodeTotalPlayerListPayload's same pass-through-if-not-binary
-    // pattern on the backend.
-    const decodeIncoming = (raw: unknown): any => {
-      if (raw instanceof ArrayBuffer || raw instanceof Uint8Array) {
-        return decode(new Uint8Array(raw as ArrayBuffer));
-      }
-      return raw;
-    };
-
+    // same logged-in browser). liveMatchUpdate on THAT room is msgpack- or
+    // plain-JSON-encoded depending on that room's OWN separate negotiation
+    // (matchDataController.tsx's ?msgpackLiveUpdate=1) — decodeWireMessage
+    // handles all three shapes (plain object, msgpack, protobuf) landing on
+    // the same event name.
+    //
     // incoming.teams is only a SLICE of this match's teams now (backend:
     // TEAMS_PER_LIVE_CHUNK) — merge by teamId into the latest known state
     // instead of replacing it wholesale, so:
@@ -648,7 +707,7 @@ const PublicThemeRenderer: React.FC = () => {
     // non-redundant pieces of the SAME tick — queuing/delaying them would
     // only add latency for no coalescing benefit.
     const processLiveMatchUpdate = (raw: ArrayBuffer | Uint8Array) => {
-      const incoming = decodeIncoming(raw);
+      const incoming = decodeWireMessage(raw, overlayProto.MatchDataPayload);
       if (!incoming) return;
 
       // A followSelected overlay wants every push for this round (whichever
@@ -708,10 +767,46 @@ const PublicThemeRenderer: React.FC = () => {
       processLiveMatchUpdate(raw);
     };
 
+    // overallDataUpdate is now a TEAM-LEVEL DELTA (backend:
+    // pubgApiMatchData.controller.js's emitOverallUpdate) — incoming.teams
+    // is only the teams that changed since the backend's last tick for this
+    // round, same shape/reasoning as processLiveMatchUpdate's mergedTeams
+    // above. Merge by teamId so a team absent from this tick keeps showing
+    // its last-known standings rather than disappearing from the board.
     const handleOverallDataUpdate = (raw: ArrayBuffer | Uint8Array) => {
-      const incoming = decodeIncoming(raw);
+      const incoming = decodeWireMessage(raw, overlayProto.OverallDataPayload);
       if (!incoming) return;
-      setOverallData(incoming);
+
+      const incomingTeams: any[] = Array.isArray(incoming.teams) ? incoming.teams : [];
+      const prevOverallData = overallDataRef.current;
+      // Keyed on roundId, not matchId — OverallData is standings for the
+      // WHOLE round (see the OverallData interface above, which has no
+      // matchId field at all), so incoming.matchId only identifies which
+      // match's tick triggered this particular recompute. Comparing against
+      // matchId here always fails (prevOverallData.matchId is undefined),
+      // which silently discarded prevTeams on every single delta and
+      // replaced the board with just that chunk's teams — every other
+      // team's points would vanish until the next full HTTP poll restored
+      // them.
+      const prevTeams: any[] =
+        prevOverallData && String(prevOverallData.roundId) === String(incoming.roundId)
+          ? prevOverallData.teams || []
+          : [];
+
+      const incomingById = new Map(incomingTeams.map((t) => [String(t.teamId ?? t._id), t]));
+      const mergedTeams = prevTeams.map((t) => {
+        const key = String(t.teamId ?? t._id);
+        return incomingById.has(key) ? incomingById.get(key) : t;
+      });
+      const knownIds = new Set(prevTeams.map((t) => String(t.teamId ?? t._id)));
+      for (const t of incomingTeams) {
+        const key = String(t.teamId ?? t._id);
+        if (!knownIds.has(key)) mergedTeams.push(t);
+      }
+
+      const nextOverallData = { ...(prevOverallData || {}), ...incoming, teams: mergedTeams };
+      overallDataRef.current = nextOverallData;
+      setOverallData(nextOverallData);
     };
 
     socket.on('liveMatchUpdate', handleLiveMatchUpdate);
@@ -720,89 +815,18 @@ const PublicThemeRenderer: React.FC = () => {
     return () => {
       socket.off('liveMatchUpdate', handleLiveMatchUpdate);
       socket.off('overallDataUpdate', handleOverallDataUpdate);
+      console.log(`[bw][overlay] leaveRoundRoom tournamentId=${tournamentId} roundId=${roundId}`);
       socket.emit('leaveRoundRoom', { tournamentId, roundId });
       socketManager.disconnect();
     };
-  }, [tournamentId, roundId]);
-
-  // Local-PCOB vitals mode — opt-in via ?localVitals=true (see above). Only
-  // ever active on the one OBS Browser Source running on the same host PC
-  // as PCOB; every other overlay never enters this effect at all, so its
-  // network behavior is completely unaffected. Connects directly to PCOB
-  // (localhost:10086, plain socket.io-client — see localPcobManager.ts, same
-  // approach proven by desktop-app\src\dashboard\Component2.tsx) and keeps
-  // localVitalsByUid updated for the merge below. The remote socket effect
-  // above is untouched and keeps running in parallel the whole time — it
-  // stays authoritative for points/rank/team-meta and is the automatic
-  // fallback the moment local goes stale/disconnects.
-  useEffect(() => {
-    if (!tournamentId || !roundId || !localVitalsEnabled) return;
-
-    const manager = LocalPcobManager.getInstance();
-    manager.connect();
-    setLocalStale(manager.isStale());
-
-    const unsubscribeData = manager.onTotalPlayerList((players) => {
-      setLocalVitalsByUid((prev) => {
-        const next = new Map(prev);
-        for (const p of players) {
-          if (p.uId !== undefined) next.set(String(p.uId), p);
-        }
-        return next;
-      });
-    });
-    const unsubscribeStale = manager.onStaleChange(setLocalStale);
-
-    return () => {
-      unsubscribeData();
-      unsubscribeStale();
-      manager.disconnect();
-    };
-  }, [tournamentId, roundId, localVitalsEnabled]);
-
-  // PCOB has no concept of "match" — without this, a stale uId->vitals
-  // entry from a previous match could briefly leak into a freshly-selected
-  // one (relevant for followSelected overlays). Mirrors the matchId-scoped
-  // reset already used by deathTrackerRef/computeDeadTeamList above.
-  useEffect(() => {
-    const currentMatchId = matchData?.matchId ?? null;
-    if (lastLocalVitalsMatchIdRef.current !== currentMatchId) {
-      lastLocalVitalsMatchIdRef.current = currentMatchId;
-      setLocalVitalsByUid(new Map());
-    }
-  }, [matchData?.matchId]);
-
-  const localVitalsFresh = localVitalsEnabled && !localStale;
-
-  // Additive, render-only overlay on top of the pure-remote `matchData` —
-  // deliberately never fed back into computeDeadTeamList, writeCachedBulk,
-  // or refreshBackpackInfo above, all of which keep consuming `matchData`
-  // directly. publicCache.ts's cache is shared across every concurrent OBS
-  // Browser Source on this machine/profile, so leaking locally-merged vitals
-  // into it could bleed into a DIFFERENT, non-opted-in browser source.
-  const mergedMatchData = useMemo(() => {
-    if (!localVitalsFresh || localVitalsByUid.size === 0) return matchData;
-    return mergeLocalVitals(matchData, localVitalsByUid);
-  }, [matchData, localVitalsByUid, localVitalsFresh]);
-
-  // Debug-only visibility into which source this specific overlay
-  // (theme/view) is actually drawing vitals from right now — logs once per
-  // actual change, not per tick. Skipped entirely when localVitals isn't
-  // set, so a non-opted-in overlay's console output is unchanged.
-  useEffect(() => {
-    if (!localVitalsEnabled) return;
-    const totalPlayers = (matchData?.teams || []).reduce(
-      (sum: number, t: any) => sum + (t.players?.length || 0),
-      0
-    );
-    const playersFromLocal = localVitalsFresh ? localVitalsByUid.size : 0;
-    const source = localVitalsFresh ? 'local' : 'remote (local stale/unreachable)';
-    const summary = `${source}|${playersFromLocal}/${totalPlayers}`;
-    if (lastVitalsLogRef.current !== summary) {
-      lastVitalsLogRef.current = summary;
-      console.log(`[Overlay:${theme}/${view}] vitals source: ${source} — ${playersFromLocal}/${totalPlayers} players`);
-    }
-  }, [localVitalsEnabled, localVitalsFresh, localVitalsByUid, matchData, theme, view]);
+    // `view` is intentionally a dep here (unlike before) — a view change
+    // must rejoin the correct round:...:matchData/:overall sub-room(s), not
+    // silently keep whatever was joined for the PREVIOUS view.
+    // socketManager.disconnect() in the cleanup above is a documented no-op
+    // ("shared socket stays alive"), so re-running this effect on a view
+    // change is cheap: it just re-emits join/leave and re-registers two
+    // listeners, it does not tear down or reconnect the transport.
+  }, [tournamentId, roundId, view]);
 
   const renderView = () => {
     if (loading) return <div style={PLACEHOLDER_STYLE} />;
@@ -829,35 +853,35 @@ const PublicThemeRenderer: React.FC = () => {
       case 'Lower':
         return renderComp('Lower', { tournament, round, match, totalMatches: matches.length, matches });
       case 'Upper':
-        return renderComp('Upper', { tournament, round, match, matchData: mergedMatchData, backpackInfo });
+        return renderComp('Upper', { tournament, round, match, matchData, backpackInfo });
       case 'Dom':
-        return renderComp('Dom', { tournament, round, match, matchData: mergedMatchData });
+        return renderComp('Dom', { tournament, round, match, matchData });
       case 'Achive':
-        return renderComp('Achive', { tournament, round, match, matchData: mergedMatchData });
+        return renderComp('Achive', { tournament, round, match, matchData });
       case 'Alerts':
-        return renderComp('Alerts', { tournament, round, match, matchData: mergedMatchData, deadTeamList });
+        return renderComp('Alerts', { tournament, round, match, matchData, deadTeamList });
       case 'LiveStats':
-        return renderComp('LiveStats', { tournament, round, match, matchData: mergedMatchData, overallData });
+        return renderComp('LiveStats', { tournament, round, match, matchData, overallData });
       case 'LiveFrags':
-        return renderComp('LiveFrags', { tournament, round, match, matchData: mergedMatchData });
+        return renderComp('LiveFrags', { tournament, round, match, matchData });
       case 'MatchData':
-        return renderComp('MatchData', { tournament, round, match, matchData: mergedMatchData });
+        return renderComp('MatchData', { tournament, round, match, matchData });
       case 'MatchFragrs':
-        return renderComp('MatchFragrs', { tournament, round, match, matchData: mergedMatchData });
+        return renderComp('MatchFragrs', { tournament, round, match, matchData });
       case 'WwcdSummary':
-        return renderComp('WwcdSummary', { tournament, round, match, matchData: mergedMatchData });
+        return renderComp('WwcdSummary', { tournament, round, match, matchData });
       case 'WwcdStats':
-        return renderComp('WwcdStats', { tournament, round, match, matchData: mergedMatchData });
+        return renderComp('WwcdStats', { tournament, round, match, matchData });
       case 'OverAllData':
-        return renderComp('OverallData', { tournament, round, match, matchData: mergedMatchData, overallData, matches, matchDatas });
+        return renderComp('OverallData', { tournament, round, match, matchData, overallData, matches, matchDatas });
       case 'OverallFrags':
-        return renderComp('OverallFrags', { tournament, round, match, matchData: mergedMatchData, overallData, matches, matchDatas });
+        return renderComp('OverallFrags', { tournament, round, match, matchData, overallData, matches, matchDatas });
       case 'Schedule':
         return renderComp('Schedule', { tournament, round, matches, matchDatas, selectedScheduleMatches: selectedScheduleMatchIds });
       case 'CommingUpNext':
         return renderComp('CommingUpNext', { tournament, round, match, matches });
       case 'Champions':
-        return renderComp('Champions', { tournament, round, matchData: mergedMatchData, overallData });
+        return renderComp('Champions', { tournament, round, matchData, overallData });
       case '1stRunnerUp':
         return renderComp('FirstRunnerUp', { tournament, round, overallData });
       case '2ndRunnerUp':
@@ -865,29 +889,29 @@ const PublicThemeRenderer: React.FC = () => {
       case 'EventMvp':
         return renderComp('EventMvp', { tournament, round, overallData, matches, matchDatas });
       case 'MatchSummary':
-        return renderComp('MatchSummary', { tournament, round, match, matchData: mergedMatchData });
+        return renderComp('MatchSummary', { tournament, round, match, matchData });
       case 'playerH2H':
-        return renderComp('PlayerH2H', { tournament, round, match, matchData: mergedMatchData });
+        return renderComp('PlayerH2H', { tournament, round, match, matchData });
       case 'TeamH2H':
-        return renderComp('TeamH2H', { tournament, round, match, matchData: mergedMatchData });
+        return renderComp('TeamH2H', { tournament, round, match, matchData });
       case 'intro':
-        return renderComp('Intro', { tournament, round, match, matchData: mergedMatchData });
+        return renderComp('Intro', { tournament, round, match, matchData });
       case 'mapPreview':
-        return renderComp('MapPreview', { tournament, round, match, matchData: mergedMatchData });
+        return renderComp('MapPreview', { tournament, round, match, matchData });
       case 'slots':
-        return renderComp('Slots', { tournament, round, match, matchData: mergedMatchData });
+        return renderComp('Slots', { tournament, round, match, matchData });
       case 'mvp':
-        return renderComp('Mvp', { tournament, round, match, matchData: mergedMatchData, backpackInfo });
+        return renderComp('Mvp', { tournament, round, match, matchData, backpackInfo });
       case 'highlightPoints':
-        return renderComp('HighlightPoints', { tournament, round, match, matchData: mergedMatchData, overallData, matches, matchDatas });
+        return renderComp('HighlightPoints', { tournament, round, match, matchData, overallData, matches, matchDatas });
       case 'HighlightSchedule':
         return renderComp('HighlightSchedule', { tournament, round, matches, matchDatas, selectedScheduleMatches: selectedScheduleMatchIds });
       case 'RosterShowCase':
-        return renderComp('RosterShowCase', { tournament, round, match, matchData: mergedMatchData });
+        return renderComp('RosterShowCase', { tournament, round, match, matchData });
       case 'PlayerSwitch':
-        return renderComp('PlayerSwitch', { match, matchData: mergedMatchData, loading, error });
+        return renderComp('PlayerSwitch', { match, matchData, loading, error });
       case 'LiveData':
-        return renderComp('LiveData', { tournament, round, match, matchData: mergedMatchData, overallData });
+        return renderComp('LiveData', { tournament, round, match, matchData, overallData });
       default:
         return <div style={PLACEHOLDER_STYLE}>View "{view}" not implemented yet.</div>;
     }

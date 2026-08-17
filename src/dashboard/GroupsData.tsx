@@ -793,68 +793,6 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
 
   if (!showForm) return null;
 
-  // ── Groups column (shared between desktop right panel and mobile tab 3)
-  const GroupsColumn = () => (
-    <>
-      <div className="gx-panel-hdr">
-        <div className="gx-panel-label">Existing groups</div>
-
-        <div className="gx-search-wrap" style={{ marginBottom: 12 }}>
-          <FaSearch className="gx-search-ic" />
-          <input
-            type="text"
-            value={groupSearchTerm}
-            onChange={(e) => setGroupSearchTerm(e.target.value)}
-            placeholder="Search groups or teams..."
-            className="gx-search"
-          />
-        </div>
-
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between"
-        }}>
-          <span style={{
-            color: "#93959C",
-            fontSize: 13,
-            fontWeight: 500
-          }}>
-            {filteredGroups.length} group{filteredGroups.length !== 1 ? "s" : ""}
-          </span>
-
-          <span
-            className="gx-mono"
-            style={{
-              color: "#E11D2E",
-              fontSize: 13,
-              fontWeight: 800
-            }}
-          >
-            {filteredGroups.length}
-          </span>
-        </div>
-      </div>
-      <div className="gx-groups-scroll">
-        {filteredGroups.length === 0 ? (
-          <div className="gx-empty">
-            <div className="gx-empty-icon"><FaLayerGroup /></div>
-            No groups yet
-          </div>
-        ) : filteredGroups.map(group => (
-          <GroupCard
-            key={group._id}
-            group={group}
-            isExpanded={expandedGroups.has(group._id)}
-            onToggleExpand={toggleExpand}
-            onEdit={openFormForEditGroup}
-            onDelete={handleDeleteGroup}
-          />
-        ))}
-      </div>
-    </>
-  );
-
   return (
     <>
       <style>{STYLES}</style>
@@ -1027,7 +965,68 @@ const Group = React.forwardRef<GroupRef, GroupProps>(({ onSelectionChange }, ref
           </div>
 
           <div className="gx-right-panel">
-            <GroupsColumn />
+            {/* Inlined here (not a separate GroupsColumn() component
+                function) so React diffs this panel's children on each
+                render instead of remounting the whole thing — a component
+                redefined every render gets a new type identity, so React
+                used to unmount+remount every GroupCard/logo/expanded row on
+                every keystroke in either search box above. */}
+            <div className="gx-panel-hdr">
+              <div className="gx-panel-label">Existing groups</div>
+
+              <div className="gx-search-wrap" style={{ marginBottom: 12 }}>
+                <FaSearch className="gx-search-ic" />
+                <input
+                  type="text"
+                  value={groupSearchTerm}
+                  onChange={(e) => setGroupSearchTerm(e.target.value)}
+                  placeholder="Search groups or teams..."
+                  className="gx-search"
+                />
+              </div>
+
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between"
+              }}>
+                <span style={{
+                  color: "#93959C",
+                  fontSize: 13,
+                  fontWeight: 500
+                }}>
+                  {filteredGroups.length} group{filteredGroups.length !== 1 ? "s" : ""}
+                </span>
+
+                <span
+                  className="gx-mono"
+                  style={{
+                    color: "#E11D2E",
+                    fontSize: 13,
+                    fontWeight: 800
+                  }}
+                >
+                  {filteredGroups.length}
+                </span>
+              </div>
+            </div>
+            <div className="gx-groups-scroll">
+              {filteredGroups.length === 0 ? (
+                <div className="gx-empty">
+                  <div className="gx-empty-icon"><FaLayerGroup /></div>
+                  No groups yet
+                </div>
+              ) : filteredGroups.map(group => (
+                <GroupCard
+                  key={group._id}
+                  group={group}
+                  isExpanded={expandedGroups.has(group._id)}
+                  onToggleExpand={toggleExpand}
+                  onEdit={openFormForEditGroup}
+                  onDelete={handleDeleteGroup}
+                />
+              ))}
+            </div>
           </div>
 
         </div>

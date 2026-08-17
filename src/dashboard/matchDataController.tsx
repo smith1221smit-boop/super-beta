@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
+import { decode } from '@msgpack/msgpack';
 import api from '../login/api';
 import { socket } from './socket';
 import SocketManager from './socketManager';
@@ -9,7 +10,7 @@ import { getOrFetch, setCache, removeCache } from './cache';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload';
 import {
   FaUpload, FaEdit, FaTimes, FaPlus, FaCheck,
-  FaSearch, FaExclamationTriangle, FaCheckCircle, FaInfoCircle,
+  FaSearch, FaExclamationTriangle, FaCheckCircle, FaInfoCircle, FaHistory,
 } from 'react-icons/fa';
 
 // Shared with MainTeams.tsx's team-by-id cache — same backend resource.
@@ -343,6 +344,7 @@ const MatchDataViewer: React.FC = () => {
   const [selectedPlayers, setSelectedPlayers]   = useState<string[]>([]);
   const [playersLoading, setPlayersLoading]     = useState(false);
   const [savingRoster, setSavingRoster]         = useState(false);
+  const [copyingRoster, setCopyingRoster]       = useState(false);
   const [rosterSearch, setRosterSearch]         = useState('');
   const [rosterWarning, setRosterWarning]       = useState<string | null>(null);
 
@@ -438,7 +440,21 @@ const MatchDataViewer: React.FC = () => {
   useEffect(() => {
     if (!socket) return;
 
-    const handleLiveMatchUpdate = (data: any) => {
+    // Bandwidth: the backend now negotiates msgpack for this room per
+    // socket (socketManager.tsx sends ?msgpackLiveUpdate=1) — decode
+    // defensively (only if it's actually binary) so this stays correct
+    // whether the server has picked this socket up as msgpack-capable yet
+    // or not, and regardless of client/server deploy order.
+    const handleLiveMatchUpdate = (raw: any) => {
+      let data: any = raw;
+      if (raw instanceof ArrayBuffer || raw instanceof Uint8Array) {
+        try {
+          data = decode(new Uint8Array(raw));
+        } catch (err) {
+          console.error('[bw][matchDataController] failed to decode msgpack liveMatchUpdate payload:', err, raw);
+          return;
+        }
+      }
       if (!data) return;
       const inId = typeof data.matchId === 'object' && data.matchId?._id ? data.matchId._id : data.matchId;
       if (inId?.toString?.() !== matchId?.toString?.()) return;
@@ -696,33 +712,40 @@ const MatchDataViewer: React.FC = () => {
     });
   }, [t]);
 
+  // A real PUBG UID is digits-only, 5-20 chars — same rule the backend
+  // enforces (validatePlayerIds in teams.controller.js). Checking it here
+  // first avoids a guaranteed round-trip 400 when the field is left blank
+  // or has a malformed value.
+  const PLAYER_ID_FORMAT = /^\d{5,20}$/;
+
   const addNewPlayer = async () => {
     if (!editingTeam || !newPlayerName.trim()) { showToast('error', t('matchData.pleaseEnterPlayerName', 'Enter a player name first.')); return; }
+    const playerId = newPlayerId.trim();
+    if (!PLAYER_ID_FORMAT.test(playerId)) {
+      showToast('error', t('matchData.invalidPlayerId', 'Enter a valid PUBG UID (digits only, 5-20 characters).'));
+      return;
+    }
     setAddingPlayer(true);
     try {
       let photoUrl = '';
       if (newPlayerPhoto) photoUrl = await uploadToCloudinary(newPlayerPhoto, 'players/photos', 'player_photo');
-      // Forced-fresh read: this is a read-modify-write (PUT the full team
-      // back with an appended player), so a cached/stale roster here could
-      // silently drop players added elsewhere in the meantime.
-      const team = await getOrFetch(
-        teamByIdKey(editingTeam.teamId),
-        () => api.get(`/teams/${editingTeam.teamId}`).then(r => r.data),
-        { maxAge: 2 * 60 * 1000, storage: 'session', forceRefresh: true }
-      );
-      const { data: updatedTeam } = await api.put(`/teams/${editingTeam.teamId}`, {
-        ...team,
-        players: [...team.players, { playerName: newPlayerName.trim(), playerId: newPlayerId.trim() || undefined, photo: photoUrl || undefined }],
+      // Atomic single-player add ($push server-side) instead of a
+      // read-modify-write PUT of the whole team — no race with players
+      // added elsewhere between the read and the write.
+      const { data: updatedTeam } = await api.post(`/teams/${editingTeam.teamId}/players`, {
+        playerName: newPlayerName.trim(),
+        playerId,
+        photo: photoUrl || undefined,
       });
       setCache(teamByIdKey(editingTeam.teamId), updatedTeam, 'session');
       removeCache('cache:v1:teams:list', 'session');
-      const newPlayer = updatedTeam.players.find((p: any) => p.playerName === newPlayerName.trim() && (!newPlayerId.trim() || p.playerId === newPlayerId.trim()));
+      const newPlayer = updatedTeam.players.find((p: any) => p.playerName === newPlayerName.trim() && p.playerId === playerId);
       if (!newPlayer) throw new Error('Failed to find newly added player');
       setAvailablePlayers(prev => [...prev, newPlayer]);
       setNewPlayerName(''); setNewPlayerId(''); setNewPlayerPhoto(null);
       showToast('success', t('matchData.playerAddedSuccessfully', 'Player added to the roster pool.'));
-    } catch {
-      showToast('error', t('matchData.failedToAddPlayer', 'Could not add that player — try again.'));
+    } catch (err: any) {
+      showToast('error', err?.response?.data?.error || t('matchData.failedToAddPlayer', 'Could not add that player — try again.'));
     } finally { setAddingPlayer(false); }
   };
 
@@ -780,6 +803,56 @@ const MatchDataViewer: React.FC = () => {
     } finally { setSavingRoster(false); }
   };
 
+  // ── Copy roster from previous match ─────────────────────────────────────
+  const handleCopyPreviousRoster = async () => {
+    if (!matchData?._id || copyingRoster) return;
+    const ok = window.confirm(
+      t('matchData.confirmCopyPreviousRoster',
+        "Copy the previous match's roster into this match? This replaces every team's current roster here and resets all stats — this can't be undone.")
+    );
+    if (!ok) return;
+
+    setCopyingRoster(true);
+    try {
+      const { data } = await api.post(`/matchdata/${matchData._id}/copy-previous-roster`, {});
+
+      setMatchData(prev => {
+        if (!prev) return prev;
+        const updatedById = new Map((data.updatedTeams || []).map((u: any) => [String(u.teamId), u]));
+        return {
+          ...prev,
+          teams: prev.teams.map(team => {
+            const u = updatedById.get(String(team.teamId || team._id));
+            return u ? { ...team, players: u.players } : team;
+          }),
+        };
+      });
+
+      const updatedCount = data.updatedTeams?.length || 0;
+      const skipped: any[] = data.skippedTeams || [];
+
+      if (updatedCount === 0) {
+        showToast('info', t('matchData.noRosterCopied', 'No matching teams found in the previous match — nothing was copied.'));
+      } else if (skipped.length > 0) {
+        const names = skipped.map((s: any) => s.teamName).filter(Boolean).join(', ');
+        showToast('info', t('matchData.rosterCopiedPartial',
+          `Copied ${updatedCount} team roster(s) from match ${data.previousMatchNo}. Skipped (no match in previous game): ${names}`));
+      } else {
+        showToast('success', t('matchData.rosterCopiedSuccess',
+          `Copied roster${updatedCount === 1 ? '' : 's'} for ${updatedCount} team(s) from match ${data.previousMatchNo}.`));
+      }
+    } catch (err: any) {
+      const reason = err?.response?.data?.reason;
+      if (reason === 'no_previous_match') {
+        showToast('info', t('matchData.noPreviousMatch', 'This is the first match in the round — no previous match to copy from.'));
+      } else if (reason === 'no_previous_matchdata') {
+        showToast('info', t('matchData.previousMatchEmpty', "The previous match doesn't have a roster yet."));
+      } else {
+        showToast('error', t('matchData.failedToCopyRoster', 'Could not copy the previous roster — try again.'));
+      }
+    } finally { setCopyingRoster(false); }
+  };
+
   // ── Derived data ─────────────────────────────────────────────────────────
   const sortedTeams = useMemo(() => {
     const arr = [...(matchData?.teams ?? [])];
@@ -797,13 +870,6 @@ const MatchDataViewer: React.FC = () => {
   }, []);
 
   // ── Loading / Error / Empty ──────────────────────────────────────────────
-  const Shell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-    <div className="min-h-screen bg-[#0B0C0E] text-[#F4F2EE] font-sans antialiased">
-      <GlobalStyle />
-      {children}
-    </div>
-  );
-
   if (loading) {
     return (
       <Shell>
@@ -888,17 +954,37 @@ const MatchDataViewer: React.FC = () => {
         </div>
       </div>
 
-      {/* Sort */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-end items-center gap-2 pt-4 pb-2">
-        <span className="font-mono text-[9px] tracking-[0.18em] text-[#55565C] uppercase">Sort</span>
-        <select
-          value={sortBy}
-          onChange={e => setSortBy(e.target.value as 'slot' | 'placePoints')}
-          className="bg-[#131418] border border-[#24262B] text-[#E11D2E] font-mono text-[10px] font-bold px-3 py-1.5 outline-none focus-visible:border-[#E11D2E]"
+      {/* Toolbar: copy-previous-roster + Sort */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center gap-2 pt-4 pb-2">
+        <button
+          type="button"
+          onClick={handleCopyPreviousRoster}
+          disabled={copyingRoster}
+          className="flex items-center gap-1.5 font-mono text-[9px] font-semibold tracking-wide px-2.5 py-1.5 border border-[#24262B] text-[#93959C] hover:border-[#E11D2E]/50 hover:text-[#E11D2E] disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          <option value="slot">SLOT</option>
-          <option value="placePoints">POINTS</option>
-        </select>
+          {copyingRoster ? (
+            <>
+              <span className="w-3 h-3 border-2 border-[#55565C]/40 border-t-[#93959C] rounded-full animate-spin" />
+              COPYING…
+            </>
+          ) : (
+            <>
+              <FaHistory size={9} /> COPY PREVIOUS ROSTER
+            </>
+          )}
+        </button>
+
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[9px] tracking-[0.18em] text-[#55565C] uppercase">Sort</span>
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value as 'slot' | 'placePoints')}
+            className="bg-[#131418] border border-[#24262B] text-[#E11D2E] font-mono text-[10px] font-bold px-3 py-1.5 outline-none focus-visible:border-[#E11D2E]"
+          >
+            <option value="slot">SLOT</option>
+            <option value="placePoints">POINTS</option>
+          </select>
+        </div>
       </div>
 
       {/* Teams grid */}
@@ -1016,9 +1102,9 @@ const MatchDataViewer: React.FC = () => {
                     </div>
 
                     <div>
-                      <label className="block font-mono text-[10px] tracking-wider text-[#55565C] uppercase mb-1.5">Player ID (optional)</label>
+                      <label className="block font-mono text-[10px] tracking-wider text-[#55565C] uppercase mb-1.5">Player ID (PUBG UID) *</label>
                       <input
-                        type="text" placeholder="Enter player ID"
+                        type="text" placeholder="Digits only, e.g. 5123456789"
                         value={newPlayerId} onChange={e => setNewPlayerId(e.target.value)}
                         className="w-full px-3 py-2.5 bg-[#0B0C0E] border border-[#24262B] text-[#F4F2EE] text-sm placeholder:text-[#55565C] outline-none focus-visible:border-[#E11D2E]"
                       />
@@ -1041,7 +1127,7 @@ const MatchDataViewer: React.FC = () => {
 
                     <button
                       onClick={addNewPlayer}
-                      disabled={addingPlayer || !newPlayerName.trim()}
+                      disabled={addingPlayer || !newPlayerName.trim() || !newPlayerId.trim()}
                       className="w-full flex items-center justify-center gap-2 py-3 bg-[#E11D2E] hover:bg-[#8C1220] disabled:opacity-40 disabled:cursor-not-allowed text-white font-display font-bold text-[12px] tracking-wide"
                     >
                       {addingPlayer
@@ -1087,6 +1173,17 @@ const MatchDataViewer: React.FC = () => {
     </Shell>
   );
 };
+
+// Module-scoped (not defined inside MatchDataViewer) so its identity stays
+// stable across renders — it sits at the root of every branch this file
+// returns, so a fresh function reference here would remount the whole page
+// (and drop input focus) on every keystroke.
+const Shell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="min-h-screen bg-[#0B0C0E] text-[#F4F2EE] font-sans antialiased">
+    <GlobalStyle />
+    {children}
+  </div>
+);
 
 // Fonts + the one keyframe used for live-update pulses. Kept as a single
 // static <style> tag (same approach as the marketing page) so it's injected

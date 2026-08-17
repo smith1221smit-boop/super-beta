@@ -17,6 +17,7 @@
     "i18next-http-backend": "^3.0.0",
     "lodash.debounce": "^4.0.8",
     "lucide-react": "^0.540.0",
+    "protobufjs": "^8.7.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-i18next": "^13.5.0",
@@ -30,12 +31,17 @@
     "start": "react-scripts start",
     "build": "cross-env DISABLE_ESLINT_PLUGIN=true react-scripts build --legacy-peer-deps",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "proto:gen": "pbjs -t static-module -w commonjs -o src/proto/overlay.pb.js src/proto/overlay.proto && pbts -o src/proto/overlay.pb.d.ts src/proto/overlay.pb.js"
   },
   "eslintConfig": {
     "extends": [
       "react-app",
       "react-app/jest"
+    ],
+    "ignorePatterns": [
+      "src/proto/*.pb.js",
+      "src/proto/*.pb.d.ts"
     ]
   },
   "browserslist": {
@@ -58,7 +64,9 @@
     "@types/socket.io-client": "^1.4.36",
     "autoprefixer": "^10.4.21",
     "cross-env": "^7.0.3",
+    "eslint-plugin-jsdoc": "^63.3.3",
     "postcss": "^8.5.6",
+    "protobufjs-cli": "^2.6.2",
     "tailwindcss": "^3.4.17",
     "typescript": "^4.9.5"
   }

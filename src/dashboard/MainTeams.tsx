@@ -687,13 +687,15 @@ const Teams: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Refetch (debounced) whenever the search query changes, skipping the
-  // redundant call on first mount (already handled above).
+  // Refetch whenever the search query changes, skipping the redundant call
+  // on first mount (already handled above). No debounce here — SearchInput
+  // (above) already debounces 280ms before it calls onSearchChange/updates
+  // searchQuery, so debouncing again here just doubled the delay between
+  // "stop typing" and results landing for no benefit.
   const isFirstSearchRun = useRef(true);
   useEffect(() => {
     if (isFirstSearchRun.current) { isFirstSearchRun.current = false; return; }
-    const id = setTimeout(() => { fetchTeams(searchQuery); }, 280);
-    return () => clearTimeout(id);
+    fetchTeams(searchQuery);
   }, [searchQuery, fetchTeams]);
 
   const viewingTeam = useMemo(() => teams.find(t => t._id === viewingTeamId) || null, [teams, viewingTeamId]);

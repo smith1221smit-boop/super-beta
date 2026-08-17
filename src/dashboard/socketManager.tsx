@@ -56,10 +56,17 @@ class SocketManager {
         reconnectionAttempts: Infinity, // keep trying — this tab may run unattended in OBS for hours
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
+        // Bandwidth: declares this client can decode msgpack on the
+        // dashboard's user:${userKey} liveMatchUpdate (today it's plain
+        // JSON there). PERMANENT negotiated default, not a rollout flag —
+        // an old/unreloaded tab that never sends this keeps getting plain
+        // JSON forever, correctly. See matchDataController.tsx's
+        // decodeIncoming for the matching decode step.
+        query: { msgpackLiveUpdate: "1" },
       });
 
       this.socket.on("connect", () => {
-        console.log("SocketManager: Socket connected");
+        console.log(`[bw][socketManager] connected id=${this.socket?.id} msgpackLiveUpdate=1 (negotiated for user: room liveMatchUpdate)`);
         if (this.reconnectTimer) {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;

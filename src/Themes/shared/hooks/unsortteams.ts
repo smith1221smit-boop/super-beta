@@ -17,10 +17,9 @@ export interface Player {
   isOutsideBlueCircle?: boolean;
   isFiring?: boolean;
   picUrl?: string;
-  // Join key used by localPcobManager/useLocalVitalsMerge to match a raw
-  // PCOB telemetry record onto this player when local-vitals mode is on
-  // (?localVitals=true) — same uId namespace PCOB itself uses, persisted
-  // through by the backend's live-sync path.
+  // Player identifier carried through from the remote/proto payload — used
+  // across theme views (Overall/Champions/EventMvp/PlayerSwitch/TopFragger,
+  // etc.) to key/match players between updates.
   uId?: string | number;
   [key: string]: any;
 }

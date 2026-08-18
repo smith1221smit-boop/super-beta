@@ -154,8 +154,8 @@ const TopNav = memo(({ user, onLogout }: { user: any; onLogout: () => void }) =>
 
   const links = [
     { label: 'TOURNAMENTS', icon: <FaTrophy size={13} />, active: true },
-    { label: 'TEAMS', icon: <FaUsers size={13} />, onClick: () => window.open('/teams', '_blank', 'noopener,noreferrer') },
-    { label: 'HUD', icon: <FaEye size={13} />, onClick: () => window.open('/displayhud', '_blank', 'noopener,noreferrer') },
+    { label: 'TEAMS', icon: <FaUsers size={13} />, onClick: () => window.location.href = '/teams' },
+    { label: 'HUD', icon: <FaEye size={13} />, onClick: () => window.location.href = '/displayhud' },
     { label: 'HELP', icon: <FaDiscord size={13} />, onClick: () => window.open('https://discord.com/channels/623776491682922526/1426117227257663558', '_blank') },
   ];
 

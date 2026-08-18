@@ -17,7 +17,7 @@ import { getCache, setCache, clearCacheByPrefix } from './cache.tsx';
 // backend's own bulk-response cache is already only a 3s TTL
 // (Bulkpublic.route.js), so holding onto a local copy much longer than that
 // just widens how stale that first frame can look after a reload.
-const STATIC_TTL_MS = 90 * 1000;
+const STATIC_TTL_MS = 60 * 1000;
 const LIVE_TTL_MS = 8 * 1000;
 
 const staticKey = (tournamentId: string, roundId: string) =>

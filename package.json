@@ -17,6 +17,7 @@
     "i18next-http-backend": "^3.0.0",
     "lodash.debounce": "^4.0.8",
     "lucide-react": "^0.540.0",
+    "papaparse": "^5.6.0",
     "protobufjs": "^8.7.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -59,6 +60,7 @@
   "devDependencies": {
     "@types/lodash.debounce": "^4.0.9",
     "@types/node": "^24.10.0",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
     "@types/socket.io-client": "^1.4.36",

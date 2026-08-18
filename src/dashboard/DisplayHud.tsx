@@ -136,6 +136,16 @@ const STYLES = `
 .hd-status { display: flex; align-items: center; gap: 7px; background: #131418; border: 1px solid #24262B; padding: 8px 14px; }
 .hd-status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 
+.hd-api-banner { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px; padding: 6px 10px 6px 8px; background: #E11D2E; border: 1px solid #E11D2E; color: #fff; cursor: pointer; transition: background .15s ease, transform .1s ease; font-family: inherit; }
+.hd-api-banner:hover { background: #c8172a; }
+.hd-api-banner:active { transform: scale(0.98); }
+.hd-api-banner-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.hd-api-banner-dot { width: 6px; height: 6px; border-radius: 50%; background: #fff; flex-shrink: 0; }
+.hd-api-banner-text { min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+.hd-api-banner-label { font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.8; flex-shrink: 0; }
+.hd-api-banner-name { font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+.hd-api-banner-cta { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; white-space: nowrap; flex-shrink: 0; padding-left: 6px; border-left: 1px solid rgba(255,255,255,0.35); }
+
 .hd-step { display: flex; gap: 16px; margin-bottom: 14px; }
 .hd-step-num-wrap { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; width: 34px; }
 .hd-step-num { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; border: 1px solid #24262B; background: #131418; color: #55565C; flex-shrink: 0; }
@@ -217,7 +227,7 @@ const TopNav = memo(({
 
   const links = [
     { label: 'TOURNAMENTS', icon: <FaTrophy size={13} />, onClick: () => (window.location.href = '/dashboard') },
-    { label: 'TEAMS', icon: <FaUsers size={13} />, onClick: () => window.open('/teams', '_blank', 'noopener,noreferrer') },
+    { label: 'TEAMS', icon: <FaUsers size={13} />, onClick: () => (window.location.href = '/teams') },
     { label: 'HUD', icon: <FaEye size={13} />, active: true },
     { label: 'HELP', icon: <FaDiscord size={13} />, onClick: () => window.open('https://discord.com/channels/623776491682922526/1426117227257663558', '_blank') },
   ];
@@ -335,6 +345,8 @@ const DisplayHud: React.FC = () => {
   const [selectedSchedule, setSelectedSchedule] = useState<Record<string, string[]>>({});
   const [user, setUser] = useState<any>(null);
   const [pollingKey, setPollingKey] = useState(0);
+  const [apiRound, setApiRound] = useState<{ tournamentId: string; roundId: string; roundName: string } | null>(null);
+  const [jumpingToApiRound, setJumpingToApiRound] = useState(false);
   const [themeMap, setThemeMap] = useState<Record<string, string>>(() => {
     try { const s = localStorage.getItem('selectedThemeMap'); return s ? JSON.parse(s) : {}; } catch { return {}; }
   });
@@ -399,6 +411,20 @@ const DisplayHud: React.FC = () => {
       });
       setSelectedMatches(map);
     }).catch(() => {});
+
+    // The backend enforces at most one apiEnable:true round per user (DB-level
+    // unique partial index), so this is a single global "live" round, not a
+    // per-tournament thing — surfacing it here saves re-clicking through the
+    // tournament/round pickers to find whichever one it currently is.
+    api.get('/user/rounds').then(r => {
+      const active = (Array.isArray(r.data) ? r.data : []).find((rd: any) => rd.apiEnable);
+      if (!active) { setApiRound(null); return; }
+      setApiRound({
+        tournamentId: typeof active.tournamentId === 'object' ? active.tournamentId._id : active.tournamentId,
+        roundId: active._id,
+        roundName: active.roundName,
+      });
+    }).catch(() => setApiRound(null));
   }, []);
 
   useEffect(() => {
@@ -454,6 +480,47 @@ const DisplayHud: React.FC = () => {
       .catch(err => { if (!isCanceled(err)) setMatches([]); })
       .finally(() => { if (!controller.signal.aborted) setMatchesLoading(false); });
   }, [tournamentId]);
+
+  // Jumps straight to the tournament/round the API-enabled banner is
+  // pointing at. Can't reuse handleTournamentChange + handleRoundChange back
+  // to back here: handleRoundChange closes over `tournamentId` from state,
+  // which wouldn't have committed yet from the setTournamentId call above it
+  // in the same tick, so it'd fetch matches for the *previous* tournament.
+  // Fetching rounds and matches directly off the known IDs sidesteps that.
+  const jumpToApiRound = useCallback(async () => {
+    if (!apiRound) return;
+    const { tournamentId: tId, roundId: rId } = apiRound;
+
+    setJumpingToApiRound(true);
+    setTournamentId(tId);
+    setRoundId(rId);
+    setRounds([]);
+    setMatches([]);
+
+    roundsAbortRef.current?.abort();
+    const roundsController = new AbortController();
+    roundsAbortRef.current = roundsController;
+    matchesAbortRef.current?.abort();
+    const matchesController = new AbortController();
+    matchesAbortRef.current = matchesController;
+
+    setRoundsLoading(true);
+    setMatchesLoading(true);
+    try {
+      const [roundsData, matchesData] = await Promise.all([
+        getOrFetch(`cache:v1:rounds:${tId}`, () => api.get(`/tournaments/${tId}/rounds`).then(r => r.data), { maxAge: 90 * 1000, storage: 'session' }),
+        getOrFetch(`cache:v1:matches:${tId}:${rId}`, () => api.get(`/tournaments/${tId}/rounds/${rId}/matches`).then(r => r.data), { maxAge: 90 * 1000, storage: 'session' }),
+      ]);
+      if (!roundsController.signal.aborted) setRounds(Array.isArray(roundsData) ? roundsData : []);
+      if (!matchesController.signal.aborted) setMatches(Array.isArray(matchesData) ? matchesData : []);
+    } catch (err) {
+      if (!isCanceled(err)) { setRounds([]); setMatches([]); }
+    } finally {
+      if (!roundsController.signal.aborted) setRoundsLoading(false);
+      if (!matchesController.signal.aborted) setMatchesLoading(false);
+      setJumpingToApiRound(false);
+    }
+  }, [apiRound]);
 
   // Match.tsx writes new/edited/deleted matches into this same cache key, but
   // only inside its own tab's sessionStorage — it never reaches this tab's
@@ -544,6 +611,11 @@ const DisplayHud: React.FC = () => {
     [tournaments, tournamentId]
   );
 
+  const apiTournamentName = useMemo(
+    () => (apiRound ? tournaments.find(t => t._id === apiRound.tournamentId)?.tournamentName || 'Unknown tournament' : ''),
+    [tournaments, apiRound]
+  );
+
   return (
     <div className="hd-root" style={{ minHeight: '100vh', background: '#0B0C0E' }}>
       <style>{STYLES}</style>
@@ -594,6 +666,19 @@ const DisplayHud: React.FC = () => {
           </div>
         ) : (
           <>
+            {apiRound && (
+              <button className="hd-api-banner" onClick={jumpToApiRound} disabled={jumpingToApiRound}>
+                <span className="hd-api-banner-left">
+                  <span className="hd-api-banner-dot hd-dot" />
+                  <span className="hd-api-banner-text">
+                    <span className="hd-api-banner-label">API live</span>
+                    <span className="hd-api-banner-name">{apiTournamentName} — {apiRound.roundName}</span>
+                  </span>
+                </span>
+                <span className="hd-api-banner-cta">{jumpingToApiRound ? 'LOADING…' : 'JUMP IN →'}</span>
+              </button>
+            )}
+
             {/* STEP 1 — Tournament & round */}
             <div className="hd-step">
               <div className="hd-step-num-wrap">

@@ -7,6 +7,7 @@ import {
   FaSearch, FaTimes, FaBars, FaPlus, FaCheck
 } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
+import Papa from 'papaparse';
 import api from '../login/api.tsx';
 import { uploadToCloudinary } from '../utils/cloudinaryUpload.tsx';
 import { getOrFetch, setCache, removeCache } from './cache';
@@ -44,6 +45,94 @@ interface TeamForm {
 
 const EMPTY_FORM: TeamForm = { teamFullName: '', teamTag: '', logo: '', teamFlag: '' };
 const EMPTY_PLAYER: Player = { playerName: '', playerId: '', photo: '' };
+
+// ── CSV bulk import ──────────────────────────────────────────────────────────
+// Mirrors the backend's exact per-player rules (teams.controller.js
+// PLAYER_ID_FORMAT / validatePlayerIds) so bad rows are caught in the
+// preview instead of failing an otherwise-good team server-side.
+const CSV_PLAYER_ID_FORMAT = /^\d{5,20}$/;
+const CSV_REQUIRED_COLUMNS = ['team_name', 'team_tag', 'player_name', 'player_uid'];
+
+interface CsvRow {
+  team_name?: string;
+  team_tag?: string;
+  team_logo_url?: string;
+  team_flag_url?: string;
+  player_name?: string;
+  player_uid?: string;
+  player_photo_url?: string;
+}
+
+interface ParsedTeamGroup {
+  teamFullName: string;
+  teamTag: string;
+  logo: string;
+  teamFlag: string;
+  players: Player[];
+}
+
+interface BulkImportResult {
+  createdCount: number;
+  failedCount: number;
+  created: Team[];
+  failed: { teamFullName: string; teamTag: string; reason: string }[];
+}
+
+// Groups CSV rows (one row per player, team columns repeated) into one entry
+// per team, keyed by teamTag — the field with a unique index on the backend,
+// so grouping matches what the backend actually treats as team identity.
+function parseCsvRows(rows: CsvRow[]): { groups: ParsedTeamGroup[]; warnings: string[] } {
+  const groups = new Map<string, ParsedTeamGroup>();
+  const warnings: string[] = [];
+
+  rows.forEach((row, i) => {
+    const rowNum = i + 2; // +1 for 0-index, +1 for the header row
+    const teamName = (row.team_name || '').trim();
+    const teamTag = (row.team_tag || '').trim();
+    const playerName = (row.player_name || '').trim();
+    const playerUid = (row.player_uid || '').trim();
+
+    if (!teamName || !teamTag) {
+      warnings.push(`Row ${rowNum}: missing team_name/team_tag, row skipped`);
+      return;
+    }
+
+    let group = groups.get(teamTag);
+    if (!group) {
+      group = {
+        teamFullName: teamName,
+        teamTag,
+        logo: (row.team_logo_url || '').trim(),
+        teamFlag: (row.team_flag_url || '').trim(),
+        players: [],
+      };
+      groups.set(teamTag, group);
+    } else if (group.teamFullName !== teamName) {
+      warnings.push(`Row ${rowNum}: team_name "${teamName}" doesn't match "${group.teamFullName}" already seen for tag "${teamTag}" — kept the first name`);
+    }
+
+    if (!playerName) {
+      warnings.push(`Row ${rowNum}: missing player_name, player skipped`);
+      return;
+    }
+    if (!CSV_PLAYER_ID_FORMAT.test(playerUid)) {
+      warnings.push(`Row ${rowNum}: player_uid "${playerUid}" for "${playerName}" isn't a valid PUBG UID (digits only, 5-20 chars), player skipped`);
+      return;
+    }
+    if (group.players.some(p => p.playerId === playerUid)) {
+      warnings.push(`Row ${rowNum}: player_uid "${playerUid}" is already used by another player on team "${teamTag}" in this file, player skipped`);
+      return;
+    }
+
+    group.players.push({
+      playerName,
+      playerId: playerUid,
+      photo: (row.player_photo_url || '').trim(),
+    });
+  });
+
+  return { groups: Array.from(groups.values()), warnings };
+}
 
 // ── Design system ────────────────────────────────────────────────────────────
 // PERF NOTES (read before touching this file again):
@@ -207,9 +296,24 @@ const STYLES = `
 .tm-empty { text-align: center; padding: 72px 24px; border: 1px dashed #24262B; }
 .tm-empty-icon-wrap { width: 68px; height: 68px; border-radius: 50%; margin: 0 auto 20px; background: rgba(225,29,46,0.08); border: 1px solid rgba(225,29,46,0.3); display: flex; align-items: center; justify-content: center; }
 
+/* ── CSV import modal ── */
+.tm-import-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 36px 20px; border: 1px dashed #24262B; cursor: pointer; text-align: center; }
+.tm-import-drop:hover { border-color: rgba(225,29,46,0.5); }
+.tm-import-summary { display: flex; flex-wrap: wrap; gap: 20px; padding: 12px 14px; background: #131418; border: 1px solid #24262B; }
+.tm-import-summary-stat { display: flex; flex-direction: column; gap: 2px; }
+.tm-import-table-wrap { max-height: 240px; overflow-y: auto; border: 1px solid #24262B; margin-top: 14px; }
+.tm-import-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tm-import-table th { position: sticky; top: 0; background: #131418; text-align: left; padding: 8px 10px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #55565C; letter-spacing: 0.05em; text-transform: uppercase; border-bottom: 1px solid #24262B; }
+.tm-import-table td { padding: 7px 10px; color: #93959C; border-bottom: 1px solid #1a1b1f; }
+.tm-import-table tr:last-child td { border-bottom: none; }
+.tm-import-warnings { max-height: 160px; overflow-y: auto; border: 1px solid rgba(225,29,46,0.3); background: rgba(225,29,46,0.05); padding: 10px 12px 10px 26px; margin-top: 14px; font-size: 12px; color: #93959C; }
+.tm-import-warnings li { margin-bottom: 4px; }
+.tm-import-result-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #131418; border: 1px solid #24262B; margin-bottom: 6px; font-size: 12px; }
+.tm-import-result-row.fail { border-color: rgba(225,29,46,0.35); }
+
 @media (max-width: 560px) {
-  .tm-header-row { align-items: flex-start; }
-  .tm-header-row .tm-btn-primary { width: 100%; justify-content: center; }
+  .tm-header-row { align-items: flex-start; flex-direction: column; }
+  .tm-header-row .tm-btn-primary, .tm-header-row .tm-btn-outline { width: 100%; justify-content: center; }
   .tm-stats { width: 100%; margin-left: 0; }
   .tm-stat { flex: 1; justify-content: center; }
   .tm-grid { grid-template-columns: 1fr; }
@@ -225,7 +329,7 @@ const TopNav: React.FC<{ user: any }> = memo(({ user }) => {
   const links = [
     { label: 'TOURNAMENTS', icon: <FaTrophy size={13} />, onClick: () => window.location.href = '/dashboard' },
     { label: 'TEAMS', icon: <FaUsers size={13} />, active: true },
-    { label: 'HUD', icon: <FaEye size={13} />, onClick: () => window.open('/displayhud', '_blank', 'noopener,noreferrer') },
+    { label: 'HUD', icon: <FaEye size={13} />, onClick: () => window.location.href = '/displayhud' },
     { label: 'HELP', icon: <FaDiscord size={13} />, onClick: () => window.open('https://discord.com/channels/623776491682922526/1426117227257663558', '_blank') },
   ];
 
@@ -634,6 +738,223 @@ const FormModal: React.FC<{
   );
 };
 
+// ── CSV bulk-import modal ────────────────────────────────────────────────────
+// Second, additive entry point next to the manual "NEW TEAM" form — parses
+// the CSV client-side (one row per player, team columns repeated), groups it
+// into teams, and hands the whole batch to POST /teams/bulk-import in a
+// single request instead of looping createTeam per row.
+const ImportCsvModal: React.FC<{
+  onClose: () => void;
+  onImported: () => void;
+}> = ({ onClose, onImported }) => {
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [groups, setGroups] = useState<ParsedTeamGroup[]>([]);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [result, setResult] = useState<BulkImportResult | null>(null);
+
+  const totalPlayers = useMemo(() => groups.reduce((s, g) => s + g.players.length, 0), [groups]);
+  const previewGroups = useMemo(() => groups.slice(0, 50), [groups]);
+
+  const handleFile = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file after fixing it
+    if (!file) return;
+
+    setFileName(file.name);
+    setParsing(true);
+    setParseError(null);
+    setGroups([]);
+    setWarnings([]);
+    setResult(null);
+    setImportError(null);
+
+    Papa.parse<CsvRow>(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        setParsing(false);
+        const fields = results.meta.fields || [];
+        const missing = CSV_REQUIRED_COLUMNS.filter(c => !fields.includes(c));
+        if (missing.length) {
+          setParseError(`CSV is missing required column(s): ${missing.join(', ')}`);
+          return;
+        }
+        const { groups: parsedGroups, warnings: parsedWarnings } = parseCsvRows(results.data);
+        setGroups(parsedGroups);
+        setWarnings(parsedWarnings);
+      },
+      error: (err: Error) => {
+        setParsing(false);
+        setParseError(err.message || 'Failed to parse CSV file');
+      },
+    });
+  }, []);
+
+  const handleImport = useCallback(async () => {
+    if (importing || groups.length === 0) return;
+    setImporting(true);
+    setImportError(null);
+    try {
+      const payload = {
+        teams: groups.map(g => ({
+          teamFullName: g.teamFullName,
+          teamTag: g.teamTag,
+          logo: g.logo,
+          teamFlag: g.teamFlag,
+          players: g.players,
+        })),
+      };
+      const res = await api.post('/teams/bulk-import', payload);
+      setResult(res.data);
+      onImported();
+    } catch (err: any) {
+      setImportError(err?.response?.data?.error || 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  }, [groups, importing, onImported]);
+
+  return (
+    <div className="tm-modal-overlay" onClick={onClose}>
+      <div className="tm-modal-box" onClick={e => e.stopPropagation()}>
+        <div className="tm-modal-hdr">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="tm-pill">CSV</span>
+            <span className="tm-orb" style={{ color: '#F4F2EE', fontSize: 15, fontWeight: 700, textTransform: 'uppercase' }}>
+              Import teams from CSV
+            </span>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ width: 30, height: 30, background: 'transparent', border: '1px solid #24262B', color: '#93959C', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <FaTimes size={13} />
+          </button>
+        </div>
+        <div className="tm-modal-body">
+          {result ? (
+            <>
+              <div className="tm-import-summary">
+                <div className="tm-import-summary-stat">
+                  <span className="tm-orb" style={{ fontSize: 20, fontWeight: 800, color: '#F4F2EE' }}>{result.createdCount}</span>
+                  <span className="tm-mono" style={{ fontSize: 10, color: '#55565C' }}>TEAMS CREATED</span>
+                </div>
+                {result.failedCount > 0 && (
+                  <div className="tm-import-summary-stat">
+                    <span className="tm-orb" style={{ fontSize: 20, fontWeight: 800, color: '#E11D2E' }}>{result.failedCount}</span>
+                    <span className="tm-mono" style={{ fontSize: 10, color: '#55565C' }}>FAILED</span>
+                  </div>
+                )}
+              </div>
+
+              {result.failed.length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  {result.failed.map((f, i) => (
+                    <div key={i} className="tm-import-result-row fail">
+                      <FaTimes size={11} style={{ color: '#E11D2E', flexShrink: 0 }} />
+                      <span style={{ color: '#F4F2EE', fontWeight: 600 }}>{f.teamFullName} ({f.teamTag})</span>
+                      <span style={{ color: '#93959C' }}>— {f.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button type="button" className="tm-btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} onClick={onClose}>
+                DONE
+              </button>
+            </>
+          ) : (
+            <>
+              <label htmlFor="csv-import-file" className="tm-import-drop">
+                <FaUpload size={20} style={{ color: '#E11D2E' }} />
+                <span style={{ color: '#F4F2EE', fontWeight: 600, fontSize: 14 }}>
+                  {fileName || 'Click to choose a CSV file'}
+                </span>
+                <span style={{ color: '#55565C', fontSize: 12 }}>
+                  Columns: team_name, team_tag, team_logo_url, team_flag_url, player_name, player_uid, player_photo_url
+                </span>
+              </label>
+              <input id="csv-import-file" type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={handleFile} />
+
+              {parsing && <p style={{ color: '#93959C', fontSize: 13, marginTop: 14 }}>Parsing…</p>}
+
+              {parseError && (
+                <p style={{ color: '#E11D2E', fontSize: 13, marginTop: 14 }}>{parseError}</p>
+              )}
+
+              {!parsing && !parseError && fileName && (
+                <>
+                  <div className="tm-import-summary" style={{ marginTop: 16 }}>
+                    <div className="tm-import-summary-stat">
+                      <span className="tm-orb" style={{ fontSize: 20, fontWeight: 800, color: '#F4F2EE' }}>{groups.length}</span>
+                      <span className="tm-mono" style={{ fontSize: 10, color: '#55565C' }}>TEAMS</span>
+                    </div>
+                    <div className="tm-import-summary-stat">
+                      <span className="tm-orb" style={{ fontSize: 20, fontWeight: 800, color: '#F4F2EE' }}>{totalPlayers}</span>
+                      <span className="tm-mono" style={{ fontSize: 10, color: '#55565C' }}>PLAYERS</span>
+                    </div>
+                    {warnings.length > 0 && (
+                      <div className="tm-import-summary-stat">
+                        <span className="tm-orb" style={{ fontSize: 20, fontWeight: 800, color: '#E11D2E' }}>{warnings.length}</span>
+                        <span className="tm-mono" style={{ fontSize: 10, color: '#55565C' }}>WARNINGS</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {groups.length > 0 && (
+                    <div className="tm-import-table-wrap">
+                      <table className="tm-import-table">
+                        <thead>
+                          <tr><th>Team</th><th>Tag</th><th>Players</th></tr>
+                        </thead>
+                        <tbody>
+                          {previewGroups.map(g => (
+                            <tr key={g.teamTag}>
+                              <td style={{ color: '#F4F2EE' }}>{g.teamFullName}</td>
+                              <td className="tm-mono">{g.teamTag}</td>
+                              <td>{g.players.length}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {groups.length > previewGroups.length && (
+                        <p style={{ color: '#55565C', fontSize: 11, padding: '6px 10px' }}>+{groups.length - previewGroups.length} more</p>
+                      )}
+                    </div>
+                  )}
+
+                  {warnings.length > 0 && (
+                    <ul className="tm-import-warnings">
+                      {warnings.slice(0, 50).map((w, i) => <li key={i}>{w}</li>)}
+                      {warnings.length > 50 && <li>+{warnings.length - 50} more warnings</li>}
+                    </ul>
+                  )}
+
+                  {importError && <p style={{ color: '#E11D2E', fontSize: 13, marginTop: 14 }}>{importError}</p>}
+
+                  <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                    <button type="button" className="tm-btn-ghost" onClick={onClose}>CANCEL</button>
+                    <button
+                      type="button"
+                      className="tm-btn-primary"
+                      style={{ flex: 1, justifyContent: 'center' }}
+                      disabled={groups.length === 0 || importing}
+                      onClick={handleImport}
+                    >
+                      {importing ? 'IMPORTING…' : `IMPORT ${groups.length} TEAM${groups.length === 1 ? '' : 'S'}`}
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ── Teams root ────────────────────────────────────────────────────────────────
 const Teams: React.FC = () => {
   const { t } = useTranslation();
@@ -643,6 +964,7 @@ const Teams: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
 
   const [formTeam, setFormTeam] = useState<Team | 'new' | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [viewingTeamId, setViewingTeamId] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
@@ -756,6 +1078,11 @@ const Teams: React.FC = () => {
   const openNewForm = useCallback(() => setFormTeam('new'), []);
   const closeForm = useCallback(() => setFormTeam(null), []);
   const closeDetail = useCallback(() => setViewingTeamId(null), []);
+  const closeImportModal = useCallback(() => setShowImportModal(false), []);
+  const handleImported = useCallback(() => {
+    removeCache(TEAMS_LIST_CACHE_KEY, 'session');
+    fetchTeams(searchQuery);
+  }, [fetchTeams, searchQuery]);
 
   // Both detail view and edit need the REAL players array, which the list
   // endpoint never sends. Fetch it on demand and merge it into `teams` so
@@ -824,9 +1151,14 @@ const Teams: React.FC = () => {
             </h1>
             <p style={{ color: '#93959C', fontSize: 14, maxWidth: 480 }}>{t('teams.header.subtitle')}</p>
           </div>
-          <button className="tm-btn-primary" onClick={openNewForm}>
-            <FaPlus size={12} /> NEW TEAM
-          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="tm-btn-outline" onClick={() => setShowImportModal(true)}>
+              <FaUpload size={12} /> IMPORT CSV
+            </button>
+            <button className="tm-btn-primary" onClick={openNewForm}>
+              <FaPlus size={12} /> NEW TEAM
+            </button>
+          </div>
         </div>
 
         <div className="tm-toolbar">
@@ -897,6 +1229,10 @@ const Teams: React.FC = () => {
           onDeleteSelectedPlayers={deleteSelectedPlayers}
           deletingPlayerIds={deletingPlayerIds}
         />
+      )}
+
+      {showImportModal && (
+        <ImportCsvModal onClose={closeImportModal} onImported={handleImported} />
       )}
     </div>
   );

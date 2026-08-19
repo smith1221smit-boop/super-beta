@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 
 // Exported so every theme's LiveStats/Alerts/battlebar imports THESE types
 // instead of redeclaring their own local Player/Team/MatchData interfaces.
@@ -104,6 +104,20 @@ export function useSortedTeams(
   overallData?: OverallData | null,
   sortBy: 'live' | 'overall' | 'liveUntilDead' = 'live'
 ) {
+  // Freezes each team's "prior matches" baseline the first time it's read
+  // for a given match, instead of recomputing it (via the live subtraction
+  // below) on every tick. `matchData` and `overallData` are driven by two
+  // independent socket streams (liveMatchUpdate / overallDataUpdate, see
+  // PublicThemeRenderer.tsx) that are never guaranteed to be in sync — the
+  // backend's overallDataUpdate recompute is fired unawaited and can lag
+  // behind the matchData tick that just landed. Recomputing the subtraction
+  // fresh every render means that lag shows up directly as a transient dip
+  // in priorBaseline (and the sort order flickering with it) for a team
+  // that's still alive and hasn't actually changed standing at all. Caching
+  // it once per (matchId, teamId) makes it behave the way the comments below
+  // already claim it does: stable while alive, only moving on death.
+  const priorBaselineCacheRef = useRef<Map<string, { matchId: string; value: number }>>(new Map());
+
   const overallMap = useMemo(() => {
     const map = new Map<string, number>();
     if (!overallData?.teams) return map;
@@ -191,7 +205,36 @@ export function useSortedTeams(
       // next overall push catches up), which would otherwise underflow this
       // subtraction into a negative "prior standing" and flash as -1 on the
       // overlay.
-      const priorBaseline = Math.max(0, liveOverallTotal - thisMatchLiveContribution);
+      const rawPriorBaseline = Math.max(0, liveOverallTotal - thisMatchLiveContribution);
+
+      // Freeze priorBaseline instead of trusting the raw subtraction above on
+      // every tick — see priorBaselineCacheRef's comment above. Re-seed once
+      // whenever this is a new match for this team (cache miss, or a stale
+      // matchId left over from a previous match) — in the common case that
+      // happens at/near thisMatchLiveContribution === 0 (before this team
+      // has scored anything this match), where the subtraction is exact
+      // regardless of any matchData/overallData lag. If the hook only ever
+      // sees this team mid-match (e.g. a page load/refresh after kills
+      // already happened), seed with whatever's available rather than
+      // leaving it uncached — a possibly-imprecise value locked in once is
+      // still strictly better than the raw subtraction jittering all match.
+      //
+      // Don't seed at all, though, while overallMap has no entry for this
+      // team yet (overallData hasn't loaded/arrived for it this session) —
+      // that reads as liveOverallTotal defaulting to 0 above, which isn't a
+      // real "0 prior points" reading, just "no data yet." Seeding off that
+      // would freeze the team at 0 for the rest of the match even after the
+      // real overallData value shows up moments later.
+      const cached = priorBaselineCacheRef.current.get(lookupKey);
+      let priorBaseline: number;
+      if (cached && cached.matchId === matchData._id) {
+        priorBaseline = cached.value;
+      } else if (overallMap.has(lookupKey)) {
+        priorBaselineCacheRef.current.set(lookupKey, { matchId: matchData._id, value: rawPriorBaseline });
+        priorBaseline = rawPriorBaseline;
+      } else {
+        priorBaseline = rawPriorBaseline;
+      }
 
       const totalPoints = priorBaseline + (isAllDead ? thisMatchFinalContribution : 0);
 

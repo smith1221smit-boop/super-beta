@@ -501,107 +501,107 @@ $root.overlay = (function() {
 
         /**
          * Player health.
-         * @member {number} health
+         * @member {number|null|undefined} health
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.health = 0;
+        Player.prototype.health = null;
 
         /**
          * Player healthMax.
-         * @member {number} healthMax
+         * @member {number|null|undefined} healthMax
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.healthMax = 0;
+        Player.prototype.healthMax = null;
 
         /**
          * Player liveState.
-         * @member {number} liveState
+         * @member {number|null|undefined} liveState
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.liveState = 0;
+        Player.prototype.liveState = null;
 
         /**
          * Player isFiring.
-         * @member {boolean} isFiring
+         * @member {boolean|null|undefined} isFiring
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.isFiring = false;
+        Player.prototype.isFiring = null;
 
         /**
          * Player bHasDied.
-         * @member {boolean} bHasDied
+         * @member {boolean|null|undefined} bHasDied
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.bHasDied = false;
+        Player.prototype.bHasDied = null;
 
         /**
          * Player isOutsideBlueCircle.
-         * @member {boolean} isOutsideBlueCircle
+         * @member {boolean|null|undefined} isOutsideBlueCircle
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.isOutsideBlueCircle = false;
+        Player.prototype.isOutsideBlueCircle = null;
 
         /**
          * Player killNum.
-         * @member {number} killNum
+         * @member {number|null|undefined} killNum
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.killNum = 0;
+        Player.prototype.killNum = null;
 
         /**
          * Player killNumBeforeDie.
-         * @member {number} killNumBeforeDie
+         * @member {number|null|undefined} killNumBeforeDie
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.killNumBeforeDie = 0;
+        Player.prototype.killNumBeforeDie = null;
 
         /**
          * Player gotAirDropNum.
-         * @member {number} gotAirDropNum
+         * @member {number|null|undefined} gotAirDropNum
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.gotAirDropNum = 0;
+        Player.prototype.gotAirDropNum = null;
 
         /**
          * Player maxKillDistance.
-         * @member {number} maxKillDistance
+         * @member {number|null|undefined} maxKillDistance
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.maxKillDistance = 0;
+        Player.prototype.maxKillDistance = null;
 
         /**
          * Player damage.
-         * @member {number} damage
+         * @member {number|null|undefined} damage
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.damage = 0;
+        Player.prototype.damage = null;
 
         /**
          * Player killNumInVehicle.
-         * @member {number} killNumInVehicle
+         * @member {number|null|undefined} killNumInVehicle
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.killNumInVehicle = 0;
+        Player.prototype.killNumInVehicle = null;
 
         /**
          * Player killNumByGrenade.
-         * @member {number} killNumByGrenade
+         * @member {number|null|undefined} killNumByGrenade
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.killNumByGrenade = 0;
+        Player.prototype.killNumByGrenade = null;
 
         /**
          * Player AIKillNum.
@@ -621,11 +621,11 @@ $root.overlay = (function() {
 
         /**
          * Player rank.
-         * @member {number} rank
+         * @member {number|null|undefined} rank
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.rank = 0;
+        Player.prototype.rank = null;
 
         /**
          * Player inDamage.
@@ -637,43 +637,43 @@ $root.overlay = (function() {
 
         /**
          * Player headShotNum.
-         * @member {number} headShotNum
+         * @member {number|null|undefined} headShotNum
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.headShotNum = 0;
+        Player.prototype.headShotNum = null;
 
         /**
          * Player survivalTime.
-         * @member {number} survivalTime
+         * @member {number|null|undefined} survivalTime
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.survivalTime = 0;
+        Player.prototype.survivalTime = null;
 
         /**
          * Player driveDistance.
-         * @member {number} driveDistance
+         * @member {number|null|undefined} driveDistance
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.driveDistance = 0;
+        Player.prototype.driveDistance = null;
 
         /**
          * Player marchDistance.
-         * @member {number} marchDistance
+         * @member {number|null|undefined} marchDistance
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.marchDistance = 0;
+        Player.prototype.marchDistance = null;
 
         /**
          * Player assists.
-         * @member {number} assists
+         * @member {number|null|undefined} assists
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.assists = 0;
+        Player.prototype.assists = null;
 
         /**
          * Player outsideBlueCircleTime.
@@ -685,51 +685,51 @@ $root.overlay = (function() {
 
         /**
          * Player knockouts.
-         * @member {number} knockouts
+         * @member {number|null|undefined} knockouts
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.knockouts = 0;
+        Player.prototype.knockouts = null;
 
         /**
          * Player rescueTimes.
-         * @member {number} rescueTimes
+         * @member {number|null|undefined} rescueTimes
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.rescueTimes = 0;
+        Player.prototype.rescueTimes = null;
 
         /**
          * Player useSmokeGrenadeNum.
-         * @member {number} useSmokeGrenadeNum
+         * @member {number|null|undefined} useSmokeGrenadeNum
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.useSmokeGrenadeNum = 0;
+        Player.prototype.useSmokeGrenadeNum = null;
 
         /**
          * Player useFragGrenadeNum.
-         * @member {number} useFragGrenadeNum
+         * @member {number|null|undefined} useFragGrenadeNum
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.useFragGrenadeNum = 0;
+        Player.prototype.useFragGrenadeNum = null;
 
         /**
          * Player useBurnGrenadeNum.
-         * @member {number} useBurnGrenadeNum
+         * @member {number|null|undefined} useBurnGrenadeNum
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.useBurnGrenadeNum = 0;
+        Player.prototype.useBurnGrenadeNum = null;
 
         /**
          * Player useFlashGrenadeNum.
-         * @member {number} useFlashGrenadeNum
+         * @member {number|null|undefined} useFlashGrenadeNum
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.useFlashGrenadeNum = 0;
+        Player.prototype.useFlashGrenadeNum = null;
 
         /**
          * Player PoisonTotalDamage.
@@ -757,19 +757,19 @@ $root.overlay = (function() {
 
         /**
          * Player contribution.
-         * @member {number} contribution
+         * @member {number|null|undefined} contribution
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.contribution = 0;
+        Player.prototype.contribution = null;
 
         /**
          * Player heal.
-         * @member {number} heal
+         * @member {number|null|undefined} heal
          * @memberof overlay.Player
          * @instance
          */
-        Player.prototype.heal = 0;
+        Player.prototype.heal = null;
 
         /**
          * Player docId.
@@ -778,6 +778,177 @@ $root.overlay = (function() {
          * @instance
          */
         Player.prototype.docId = "";
+
+        // OneOf field names bound to virtual getters and setters
+        var $oneOfFields;
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_location", {
+            get: $util.oneOfGetter($oneOfFields = ["location"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_health", {
+            get: $util.oneOfGetter($oneOfFields = ["health"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_healthMax", {
+            get: $util.oneOfGetter($oneOfFields = ["healthMax"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_liveState", {
+            get: $util.oneOfGetter($oneOfFields = ["liveState"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_isFiring", {
+            get: $util.oneOfGetter($oneOfFields = ["isFiring"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_bHasDied", {
+            get: $util.oneOfGetter($oneOfFields = ["bHasDied"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_isOutsideBlueCircle", {
+            get: $util.oneOfGetter($oneOfFields = ["isOutsideBlueCircle"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_killNum", {
+            get: $util.oneOfGetter($oneOfFields = ["killNum"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_killNumBeforeDie", {
+            get: $util.oneOfGetter($oneOfFields = ["killNumBeforeDie"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_gotAirDropNum", {
+            get: $util.oneOfGetter($oneOfFields = ["gotAirDropNum"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_maxKillDistance", {
+            get: $util.oneOfGetter($oneOfFields = ["maxKillDistance"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_damage", {
+            get: $util.oneOfGetter($oneOfFields = ["damage"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_killNumInVehicle", {
+            get: $util.oneOfGetter($oneOfFields = ["killNumInVehicle"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_killNumByGrenade", {
+            get: $util.oneOfGetter($oneOfFields = ["killNumByGrenade"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_rank", {
+            get: $util.oneOfGetter($oneOfFields = ["rank"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_headShotNum", {
+            get: $util.oneOfGetter($oneOfFields = ["headShotNum"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_survivalTime", {
+            get: $util.oneOfGetter($oneOfFields = ["survivalTime"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_driveDistance", {
+            get: $util.oneOfGetter($oneOfFields = ["driveDistance"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_marchDistance", {
+            get: $util.oneOfGetter($oneOfFields = ["marchDistance"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_assists", {
+            get: $util.oneOfGetter($oneOfFields = ["assists"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_knockouts", {
+            get: $util.oneOfGetter($oneOfFields = ["knockouts"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_rescueTimes", {
+            get: $util.oneOfGetter($oneOfFields = ["rescueTimes"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_useSmokeGrenadeNum", {
+            get: $util.oneOfGetter($oneOfFields = ["useSmokeGrenadeNum"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_useFragGrenadeNum", {
+            get: $util.oneOfGetter($oneOfFields = ["useFragGrenadeNum"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_useBurnGrenadeNum", {
+            get: $util.oneOfGetter($oneOfFields = ["useBurnGrenadeNum"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_useFlashGrenadeNum", {
+            get: $util.oneOfGetter($oneOfFields = ["useFlashGrenadeNum"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_contribution", {
+            get: $util.oneOfGetter($oneOfFields = ["contribution"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
+
+        // Virtual OneOf for proto3 optional field
+        $Object.defineProperty(Player.prototype, "_heal", {
+            get: $util.oneOfGetter($oneOfFields = ["heal"]),
+            set: $util.oneOfSetter($oneOfFields)
+        });
 
         /**
          * Creates a new Player instance using the specified properties.
@@ -831,63 +1002,63 @@ $root.overlay = (function() {
                 writer.uint32(/* id 9, wireType 2 =*/74).string(message.teamName);
             if (message.location != null && $Object.hasOwnProperty.call(message, "location"))
                 $root.overlay.Vec3.encode(message.location, writer.uint32(/* id 10, wireType 2 =*/82).fork(), _depth + 1).ldelim();
-            if (message.health != null && $Object.hasOwnProperty.call(message, "health") && message.health !== 0)
+            if (message.health != null && $Object.hasOwnProperty.call(message, "health"))
                 writer.uint32(/* id 11, wireType 0 =*/88).int32(message.health);
-            if (message.healthMax != null && $Object.hasOwnProperty.call(message, "healthMax") && message.healthMax !== 0)
+            if (message.healthMax != null && $Object.hasOwnProperty.call(message, "healthMax"))
                 writer.uint32(/* id 12, wireType 0 =*/96).int32(message.healthMax);
-            if (message.liveState != null && $Object.hasOwnProperty.call(message, "liveState") && message.liveState !== 0)
+            if (message.liveState != null && $Object.hasOwnProperty.call(message, "liveState"))
                 writer.uint32(/* id 13, wireType 0 =*/104).int32(message.liveState);
-            if (message.isFiring != null && $Object.hasOwnProperty.call(message, "isFiring") && message.isFiring !== false)
+            if (message.isFiring != null && $Object.hasOwnProperty.call(message, "isFiring"))
                 writer.uint32(/* id 14, wireType 0 =*/112).bool(message.isFiring);
-            if (message.bHasDied != null && $Object.hasOwnProperty.call(message, "bHasDied") && message.bHasDied !== false)
+            if (message.bHasDied != null && $Object.hasOwnProperty.call(message, "bHasDied"))
                 writer.uint32(/* id 15, wireType 0 =*/120).bool(message.bHasDied);
-            if (message.isOutsideBlueCircle != null && $Object.hasOwnProperty.call(message, "isOutsideBlueCircle") && message.isOutsideBlueCircle !== false)
+            if (message.isOutsideBlueCircle != null && $Object.hasOwnProperty.call(message, "isOutsideBlueCircle"))
                 writer.uint32(/* id 16, wireType 0 =*/128).bool(message.isOutsideBlueCircle);
-            if (message.killNum != null && $Object.hasOwnProperty.call(message, "killNum") && message.killNum !== 0)
+            if (message.killNum != null && $Object.hasOwnProperty.call(message, "killNum"))
                 writer.uint32(/* id 20, wireType 0 =*/160).int32(message.killNum);
-            if (message.killNumBeforeDie != null && $Object.hasOwnProperty.call(message, "killNumBeforeDie") && message.killNumBeforeDie !== 0)
+            if (message.killNumBeforeDie != null && $Object.hasOwnProperty.call(message, "killNumBeforeDie"))
                 writer.uint32(/* id 21, wireType 0 =*/168).int32(message.killNumBeforeDie);
-            if (message.gotAirDropNum != null && $Object.hasOwnProperty.call(message, "gotAirDropNum") && message.gotAirDropNum !== 0)
+            if (message.gotAirDropNum != null && $Object.hasOwnProperty.call(message, "gotAirDropNum"))
                 writer.uint32(/* id 22, wireType 0 =*/176).int32(message.gotAirDropNum);
-            if (message.maxKillDistance != null && $Object.hasOwnProperty.call(message, "maxKillDistance") && message.maxKillDistance !== 0)
+            if (message.maxKillDistance != null && $Object.hasOwnProperty.call(message, "maxKillDistance"))
                 writer.uint32(/* id 23, wireType 0 =*/184).int32(message.maxKillDistance);
-            if (message.damage != null && $Object.hasOwnProperty.call(message, "damage") && message.damage !== 0)
+            if (message.damage != null && $Object.hasOwnProperty.call(message, "damage"))
                 writer.uint32(/* id 24, wireType 0 =*/192).int32(message.damage);
-            if (message.killNumInVehicle != null && $Object.hasOwnProperty.call(message, "killNumInVehicle") && message.killNumInVehicle !== 0)
+            if (message.killNumInVehicle != null && $Object.hasOwnProperty.call(message, "killNumInVehicle"))
                 writer.uint32(/* id 25, wireType 0 =*/200).int32(message.killNumInVehicle);
-            if (message.killNumByGrenade != null && $Object.hasOwnProperty.call(message, "killNumByGrenade") && message.killNumByGrenade !== 0)
+            if (message.killNumByGrenade != null && $Object.hasOwnProperty.call(message, "killNumByGrenade"))
                 writer.uint32(/* id 26, wireType 0 =*/208).int32(message.killNumByGrenade);
             if (message.AIKillNum != null && $Object.hasOwnProperty.call(message, "AIKillNum") && message.AIKillNum !== 0)
                 writer.uint32(/* id 27, wireType 0 =*/216).int32(message.AIKillNum);
             if (message.BossKillNum != null && $Object.hasOwnProperty.call(message, "BossKillNum") && message.BossKillNum !== 0)
                 writer.uint32(/* id 28, wireType 0 =*/224).int32(message.BossKillNum);
-            if (message.rank != null && $Object.hasOwnProperty.call(message, "rank") && message.rank !== 0)
+            if (message.rank != null && $Object.hasOwnProperty.call(message, "rank"))
                 writer.uint32(/* id 29, wireType 0 =*/232).int32(message.rank);
             if (message.inDamage != null && $Object.hasOwnProperty.call(message, "inDamage") && message.inDamage !== 0)
                 writer.uint32(/* id 30, wireType 0 =*/240).int32(message.inDamage);
-            if (message.headShotNum != null && $Object.hasOwnProperty.call(message, "headShotNum") && message.headShotNum !== 0)
+            if (message.headShotNum != null && $Object.hasOwnProperty.call(message, "headShotNum"))
                 writer.uint32(/* id 31, wireType 0 =*/248).int32(message.headShotNum);
-            if (message.survivalTime != null && $Object.hasOwnProperty.call(message, "survivalTime") && message.survivalTime !== 0)
+            if (message.survivalTime != null && $Object.hasOwnProperty.call(message, "survivalTime"))
                 writer.uint32(/* id 32, wireType 0 =*/256).int32(message.survivalTime);
-            if (message.driveDistance != null && $Object.hasOwnProperty.call(message, "driveDistance") && message.driveDistance !== 0)
+            if (message.driveDistance != null && $Object.hasOwnProperty.call(message, "driveDistance"))
                 writer.uint32(/* id 33, wireType 0 =*/264).int32(message.driveDistance);
-            if (message.marchDistance != null && $Object.hasOwnProperty.call(message, "marchDistance") && message.marchDistance !== 0)
+            if (message.marchDistance != null && $Object.hasOwnProperty.call(message, "marchDistance"))
                 writer.uint32(/* id 34, wireType 0 =*/272).int32(message.marchDistance);
-            if (message.assists != null && $Object.hasOwnProperty.call(message, "assists") && message.assists !== 0)
+            if (message.assists != null && $Object.hasOwnProperty.call(message, "assists"))
                 writer.uint32(/* id 35, wireType 0 =*/280).int32(message.assists);
             if (message.outsideBlueCircleTime != null && $Object.hasOwnProperty.call(message, "outsideBlueCircleTime") && message.outsideBlueCircleTime !== 0)
                 writer.uint32(/* id 36, wireType 0 =*/288).int32(message.outsideBlueCircleTime);
-            if (message.knockouts != null && $Object.hasOwnProperty.call(message, "knockouts") && message.knockouts !== 0)
+            if (message.knockouts != null && $Object.hasOwnProperty.call(message, "knockouts"))
                 writer.uint32(/* id 37, wireType 0 =*/296).int32(message.knockouts);
-            if (message.rescueTimes != null && $Object.hasOwnProperty.call(message, "rescueTimes") && message.rescueTimes !== 0)
+            if (message.rescueTimes != null && $Object.hasOwnProperty.call(message, "rescueTimes"))
                 writer.uint32(/* id 38, wireType 0 =*/304).int32(message.rescueTimes);
-            if (message.useSmokeGrenadeNum != null && $Object.hasOwnProperty.call(message, "useSmokeGrenadeNum") && message.useSmokeGrenadeNum !== 0)
+            if (message.useSmokeGrenadeNum != null && $Object.hasOwnProperty.call(message, "useSmokeGrenadeNum"))
                 writer.uint32(/* id 39, wireType 0 =*/312).int32(message.useSmokeGrenadeNum);
-            if (message.useFragGrenadeNum != null && $Object.hasOwnProperty.call(message, "useFragGrenadeNum") && message.useFragGrenadeNum !== 0)
+            if (message.useFragGrenadeNum != null && $Object.hasOwnProperty.call(message, "useFragGrenadeNum"))
                 writer.uint32(/* id 40, wireType 0 =*/320).int32(message.useFragGrenadeNum);
-            if (message.useBurnGrenadeNum != null && $Object.hasOwnProperty.call(message, "useBurnGrenadeNum") && message.useBurnGrenadeNum !== 0)
+            if (message.useBurnGrenadeNum != null && $Object.hasOwnProperty.call(message, "useBurnGrenadeNum"))
                 writer.uint32(/* id 41, wireType 0 =*/328).int32(message.useBurnGrenadeNum);
-            if (message.useFlashGrenadeNum != null && $Object.hasOwnProperty.call(message, "useFlashGrenadeNum") && message.useFlashGrenadeNum !== 0)
+            if (message.useFlashGrenadeNum != null && $Object.hasOwnProperty.call(message, "useFlashGrenadeNum"))
                 writer.uint32(/* id 42, wireType 0 =*/336).int32(message.useFlashGrenadeNum);
             if (message.PoisonTotalDamage != null && $Object.hasOwnProperty.call(message, "PoisonTotalDamage") && message.PoisonTotalDamage !== 0)
                 writer.uint32(/* id 43, wireType 0 =*/344).int32(message.PoisonTotalDamage);
@@ -895,9 +1066,9 @@ $root.overlay = (function() {
                 writer.uint32(/* id 44, wireType 0 =*/352).int32(message.UseSelfRescueTime);
             if (message.UseEmergencyCallTime != null && $Object.hasOwnProperty.call(message, "UseEmergencyCallTime") && message.UseEmergencyCallTime !== 0)
                 writer.uint32(/* id 45, wireType 0 =*/360).int32(message.UseEmergencyCallTime);
-            if (message.contribution != null && $Object.hasOwnProperty.call(message, "contribution") && message.contribution !== 0)
+            if (message.contribution != null && $Object.hasOwnProperty.call(message, "contribution"))
                 writer.uint32(/* id 46, wireType 0 =*/368).int32(message.contribution);
-            if (message.heal != null && $Object.hasOwnProperty.call(message, "heal") && message.heal !== 0)
+            if (message.heal != null && $Object.hasOwnProperty.call(message, "heal"))
                 writer.uint32(/* id 47, wireType 0 =*/376).int32(message.heal);
             if (message.docId != null && $Object.hasOwnProperty.call(message, "docId") && message.docId !== "")
                 writer.uint32(/* id 48, wireType 2 =*/386).string(message.docId);
@@ -1033,123 +1204,98 @@ $root.overlay = (function() {
                         if (wireType !== 2)
                             break;
                         message.location = $root.overlay.Vec3.decode(reader, reader.uint32(), $undefined, _depth + 1, message.location);
+                        message._location = "location";
                         continue;
                     }
                 case 11: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.health = value;
-                        else
-                            delete message.health;
+                        message.health = reader.int32();
+                        message._health = "health";
                         continue;
                     }
                 case 12: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.healthMax = value;
-                        else
-                            delete message.healthMax;
+                        message.healthMax = reader.int32();
+                        message._healthMax = "healthMax";
                         continue;
                     }
                 case 13: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.liveState = value;
-                        else
-                            delete message.liveState;
+                        message.liveState = reader.int32();
+                        message._liveState = "liveState";
                         continue;
                     }
                 case 14: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.bool())
-                            message.isFiring = value;
-                        else
-                            delete message.isFiring;
+                        message.isFiring = reader.bool();
+                        message._isFiring = "isFiring";
                         continue;
                     }
                 case 15: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.bool())
-                            message.bHasDied = value;
-                        else
-                            delete message.bHasDied;
+                        message.bHasDied = reader.bool();
+                        message._bHasDied = "bHasDied";
                         continue;
                     }
                 case 16: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.bool())
-                            message.isOutsideBlueCircle = value;
-                        else
-                            delete message.isOutsideBlueCircle;
+                        message.isOutsideBlueCircle = reader.bool();
+                        message._isOutsideBlueCircle = "isOutsideBlueCircle";
                         continue;
                     }
                 case 20: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.killNum = value;
-                        else
-                            delete message.killNum;
+                        message.killNum = reader.int32();
+                        message._killNum = "killNum";
                         continue;
                     }
                 case 21: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.killNumBeforeDie = value;
-                        else
-                            delete message.killNumBeforeDie;
+                        message.killNumBeforeDie = reader.int32();
+                        message._killNumBeforeDie = "killNumBeforeDie";
                         continue;
                     }
                 case 22: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.gotAirDropNum = value;
-                        else
-                            delete message.gotAirDropNum;
+                        message.gotAirDropNum = reader.int32();
+                        message._gotAirDropNum = "gotAirDropNum";
                         continue;
                     }
                 case 23: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.maxKillDistance = value;
-                        else
-                            delete message.maxKillDistance;
+                        message.maxKillDistance = reader.int32();
+                        message._maxKillDistance = "maxKillDistance";
                         continue;
                     }
                 case 24: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.damage = value;
-                        else
-                            delete message.damage;
+                        message.damage = reader.int32();
+                        message._damage = "damage";
                         continue;
                     }
                 case 25: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.killNumInVehicle = value;
-                        else
-                            delete message.killNumInVehicle;
+                        message.killNumInVehicle = reader.int32();
+                        message._killNumInVehicle = "killNumInVehicle";
                         continue;
                     }
                 case 26: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.killNumByGrenade = value;
-                        else
-                            delete message.killNumByGrenade;
+                        message.killNumByGrenade = reader.int32();
+                        message._killNumByGrenade = "killNumByGrenade";
                         continue;
                     }
                 case 27: {
@@ -1173,10 +1319,8 @@ $root.overlay = (function() {
                 case 29: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.rank = value;
-                        else
-                            delete message.rank;
+                        message.rank = reader.int32();
+                        message._rank = "rank";
                         continue;
                     }
                 case 30: {
@@ -1191,46 +1335,36 @@ $root.overlay = (function() {
                 case 31: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.headShotNum = value;
-                        else
-                            delete message.headShotNum;
+                        message.headShotNum = reader.int32();
+                        message._headShotNum = "headShotNum";
                         continue;
                     }
                 case 32: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.survivalTime = value;
-                        else
-                            delete message.survivalTime;
+                        message.survivalTime = reader.int32();
+                        message._survivalTime = "survivalTime";
                         continue;
                     }
                 case 33: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.driveDistance = value;
-                        else
-                            delete message.driveDistance;
+                        message.driveDistance = reader.int32();
+                        message._driveDistance = "driveDistance";
                         continue;
                     }
                 case 34: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.marchDistance = value;
-                        else
-                            delete message.marchDistance;
+                        message.marchDistance = reader.int32();
+                        message._marchDistance = "marchDistance";
                         continue;
                     }
                 case 35: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.assists = value;
-                        else
-                            delete message.assists;
+                        message.assists = reader.int32();
+                        message._assists = "assists";
                         continue;
                     }
                 case 36: {
@@ -1245,55 +1379,43 @@ $root.overlay = (function() {
                 case 37: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.knockouts = value;
-                        else
-                            delete message.knockouts;
+                        message.knockouts = reader.int32();
+                        message._knockouts = "knockouts";
                         continue;
                     }
                 case 38: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.rescueTimes = value;
-                        else
-                            delete message.rescueTimes;
+                        message.rescueTimes = reader.int32();
+                        message._rescueTimes = "rescueTimes";
                         continue;
                     }
                 case 39: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.useSmokeGrenadeNum = value;
-                        else
-                            delete message.useSmokeGrenadeNum;
+                        message.useSmokeGrenadeNum = reader.int32();
+                        message._useSmokeGrenadeNum = "useSmokeGrenadeNum";
                         continue;
                     }
                 case 40: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.useFragGrenadeNum = value;
-                        else
-                            delete message.useFragGrenadeNum;
+                        message.useFragGrenadeNum = reader.int32();
+                        message._useFragGrenadeNum = "useFragGrenadeNum";
                         continue;
                     }
                 case 41: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.useBurnGrenadeNum = value;
-                        else
-                            delete message.useBurnGrenadeNum;
+                        message.useBurnGrenadeNum = reader.int32();
+                        message._useBurnGrenadeNum = "useBurnGrenadeNum";
                         continue;
                     }
                 case 42: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.useFlashGrenadeNum = value;
-                        else
-                            delete message.useFlashGrenadeNum;
+                        message.useFlashGrenadeNum = reader.int32();
+                        message._useFlashGrenadeNum = "useFlashGrenadeNum";
                         continue;
                     }
                 case 43: {
@@ -1326,19 +1448,15 @@ $root.overlay = (function() {
                 case 46: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.contribution = value;
-                        else
-                            delete message.contribution;
+                        message.contribution = reader.int32();
+                        message._contribution = "contribution";
                         continue;
                     }
                 case 47: {
                         if (wireType !== 0)
                             break;
-                        if (value = reader.int32())
-                            message.heal = value;
-                        else
-                            delete message.heal;
+                        message.heal = reader.int32();
+                        message._heal = "heal";
                         continue;
                     }
                 case 48: {
@@ -1393,6 +1511,7 @@ $root.overlay = (function() {
                 _depth = 0;
             if (_depth > $util.recursionLimit)
                 return "max depth exceeded";
+            var properties = {};
             if (message.uId != null && $Object.hasOwnProperty.call(message, "uId"))
                 if (!$util.isString(message.uId))
                     return "uId: string expected";
@@ -1421,97 +1540,150 @@ $root.overlay = (function() {
                 if (!$util.isString(message.teamName))
                     return "teamName: string expected";
             if (message.location != null && $Object.hasOwnProperty.call(message, "location")) {
-                var error = $root.overlay.Vec3.verify(message.location, _depth + 1);
-                if (error)
-                    return "location." + error;
+                properties._location = 1;
+                {
+                    var error = $root.overlay.Vec3.verify(message.location, _depth + 1);
+                    if (error)
+                        return "location." + error;
+                }
             }
-            if (message.health != null && $Object.hasOwnProperty.call(message, "health"))
+            if (message.health != null && $Object.hasOwnProperty.call(message, "health")) {
+                properties._health = 1;
                 if (!$util.isInteger(message.health))
                     return "health: integer expected";
-            if (message.healthMax != null && $Object.hasOwnProperty.call(message, "healthMax"))
+            }
+            if (message.healthMax != null && $Object.hasOwnProperty.call(message, "healthMax")) {
+                properties._healthMax = 1;
                 if (!$util.isInteger(message.healthMax))
                     return "healthMax: integer expected";
-            if (message.liveState != null && $Object.hasOwnProperty.call(message, "liveState"))
+            }
+            if (message.liveState != null && $Object.hasOwnProperty.call(message, "liveState")) {
+                properties._liveState = 1;
                 if (!$util.isInteger(message.liveState))
                     return "liveState: integer expected";
-            if (message.isFiring != null && $Object.hasOwnProperty.call(message, "isFiring"))
+            }
+            if (message.isFiring != null && $Object.hasOwnProperty.call(message, "isFiring")) {
+                properties._isFiring = 1;
                 if (typeof message.isFiring !== "boolean")
                     return "isFiring: boolean expected";
-            if (message.bHasDied != null && $Object.hasOwnProperty.call(message, "bHasDied"))
+            }
+            if (message.bHasDied != null && $Object.hasOwnProperty.call(message, "bHasDied")) {
+                properties._bHasDied = 1;
                 if (typeof message.bHasDied !== "boolean")
                     return "bHasDied: boolean expected";
-            if (message.isOutsideBlueCircle != null && $Object.hasOwnProperty.call(message, "isOutsideBlueCircle"))
+            }
+            if (message.isOutsideBlueCircle != null && $Object.hasOwnProperty.call(message, "isOutsideBlueCircle")) {
+                properties._isOutsideBlueCircle = 1;
                 if (typeof message.isOutsideBlueCircle !== "boolean")
                     return "isOutsideBlueCircle: boolean expected";
-            if (message.killNum != null && $Object.hasOwnProperty.call(message, "killNum"))
+            }
+            if (message.killNum != null && $Object.hasOwnProperty.call(message, "killNum")) {
+                properties._killNum = 1;
                 if (!$util.isInteger(message.killNum))
                     return "killNum: integer expected";
-            if (message.killNumBeforeDie != null && $Object.hasOwnProperty.call(message, "killNumBeforeDie"))
+            }
+            if (message.killNumBeforeDie != null && $Object.hasOwnProperty.call(message, "killNumBeforeDie")) {
+                properties._killNumBeforeDie = 1;
                 if (!$util.isInteger(message.killNumBeforeDie))
                     return "killNumBeforeDie: integer expected";
-            if (message.gotAirDropNum != null && $Object.hasOwnProperty.call(message, "gotAirDropNum"))
+            }
+            if (message.gotAirDropNum != null && $Object.hasOwnProperty.call(message, "gotAirDropNum")) {
+                properties._gotAirDropNum = 1;
                 if (!$util.isInteger(message.gotAirDropNum))
                     return "gotAirDropNum: integer expected";
-            if (message.maxKillDistance != null && $Object.hasOwnProperty.call(message, "maxKillDistance"))
+            }
+            if (message.maxKillDistance != null && $Object.hasOwnProperty.call(message, "maxKillDistance")) {
+                properties._maxKillDistance = 1;
                 if (!$util.isInteger(message.maxKillDistance))
                     return "maxKillDistance: integer expected";
-            if (message.damage != null && $Object.hasOwnProperty.call(message, "damage"))
+            }
+            if (message.damage != null && $Object.hasOwnProperty.call(message, "damage")) {
+                properties._damage = 1;
                 if (!$util.isInteger(message.damage))
                     return "damage: integer expected";
-            if (message.killNumInVehicle != null && $Object.hasOwnProperty.call(message, "killNumInVehicle"))
+            }
+            if (message.killNumInVehicle != null && $Object.hasOwnProperty.call(message, "killNumInVehicle")) {
+                properties._killNumInVehicle = 1;
                 if (!$util.isInteger(message.killNumInVehicle))
                     return "killNumInVehicle: integer expected";
-            if (message.killNumByGrenade != null && $Object.hasOwnProperty.call(message, "killNumByGrenade"))
+            }
+            if (message.killNumByGrenade != null && $Object.hasOwnProperty.call(message, "killNumByGrenade")) {
+                properties._killNumByGrenade = 1;
                 if (!$util.isInteger(message.killNumByGrenade))
                     return "killNumByGrenade: integer expected";
+            }
             if (message.AIKillNum != null && $Object.hasOwnProperty.call(message, "AIKillNum"))
                 if (!$util.isInteger(message.AIKillNum))
                     return "AIKillNum: integer expected";
             if (message.BossKillNum != null && $Object.hasOwnProperty.call(message, "BossKillNum"))
                 if (!$util.isInteger(message.BossKillNum))
                     return "BossKillNum: integer expected";
-            if (message.rank != null && $Object.hasOwnProperty.call(message, "rank"))
+            if (message.rank != null && $Object.hasOwnProperty.call(message, "rank")) {
+                properties._rank = 1;
                 if (!$util.isInteger(message.rank))
                     return "rank: integer expected";
+            }
             if (message.inDamage != null && $Object.hasOwnProperty.call(message, "inDamage"))
                 if (!$util.isInteger(message.inDamage))
                     return "inDamage: integer expected";
-            if (message.headShotNum != null && $Object.hasOwnProperty.call(message, "headShotNum"))
+            if (message.headShotNum != null && $Object.hasOwnProperty.call(message, "headShotNum")) {
+                properties._headShotNum = 1;
                 if (!$util.isInteger(message.headShotNum))
                     return "headShotNum: integer expected";
-            if (message.survivalTime != null && $Object.hasOwnProperty.call(message, "survivalTime"))
+            }
+            if (message.survivalTime != null && $Object.hasOwnProperty.call(message, "survivalTime")) {
+                properties._survivalTime = 1;
                 if (!$util.isInteger(message.survivalTime))
                     return "survivalTime: integer expected";
-            if (message.driveDistance != null && $Object.hasOwnProperty.call(message, "driveDistance"))
+            }
+            if (message.driveDistance != null && $Object.hasOwnProperty.call(message, "driveDistance")) {
+                properties._driveDistance = 1;
                 if (!$util.isInteger(message.driveDistance))
                     return "driveDistance: integer expected";
-            if (message.marchDistance != null && $Object.hasOwnProperty.call(message, "marchDistance"))
+            }
+            if (message.marchDistance != null && $Object.hasOwnProperty.call(message, "marchDistance")) {
+                properties._marchDistance = 1;
                 if (!$util.isInteger(message.marchDistance))
                     return "marchDistance: integer expected";
-            if (message.assists != null && $Object.hasOwnProperty.call(message, "assists"))
+            }
+            if (message.assists != null && $Object.hasOwnProperty.call(message, "assists")) {
+                properties._assists = 1;
                 if (!$util.isInteger(message.assists))
                     return "assists: integer expected";
+            }
             if (message.outsideBlueCircleTime != null && $Object.hasOwnProperty.call(message, "outsideBlueCircleTime"))
                 if (!$util.isInteger(message.outsideBlueCircleTime))
                     return "outsideBlueCircleTime: integer expected";
-            if (message.knockouts != null && $Object.hasOwnProperty.call(message, "knockouts"))
+            if (message.knockouts != null && $Object.hasOwnProperty.call(message, "knockouts")) {
+                properties._knockouts = 1;
                 if (!$util.isInteger(message.knockouts))
                     return "knockouts: integer expected";
-            if (message.rescueTimes != null && $Object.hasOwnProperty.call(message, "rescueTimes"))
+            }
+            if (message.rescueTimes != null && $Object.hasOwnProperty.call(message, "rescueTimes")) {
+                properties._rescueTimes = 1;
                 if (!$util.isInteger(message.rescueTimes))
                     return "rescueTimes: integer expected";
-            if (message.useSmokeGrenadeNum != null && $Object.hasOwnProperty.call(message, "useSmokeGrenadeNum"))
+            }
+            if (message.useSmokeGrenadeNum != null && $Object.hasOwnProperty.call(message, "useSmokeGrenadeNum")) {
+                properties._useSmokeGrenadeNum = 1;
                 if (!$util.isInteger(message.useSmokeGrenadeNum))
                     return "useSmokeGrenadeNum: integer expected";
-            if (message.useFragGrenadeNum != null && $Object.hasOwnProperty.call(message, "useFragGrenadeNum"))
+            }
+            if (message.useFragGrenadeNum != null && $Object.hasOwnProperty.call(message, "useFragGrenadeNum")) {
+                properties._useFragGrenadeNum = 1;
                 if (!$util.isInteger(message.useFragGrenadeNum))
                     return "useFragGrenadeNum: integer expected";
-            if (message.useBurnGrenadeNum != null && $Object.hasOwnProperty.call(message, "useBurnGrenadeNum"))
+            }
+            if (message.useBurnGrenadeNum != null && $Object.hasOwnProperty.call(message, "useBurnGrenadeNum")) {
+                properties._useBurnGrenadeNum = 1;
                 if (!$util.isInteger(message.useBurnGrenadeNum))
                     return "useBurnGrenadeNum: integer expected";
-            if (message.useFlashGrenadeNum != null && $Object.hasOwnProperty.call(message, "useFlashGrenadeNum"))
+            }
+            if (message.useFlashGrenadeNum != null && $Object.hasOwnProperty.call(message, "useFlashGrenadeNum")) {
+                properties._useFlashGrenadeNum = 1;
                 if (!$util.isInteger(message.useFlashGrenadeNum))
                     return "useFlashGrenadeNum: integer expected";
+            }
             if (message.PoisonTotalDamage != null && $Object.hasOwnProperty.call(message, "PoisonTotalDamage"))
                 if (!$util.isInteger(message.PoisonTotalDamage))
                     return "PoisonTotalDamage: integer expected";
@@ -1521,12 +1693,16 @@ $root.overlay = (function() {
             if (message.UseEmergencyCallTime != null && $Object.hasOwnProperty.call(message, "UseEmergencyCallTime"))
                 if (!$util.isInteger(message.UseEmergencyCallTime))
                     return "UseEmergencyCallTime: integer expected";
-            if (message.contribution != null && $Object.hasOwnProperty.call(message, "contribution"))
+            if (message.contribution != null && $Object.hasOwnProperty.call(message, "contribution")) {
+                properties._contribution = 1;
                 if (!$util.isInteger(message.contribution))
                     return "contribution: integer expected";
-            if (message.heal != null && $Object.hasOwnProperty.call(message, "heal"))
+            }
+            if (message.heal != null && $Object.hasOwnProperty.call(message, "heal")) {
+                properties._heal = 1;
                 if (!$util.isInteger(message.heal))
                     return "heal: integer expected";
+            }
             if (message.docId != null && $Object.hasOwnProperty.call(message, "docId"))
                 if (!$util.isString(message.docId))
                     return "docId: string expected";
@@ -1584,44 +1760,31 @@ $root.overlay = (function() {
                 message.location = $root.overlay.Vec3.fromObject(object.location, _depth + 1);
             }
             if (object.health != null)
-                if ($Number(object.health) !== 0)
-                    message.health = object.health | 0;
+                message.health = object.health | 0;
             if (object.healthMax != null)
-                if ($Number(object.healthMax) !== 0)
-                    message.healthMax = object.healthMax | 0;
+                message.healthMax = object.healthMax | 0;
             if (object.liveState != null)
-                if ($Number(object.liveState) !== 0)
-                    message.liveState = object.liveState | 0;
+                message.liveState = object.liveState | 0;
             if (object.isFiring != null)
-                if (object.isFiring)
-                    message.isFiring = $Boolean(object.isFiring);
+                message.isFiring = $Boolean(object.isFiring);
             if (object.bHasDied != null)
-                if (object.bHasDied)
-                    message.bHasDied = $Boolean(object.bHasDied);
+                message.bHasDied = $Boolean(object.bHasDied);
             if (object.isOutsideBlueCircle != null)
-                if (object.isOutsideBlueCircle)
-                    message.isOutsideBlueCircle = $Boolean(object.isOutsideBlueCircle);
+                message.isOutsideBlueCircle = $Boolean(object.isOutsideBlueCircle);
             if (object.killNum != null)
-                if ($Number(object.killNum) !== 0)
-                    message.killNum = object.killNum | 0;
+                message.killNum = object.killNum | 0;
             if (object.killNumBeforeDie != null)
-                if ($Number(object.killNumBeforeDie) !== 0)
-                    message.killNumBeforeDie = object.killNumBeforeDie | 0;
+                message.killNumBeforeDie = object.killNumBeforeDie | 0;
             if (object.gotAirDropNum != null)
-                if ($Number(object.gotAirDropNum) !== 0)
-                    message.gotAirDropNum = object.gotAirDropNum | 0;
+                message.gotAirDropNum = object.gotAirDropNum | 0;
             if (object.maxKillDistance != null)
-                if ($Number(object.maxKillDistance) !== 0)
-                    message.maxKillDistance = object.maxKillDistance | 0;
+                message.maxKillDistance = object.maxKillDistance | 0;
             if (object.damage != null)
-                if ($Number(object.damage) !== 0)
-                    message.damage = object.damage | 0;
+                message.damage = object.damage | 0;
             if (object.killNumInVehicle != null)
-                if ($Number(object.killNumInVehicle) !== 0)
-                    message.killNumInVehicle = object.killNumInVehicle | 0;
+                message.killNumInVehicle = object.killNumInVehicle | 0;
             if (object.killNumByGrenade != null)
-                if ($Number(object.killNumByGrenade) !== 0)
-                    message.killNumByGrenade = object.killNumByGrenade | 0;
+                message.killNumByGrenade = object.killNumByGrenade | 0;
             if (object.AIKillNum != null)
                 if ($Number(object.AIKillNum) !== 0)
                     message.AIKillNum = object.AIKillNum | 0;
@@ -1629,47 +1792,35 @@ $root.overlay = (function() {
                 if ($Number(object.BossKillNum) !== 0)
                     message.BossKillNum = object.BossKillNum | 0;
             if (object.rank != null)
-                if ($Number(object.rank) !== 0)
-                    message.rank = object.rank | 0;
+                message.rank = object.rank | 0;
             if (object.inDamage != null)
                 if ($Number(object.inDamage) !== 0)
                     message.inDamage = object.inDamage | 0;
             if (object.headShotNum != null)
-                if ($Number(object.headShotNum) !== 0)
-                    message.headShotNum = object.headShotNum | 0;
+                message.headShotNum = object.headShotNum | 0;
             if (object.survivalTime != null)
-                if ($Number(object.survivalTime) !== 0)
-                    message.survivalTime = object.survivalTime | 0;
+                message.survivalTime = object.survivalTime | 0;
             if (object.driveDistance != null)
-                if ($Number(object.driveDistance) !== 0)
-                    message.driveDistance = object.driveDistance | 0;
+                message.driveDistance = object.driveDistance | 0;
             if (object.marchDistance != null)
-                if ($Number(object.marchDistance) !== 0)
-                    message.marchDistance = object.marchDistance | 0;
+                message.marchDistance = object.marchDistance | 0;
             if (object.assists != null)
-                if ($Number(object.assists) !== 0)
-                    message.assists = object.assists | 0;
+                message.assists = object.assists | 0;
             if (object.outsideBlueCircleTime != null)
                 if ($Number(object.outsideBlueCircleTime) !== 0)
                     message.outsideBlueCircleTime = object.outsideBlueCircleTime | 0;
             if (object.knockouts != null)
-                if ($Number(object.knockouts) !== 0)
-                    message.knockouts = object.knockouts | 0;
+                message.knockouts = object.knockouts | 0;
             if (object.rescueTimes != null)
-                if ($Number(object.rescueTimes) !== 0)
-                    message.rescueTimes = object.rescueTimes | 0;
+                message.rescueTimes = object.rescueTimes | 0;
             if (object.useSmokeGrenadeNum != null)
-                if ($Number(object.useSmokeGrenadeNum) !== 0)
-                    message.useSmokeGrenadeNum = object.useSmokeGrenadeNum | 0;
+                message.useSmokeGrenadeNum = object.useSmokeGrenadeNum | 0;
             if (object.useFragGrenadeNum != null)
-                if ($Number(object.useFragGrenadeNum) !== 0)
-                    message.useFragGrenadeNum = object.useFragGrenadeNum | 0;
+                message.useFragGrenadeNum = object.useFragGrenadeNum | 0;
             if (object.useBurnGrenadeNum != null)
-                if ($Number(object.useBurnGrenadeNum) !== 0)
-                    message.useBurnGrenadeNum = object.useBurnGrenadeNum | 0;
+                message.useBurnGrenadeNum = object.useBurnGrenadeNum | 0;
             if (object.useFlashGrenadeNum != null)
-                if ($Number(object.useFlashGrenadeNum) !== 0)
-                    message.useFlashGrenadeNum = object.useFlashGrenadeNum | 0;
+                message.useFlashGrenadeNum = object.useFlashGrenadeNum | 0;
             if (object.PoisonTotalDamage != null)
                 if ($Number(object.PoisonTotalDamage) !== 0)
                     message.PoisonTotalDamage = object.PoisonTotalDamage | 0;
@@ -1680,11 +1831,9 @@ $root.overlay = (function() {
                 if ($Number(object.UseEmergencyCallTime) !== 0)
                     message.UseEmergencyCallTime = object.UseEmergencyCallTime | 0;
             if (object.contribution != null)
-                if ($Number(object.contribution) !== 0)
-                    message.contribution = object.contribution | 0;
+                message.contribution = object.contribution | 0;
             if (object.heal != null)
-                if ($Number(object.heal) !== 0)
-                    message.heal = object.heal | 0;
+                message.heal = object.heal | 0;
             if (object.docId != null)
                 if (typeof object.docId !== "string" || object.docId.length)
                     message.docId = $String(object.docId);
@@ -1718,41 +1867,13 @@ $root.overlay = (function() {
                 object.teamIdfromApi = 0;
                 object.teamId = 0;
                 object.teamName = "";
-                object.location = null;
-                object.health = 0;
-                object.healthMax = 0;
-                object.liveState = 0;
-                object.isFiring = false;
-                object.bHasDied = false;
-                object.isOutsideBlueCircle = false;
-                object.killNum = 0;
-                object.killNumBeforeDie = 0;
-                object.gotAirDropNum = 0;
-                object.maxKillDistance = 0;
-                object.damage = 0;
-                object.killNumInVehicle = 0;
-                object.killNumByGrenade = 0;
                 object.AIKillNum = 0;
                 object.BossKillNum = 0;
-                object.rank = 0;
                 object.inDamage = 0;
-                object.headShotNum = 0;
-                object.survivalTime = 0;
-                object.driveDistance = 0;
-                object.marchDistance = 0;
-                object.assists = 0;
                 object.outsideBlueCircleTime = 0;
-                object.knockouts = 0;
-                object.rescueTimes = 0;
-                object.useSmokeGrenadeNum = 0;
-                object.useFragGrenadeNum = 0;
-                object.useBurnGrenadeNum = 0;
-                object.useFlashGrenadeNum = 0;
                 object.PoisonTotalDamage = 0;
                 object.UseSelfRescueTime = 0;
                 object.UseEmergencyCallTime = 0;
-                object.contribution = 0;
-                object.heal = 0;
                 object.docId = "";
             }
             if (message.uId != null && $Object.hasOwnProperty.call(message, "uId"))

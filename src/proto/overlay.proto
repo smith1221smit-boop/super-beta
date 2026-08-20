@@ -9,11 +9,23 @@
 // field here, update front/src/proto/overlay.proto to match, then regenerate
 // both sides (`npm run proto:gen` in each repo).
 //
-// No field uses `optional` — checked every live/numeric field against actual
-// frontend usage (health/liveState are always compared or divided, never
-// presence-checked) and every server write path already defaults these
-// before they'd reach an encoder. Proto3's default-0/""/false semantics
-// already match this codebase's existing "0/empty means no data" convention.
+// Player's frequently-changing stat/state fields (below) use `optional` —
+// this is what backs the player-level delta in matchTeamDiff.js's
+// computeChangedPlayerFields: the backend only sets a field on an included
+// player when it actually changed since the previous tick, and proto3's
+// `optional` gives that free, native wire-presence tracking (an unset
+// optional field costs 0 bytes — cheaper than any hand-rolled bitmask).
+// protobufjs implements `optional` as a synthetic one-field oneof, and its
+// generated toObject() respects that field's real presence regardless of
+// the `defaults` option (defaults only backfills genuinely-non-optional
+// zero-valued fields) — so PublicThemeRenderer.tsx's decodeWireMessage
+// needs NO change to keep using `{ defaults: true }`; an absent optional
+// field already decodes as absent, not 0. Verified in
+// scripts/verify-protobuf-delta.js. The client then merges a present field
+// onto the previously-known player rather than replacing it. Identity
+// fields (uId/docId/teamId/etc.) and rarely-changing display strings
+// (playerName/picUrl/etc.) are NOT optional — they're cheap, change rarely,
+// and always riding along keeps the merge logic simpler.
 syntax = "proto3";
 package overlay;
 
@@ -43,42 +55,48 @@ message Player {
   int32 teamId = 8;
   string teamName = 9;
 
-  Vec3 location = 10;
-  int32 health = 11;
-  int32 healthMax = 12;
-  int32 liveState = 13;
-  bool isFiring = 14;
-  bool bHasDied = 15;
-  bool isOutsideBlueCircle = 16;
+  optional Vec3 location = 10;
+  optional int32 health = 11;
+  optional int32 healthMax = 12;
+  optional int32 liveState = 13;
+  optional bool isFiring = 14;
+  optional bool bHasDied = 15;
+  optional bool isOutsideBlueCircle = 16;
 
-  int32 killNum = 20;
-  int32 killNumBeforeDie = 21;
-  int32 gotAirDropNum = 22;
-  int32 maxKillDistance = 23;
-  int32 damage = 24;
-  int32 killNumInVehicle = 25;
-  int32 killNumByGrenade = 26;
+  optional int32 killNum = 20;
+  optional int32 killNumBeforeDie = 21;
+  optional int32 gotAirDropNum = 22;
+  optional int32 maxKillDistance = 23;
+  optional int32 damage = 24;
+  optional int32 killNumInVehicle = 25;
+  optional int32 killNumByGrenade = 26;
+  // AIKillNum/BossKillNum/inDamage/outsideBlueCircleTime/PoisonTotalDamage/
+  // UseSelfRescueTime/UseEmergencyCallTime deliberately stay NON-optional —
+  // protobufCodec.js's toProtoPlayer already hardcodes them to 0
+  // unconditionally (confirmed dead weight, no view reads them), and proto3
+  // already omits a non-optional zero-valued scalar from the wire for free,
+  // so there's nothing for `optional` to buy here.
   int32 AIKillNum = 27;
   int32 BossKillNum = 28;
-  int32 rank = 29;
+  optional int32 rank = 29;
   int32 inDamage = 30;
-  int32 headShotNum = 31;
-  int32 survivalTime = 32;
-  int32 driveDistance = 33;
-  int32 marchDistance = 34;
-  int32 assists = 35;
+  optional int32 headShotNum = 31;
+  optional int32 survivalTime = 32;
+  optional int32 driveDistance = 33;
+  optional int32 marchDistance = 34;
+  optional int32 assists = 35;
   int32 outsideBlueCircleTime = 36;
-  int32 knockouts = 37;
-  int32 rescueTimes = 38;
-  int32 useSmokeGrenadeNum = 39;
-  int32 useFragGrenadeNum = 40;
-  int32 useBurnGrenadeNum = 41;
-  int32 useFlashGrenadeNum = 42;
+  optional int32 knockouts = 37;
+  optional int32 rescueTimes = 38;
+  optional int32 useSmokeGrenadeNum = 39;
+  optional int32 useFragGrenadeNum = 40;
+  optional int32 useBurnGrenadeNum = 41;
+  optional int32 useFlashGrenadeNum = 42;
   int32 PoisonTotalDamage = 43;
   int32 UseSelfRescueTime = 44;
   int32 UseEmergencyCallTime = 45;
-  int32 contribution = 46;
-  int32 heal = 47;
+  optional int32 contribution = 46;
+  optional int32 heal = 47;
   // matchData.model.js's playerStatsSchema declares `{ _id: true }` — every
   // player subdoc gets its OWN Mongo ObjectId, separate from `uId` (PUBG's
   // player identifier). front's shared Player type (unsortteams.ts) treats

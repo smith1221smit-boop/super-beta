@@ -3,6 +3,7 @@ import api from '../login/api.tsx';
 import PollingManager from './isPolling.tsx';
 import { socket } from './socket.tsx';
 import { getOrFetch, clearCacheByPrefix } from './cache';
+import checkAuth from '../login/auth.tsx';
 import {
   FaDiscord, FaTrophy, FaUsers, FaEye, FaBars, FaTimes, FaSearch,
   FaBroadcastTower, FaCalendarAlt, FaExternalLinkAlt, FaCheckCircle,
@@ -390,17 +391,20 @@ const DisplayHud: React.FC = () => {
   useEffect(() => {
     // Tournaments are fetched only once the user is known, since the shared
     // `tournaments_<userId>` cache key (also used by dashboard/page.tsx) is
-    // scoped per user.
-    getOrFetch('auth_user', () => api.get('/users/me').then(r => r.data), { maxAge: 5 * 60 * 1000, storage: 'local' })
+    // scoped per user. Identity itself is NOT cache-first: checkAuth always
+    // asks the server, so an expired/invalidated session is caught here
+    // instead of this page trusting a stale "logged in" cache entry while
+    // every other call on it starts failing for real (see login/auth.tsx).
+    checkAuth()
       .then(userData => {
+        if (!userData) { setTournaments([]); return; }
         setUser(userData);
         return getOrFetch(
           `tournaments_${userData._id}`,
           () => api.get('/tournaments').then(r => r.data),
           { maxAge: 90 * 1000, storage: 'local' }
-        );
+        ).then(data => setTournaments(data));
       })
-      .then(data => setTournaments(data))
       .catch(() => setTournaments([]));
 
     api.get('/matchSelection/selected').then(r => {

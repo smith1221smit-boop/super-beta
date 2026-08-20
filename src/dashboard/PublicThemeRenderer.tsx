@@ -5,6 +5,7 @@ import { overlay as overlayProto } from '../proto/overlay.pb';
 import api from '../login/api.tsx';
 import SocketManager from '../dashboard/socketManager.tsx';
 import { readCachedBulk, writeCachedBulk } from './publicCache.ts';
+import { remapProtoTeam, mergeTeamsWithPlayers } from './matchTeamMerge.ts';
 
 /* ============================================================================
    THEME COMPONENT REGISTRY
@@ -184,7 +185,7 @@ const VIEWS_NEEDING_MATCH_DATA = new Set([
   'Upper', 'Dom', 'Alerts', 'LiveStats', 'LiveFrags', 'MatchData', 'Achive', 'MatchFragrs',
   'WwcdSummary', 'WwcdStats', 'playerH2H', 'mapPreview', 'slots', 'TeamH2H', 'mvp',
   'RosterShowCase', 'MatchSummary', 'Champions', '1stRunnerUp', '2ndRunnerUp', 'EventMvp',
-  'PlayerSwitch', 'LiveData',
+  'PlayerSwitch', 'LiveData', 'Recall',
 ]);
 const VIEWS_NEEDING_ALL_MATCH_DATAS = new Set([
   'Schedule', 'highlightPoints', 'HighlightSchedule', 'OverAllData', 'OverallFrags',
@@ -328,21 +329,6 @@ const computeDeadTeamList = (
 // tab) — 0xC1 is formally reserved/"never used" by the msgpack spec, so no
 // genuine msgpack stream this codebase produces can ever start with it.
 const PROTOBUF_MARKER_BYTE = 0xc1;
-
-// Proto field names can't start with `_` (grammar requires a leading
-// letter), so the wire calls the Mongoose subdoc id `docId` — remap back to
-// `_id` (and, for teams, keep `teamId` as its own separate field) so
-// protobuf-decoded objects are byte-for-byte shape-compatible with what
-// msgpack/JSON already deliver. See overlay.proto's comments on Player.docId
-// / Team.docId for why these are two distinct Mongo ObjectIds, not one.
-const remapProtoPlayer = (p: any) => {
-  const { docId, ...rest } = p;
-  return { ...rest, _id: docId };
-};
-const remapProtoTeam = (t: any) => {
-  const { docId, players, ...rest } = t;
-  return { ...rest, _id: docId, players: Array.isArray(players) ? players.map(remapProtoPlayer) : [] };
-};
 
 // decodeWireMessage(raw, overlayProto.MatchDataPayload) /
 // decodeWireMessage(raw, overlayProto.OverallDataPayload) — each event
@@ -723,23 +709,22 @@ console.log(
           ? prevMatchData.teams || []
           : [];
 
-      const incomingById = new Map(incomingTeams.map((t) => [String(t.teamId ?? t._id), t]));
-      const mergedTeams = prevTeams.map((t) => {
-        const key = String(t.teamId ?? t._id);
-        return incomingById.has(key) ? incomingById.get(key) : t;
-      });
-      const knownIds = new Set(prevTeams.map((t) => String(t.teamId ?? t._id)));
-      for (const t of incomingTeams) {
-        const key = String(t.teamId ?? t._id);
-        if (!knownIds.has(key)) mergedTeams.push(t);
-      }
+      const mergedTeams = mergeTeamsWithPlayers(prevTeams, incomingTeams);
 
       // Computed client-side, not read off incoming.deadTeamList — see
-      // isTeamAllDead/computeDeadTeamList above. Safe to call with just
-      // this chunk's teams: the backing Map only ever grows, and this
-      // always returns the full cumulative dead-list regardless of which
-      // teams were present in this particular call.
-      const computedDeadTeamList = computeDeadTeamList(incoming.matchId, incomingTeams, deathTrackerRef);
+      // isTeamAllDead/computeDeadTeamList above. MUST use each team's fully
+      // merged roster (mergedTeams), not the raw incomingTeams delta:
+      // isTeamAllDead does `team.players.every(...)`, and the backend's
+      // player-level delta (matchTeamDiff.js's computeChangedPlayers) means
+      // a changed team's incoming `players` may now be just the ONE player
+      // who actually changed this tick — checking `.every()` against that
+      // alone would misjudge "one player died" as "whole team wiped".
+      // Still only re-checks teams that actually appeared in this tick's
+      // delta (changedTeamKeys) — already-dead teams stay skipped via
+      // computeDeadTeamList's own `dead.has(teamKey)` guard, same as before.
+      const changedTeamKeys = new Set(incomingTeams.map((t) => String(t.teamId ?? t._id)));
+      const changedTeamsFullRoster = mergedTeams.filter((t) => changedTeamKeys.has(String(t.teamId ?? t._id)));
+      const computedDeadTeamList = computeDeadTeamList(incoming.matchId, changedTeamsFullRoster, deathTrackerRef);
 
       const nextMatchData = {
         ...(prevMatchData || {}),
@@ -767,12 +752,12 @@ console.log(
       processLiveMatchUpdate(raw);
     };
 
-    // overallDataUpdate is now a TEAM-LEVEL DELTA (backend:
-    // pubgApiMatchData.controller.js's emitOverallUpdate) — incoming.teams
-    // is only the teams that changed since the backend's last tick for this
-    // round, same shape/reasoning as processLiveMatchUpdate's mergedTeams
-    // above. Merge by teamId so a team absent from this tick keeps showing
-    // its last-known standings rather than disappearing from the board.
+    // overallDataUpdate is a TEAM-LEVEL delta, and (as of the backend's
+    // player-level delta, matchTeamDiff.js's computeChangedPlayers) a
+    // changed team's OWN `players` is now itself only the players that
+    // changed — same shape/reasoning as processLiveMatchUpdate above, so
+    // this reuses the same mergeTeamsWithPlayers helper rather than a
+    // shallower team-only merge.
     const handleOverallDataUpdate = (raw: ArrayBuffer | Uint8Array) => {
       const incoming = decodeWireMessage(raw, overlayProto.OverallDataPayload);
       if (!incoming) return;
@@ -793,16 +778,7 @@ console.log(
           ? prevOverallData.teams || []
           : [];
 
-      const incomingById = new Map(incomingTeams.map((t) => [String(t.teamId ?? t._id), t]));
-      const mergedTeams = prevTeams.map((t) => {
-        const key = String(t.teamId ?? t._id);
-        return incomingById.has(key) ? incomingById.get(key) : t;
-      });
-      const knownIds = new Set(prevTeams.map((t) => String(t.teamId ?? t._id)));
-      for (const t of incomingTeams) {
-        const key = String(t.teamId ?? t._id);
-        if (!knownIds.has(key)) mergedTeams.push(t);
-      }
+      const mergedTeams = mergeTeamsWithPlayers(prevTeams, incomingTeams);
 
       const nextOverallData = { ...(prevOverallData || {}), ...incoming, teams: mergedTeams };
       overallDataRef.current = nextOverallData;
@@ -858,6 +834,8 @@ console.log(
         return renderComp('Dom', { tournament, round, match, matchData });
       case 'Achive':
         return renderComp('Achive', { tournament, round, match, matchData });
+      case 'Recall':
+        return renderComp('Recall', { tournament, round, match, matchData });
       case 'Alerts':
         return renderComp('Alerts', { tournament, round, match, matchData, deadTeamList });
       case 'LiveStats':

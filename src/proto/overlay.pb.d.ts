@@ -183,43 +183,43 @@ export namespace overlay {
         location?: (overlay.Vec3.$Properties|null);
 
         /** Player health. */
-        health: number;
+        health?: (number|null);
 
         /** Player healthMax. */
-        healthMax: number;
+        healthMax?: (number|null);
 
         /** Player liveState. */
-        liveState: number;
+        liveState?: (number|null);
 
         /** Player isFiring. */
-        isFiring: boolean;
+        isFiring?: (boolean|null);
 
         /** Player bHasDied. */
-        bHasDied: boolean;
+        bHasDied?: (boolean|null);
 
         /** Player isOutsideBlueCircle. */
-        isOutsideBlueCircle: boolean;
+        isOutsideBlueCircle?: (boolean|null);
 
         /** Player killNum. */
-        killNum: number;
+        killNum?: (number|null);
 
         /** Player killNumBeforeDie. */
-        killNumBeforeDie: number;
+        killNumBeforeDie?: (number|null);
 
         /** Player gotAirDropNum. */
-        gotAirDropNum: number;
+        gotAirDropNum?: (number|null);
 
         /** Player maxKillDistance. */
-        maxKillDistance: number;
+        maxKillDistance?: (number|null);
 
         /** Player damage. */
-        damage: number;
+        damage?: (number|null);
 
         /** Player killNumInVehicle. */
-        killNumInVehicle: number;
+        killNumInVehicle?: (number|null);
 
         /** Player killNumByGrenade. */
-        killNumByGrenade: number;
+        killNumByGrenade?: (number|null);
 
         /** Player AIKillNum. */
         AIKillNum: number;
@@ -228,46 +228,46 @@ export namespace overlay {
         BossKillNum: number;
 
         /** Player rank. */
-        rank: number;
+        rank?: (number|null);
 
         /** Player inDamage. */
         inDamage: number;
 
         /** Player headShotNum. */
-        headShotNum: number;
+        headShotNum?: (number|null);
 
         /** Player survivalTime. */
-        survivalTime: number;
+        survivalTime?: (number|null);
 
         /** Player driveDistance. */
-        driveDistance: number;
+        driveDistance?: (number|null);
 
         /** Player marchDistance. */
-        marchDistance: number;
+        marchDistance?: (number|null);
 
         /** Player assists. */
-        assists: number;
+        assists?: (number|null);
 
         /** Player outsideBlueCircleTime. */
         outsideBlueCircleTime: number;
 
         /** Player knockouts. */
-        knockouts: number;
+        knockouts?: (number|null);
 
         /** Player rescueTimes. */
-        rescueTimes: number;
+        rescueTimes?: (number|null);
 
         /** Player useSmokeGrenadeNum. */
-        useSmokeGrenadeNum: number;
+        useSmokeGrenadeNum?: (number|null);
 
         /** Player useFragGrenadeNum. */
-        useFragGrenadeNum: number;
+        useFragGrenadeNum?: (number|null);
 
         /** Player useBurnGrenadeNum. */
-        useBurnGrenadeNum: number;
+        useBurnGrenadeNum?: (number|null);
 
         /** Player useFlashGrenadeNum. */
-        useFlashGrenadeNum: number;
+        useFlashGrenadeNum?: (number|null);
 
         /** Player PoisonTotalDamage. */
         PoisonTotalDamage: number;
@@ -279,10 +279,10 @@ export namespace overlay {
         UseEmergencyCallTime: number;
 
         /** Player contribution. */
-        contribution: number;
+        contribution?: (number|null);
 
         /** Player heal. */
-        heal: number;
+        heal?: (number|null);
 
         /** Player docId. */
         docId: string;
